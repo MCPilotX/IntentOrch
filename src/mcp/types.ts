@@ -1,0 +1,178 @@
+/**
+ * MCP (Model Context Protocol) Type Definitions
+ * Based on MCP protocol specification: https://spec.modelcontextprotocol.io/
+ */
+
+// ==================== Basic Types ====================
+
+export interface MCPError {
+  code: number;
+  message: string;
+  data?: any;
+}
+
+export interface JSONRPCRequest {
+  jsonrpc: '2.0';
+  id: string | number | null;
+  method: string;
+  params?: any;
+}
+
+export interface JSONRPCResponse {
+  jsonrpc: '2.0';
+  id: string | number | null;
+  result?: any;
+  error?: MCPError;
+}
+
+// ==================== Tool Related Types ====================
+
+export interface Tool {
+  name: string;
+  description: string;
+  inputSchema: {
+    type: 'object';
+    properties: Record<string, any>;
+    required?: string[];
+    additionalProperties?: boolean;
+  };
+}
+
+export interface ToolList {
+  tools: Tool[];
+}
+
+export interface ToolCall {
+  name: string;
+  arguments: Record<string, any>;
+}
+
+export interface ToolResult {
+  content: Array<{
+    type: 'text' | 'image' | 'resource';
+    text?: string;
+    data?: any;
+  }>;
+  isError?: boolean;
+}
+
+// ==================== Resource Related Types ====================
+
+export interface Resource {
+  uri: string;
+  name: string;
+  description?: string;
+  mimeType?: string;
+}
+
+export interface ResourceList {
+  resources: Resource[];
+}
+
+export interface ResourceContents {
+  contents: Array<{
+    uri: string;
+    mimeType: string;
+    text?: string;
+    blob?: string; // base64 encoded
+  }>;
+}
+
+// ==================== Prompt Related Types ====================
+
+export interface Prompt {
+  name: string;
+  description?: string;
+  arguments?: Array<{
+    name: string;
+    description?: string;
+    required?: boolean;
+  }>;
+}
+
+export interface PromptList {
+  prompts: Prompt[];
+}
+
+// ==================== Transport Layer Types ====================
+
+export type TransportType = 'stdio' | 'http' | 'sse';
+
+export interface TransportConfig {
+  type: TransportType;
+  command?: string; // For stdio
+  args?: string[]; // For stdio
+  url?: string; // For http/sse
+  headers?: Record<string, string>; // For http/sse
+}
+
+// ==================== Client Configuration ====================
+
+export interface MCPClientConfig {
+  transport: TransportConfig;
+  autoConnect?: boolean;
+  timeout?: number;
+  maxRetries?: number;
+}
+
+// ==================== Event Types ====================
+
+export type MCPEventType = 
+  | 'connected'
+  | 'disconnected'
+  | 'error'
+  | 'tools_updated'
+  | 'resources_updated'
+  | 'prompts_updated';
+
+export interface MCPEvent {
+  type: MCPEventType;
+  data?: any;
+  timestamp: number;
+}
+
+// ==================== Session Types ====================
+
+export interface MCPSession {
+  id: string;
+  clientId: string;
+  serverId: string;
+  tools: Tool[];
+  resources: Resource[];
+  prompts: Prompt[];
+  createdAt: number;
+  lastActivity: number;
+}
+
+// ==================== Constants ====================
+
+export const MCP_METHODS = {
+  // Tool related
+  TOOLS_LIST: 'tools/list',
+  TOOLS_CALL: 'tools/call',
+  
+  // Resource related
+  RESOURCES_LIST: 'resources/list',
+  RESOURCES_READ: 'resources/read',
+  RESOURCES_SUBSCRIBE: 'resources/subscribe',
+  RESOURCES_UNSUBSCRIBE: 'resources/unsubscribe',
+  
+  // Prompt related
+  PROMPTS_LIST: 'prompts/list',
+  PROMPTS_GET: 'prompts/get',
+  
+  // Logging related
+  LOGGING_SET_LEVEL: 'logging/setLevel',
+  
+  // Notifications
+  NOTIFICATIONS_LIST: 'notifications/list',
+} as const;
+
+export const MCP_ERROR_CODES = {
+  PARSE_ERROR: -32700,
+  INVALID_REQUEST: -32600,
+  METHOD_NOT_FOUND: -32601,
+  INVALID_PARAMS: -32602,
+  INTERNAL_ERROR: -32603,
+  SERVER_ERROR: -32000,
+} as const;
