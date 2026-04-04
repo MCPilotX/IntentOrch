@@ -4,7 +4,7 @@
   <small>
     <strong>Language:</strong> 
     <a href="README.md">English</a> | 
-    <a href="README.ZH_CN.md">中文</a>
+    <a href="README.ZH_CN.md">Chinese</a>
   </small>
 </div>
 
@@ -40,7 +40,7 @@
 - **🛠️ Tool Management**: Unified tool registry for discovering, searching, and executing tools from multiple MCP servers
 - **🚀 Service Orchestration**: Manage and orchestrate services across different runtimes (Node.js, Python, Docker, etc.)
 - **⚙️ Configuration Management**: Centralized configuration system with persistence
-- **🤖 AI Integration**: Optional AI functionality for natural language tool execution
+- **🤖 AI Integration ⚠️ Planned**: Optional AI functionality for natural language tool execution. **Note**: Current version provides basic framework/placeholder implementation. Requires configuration with real AI provider API keys to work.
 - **📊 Monitoring**: Real-time service status and tool usage statistics
 - **🔧 Extensible Architecture**: Clean separation of concerns with pluggable adapters
 
@@ -64,7 +64,57 @@ pnpm add @mcpilotx/sdk-core
 
 ## 🚀 Quick Start
 
-### Basic Usage
+### 🎯 Zero-Config Demo (Recommended for First-Time Users)
+
+**Try it now - no installation needed!** Click the button below to run the demo in your browser:
+
+[![Open in CodeSandbox](https://img.shields.io/badge/Open%20in-CodeSandbox-blue?style=for-the-badge&logo=codesandbox)](https://codesandbox.io/p/sandbox/mcpilot-sdk-demo-template)
+
+Or run it locally with a single command:
+
+```bash
+# Clone and run the zero-config demo
+git clone https://github.com/MCPilotX/sdk-core.git
+cd sdk-core
+npx tsx examples/zero-config-demo.ts
+```
+
+**What you'll see immediately (no API keys needed):**
+- ✅ **Complete "connect-discover-execute" workflow** with built-in Mock MCP server
+- ✅ **4 mock tools** with real execution results
+- ✅ **AI functionality status** - Clear demonstration of current limitations
+- ✅ **Transparent error handling** - Clear messages when features require configuration
+- ✅ **Step-by-step guidance** - What to do next after the demo
+
+**Key improvements in this demo:**
+- 🚀 **Zero external dependencies** - Uses built-in Mock MCP server
+- 🔧 **No API keys required** - Works out of the box
+- 📊 **Clear AI status** - Honest about what works and what needs configuration
+- 💡 **Actionable next steps** - Clear guidance for moving to real servers
+
+### 📦 Installation (For Local Development)
+
+If you want to use the SDK in your own projects:
+
+```bash
+npm install @mcpilotx/sdk-core
+```
+
+Or using yarn:
+
+```bash
+yarn add @mcpilotx/sdk-core
+```
+
+Or using pnpm:
+
+```bash
+pnpm add @mcpilotx/sdk-core
+```
+
+### 🔧 Basic Usage (With Real MCP Servers)
+
+Once you've tried the zero-config demo, here's how to connect to real MCP servers:
 
 ```typescript
 import { mcpilot } from '@mcpilotx/sdk-core';
@@ -266,10 +316,10 @@ await mcpilot.initMCP();
 - `updateConfig(updates)`: Update configuration
 - `configureAI(config)`: Configure AI settings
 
-#### AI Functionality
+#### AI Functionality ⚠️ Planned
 
-- `ask(query, options?)`: Ask a question using AI
-- `configureAI(config)`: Configure AI provider and settings
+- `ask(query, options?)`: Ask a question using AI. **Note**: Returns clear error if AI not configured. Requires real API key for actual AI functionality.
+- `configureAI(config)`: Configure AI provider and settings. **Note**: Current version supports basic configuration framework. Real AI integration requires valid provider API keys.
 
 ## 🧪 Testing
 

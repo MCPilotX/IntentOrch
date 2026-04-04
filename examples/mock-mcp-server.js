@@ -3,8 +3,8 @@
  * A simple MCP server that simulates tool execution for testing
  */
 
-const { spawn } = require('child_process');
-const readline = require('readline');
+import { spawn } from 'child_process';
+import readline from 'readline';
 
 class MockMCPServer {
   constructor() {
@@ -301,9 +301,9 @@ class MockMCPServer {
 }
 
 // Start server if run directly
-if (require.main === module) {
+if (import.meta.url === `file://${process.argv[1]}`) {
   const server = new MockMCPServer();
   server.start();
 }
 
-module.exports = { MockMCPServer };
+export { MockMCPServer };

@@ -8,6 +8,9 @@ import { ServiceConfig, RuntimeType, Config } from './core/types';
 import { RuntimeAdapterRegistry } from './runtime/adapter-advanced';
 import { EnhancedRuntimeDetector } from './runtime/detector-advanced';
 
+// AI imports
+import { SimpleAI, AIError } from './ai/ai';
+
 // MCP related imports
 import { MCPClient, ToolRegistry, createMCPConfig, discoverLocalMCPServers } from './mcp';
 import type { Tool, ToolCall, ToolResult, MCPClientConfig } from './mcp/types';
@@ -62,6 +65,9 @@ export class MCPilotSDK {
   private initialized = false;
   private logger: SDKOptions['logger'];
   
+  // AI instance
+  private ai: SimpleAI;
+  
   // MCP related properties
   private mcpClients: Map<string, MCPClient> = new Map();
   private toolRegistry: ToolRegistry = new ToolRegistry();
@@ -73,6 +79,9 @@ export class MCPilotSDK {
       error: (msg: string) => console.error(`[ERROR] ${msg}`),
       debug: (msg: string) => console.debug(`[DEBUG] ${msg}`),
     };
+
+    // Initialize AI instance
+    this.ai = new SimpleAI();
 
     // Save MCP options
     this.mcpOptions = options.mcp;
@@ -267,21 +276,40 @@ export class MCPilotSDK {
     this.ensureInitialized();
 
     try {
-      // Check AI configuration
-      const config = this.getConfig();
-      if (!config.ai || (config.ai as any).provider === "none") {
-        throw new Error('AI functionality is not configured. Please configure AI provider first.');
+      // Use SimpleAI instance to process query
+      // This will throw AIError if AI is not configured
+      const aiResult = await this.ai.ask(query);
+      
+      // Convert SimpleAI result to SDK AskResult format
+      if (aiResult.type === 'tool_call' && aiResult.tool) {
+        return {
+          answer: `AI suggests using tool: ${aiResult.tool.tool} from service: ${aiResult.tool.service}`,
+          toolCalls: [{
+            service: aiResult.tool.service,
+            tool: aiResult.tool.tool,
+            params: aiResult.tool.params
+          }],
+          confidence: aiResult.confidence || 0.5
+        };
+      } else if (aiResult.type === 'suggestions') {
+        return {
+          answer: aiResult.message || 'AI feature not enabled or configured incorrectly',
+          confidence: 0.3
+        };
+      } else {
+        return {
+          answer: 'AI processed your query but no specific action was suggested.',
+          confidence: aiResult.confidence || 0.5
+        };
       }
-
-      // AI functionality can be integrated here
-      // Temporarily return a simple response
-      return {
-        answer: `I received your query: "${query}". AI functionality will be implemented in a future version.`,
-        confidence: 0.8,
-      };
     } catch (error) {
+      // Re-throw AIError as is for clear error messages
+      if (error instanceof AIError) {
+        throw error;
+      }
+      
       this.logger.error(`AI query failed: ${error}`);
-      throw error;
+      throw new Error(`AI query failed: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -292,6 +320,18 @@ export class MCPilotSDK {
     this.ensureInitialized();
 
     try {
+      // Convert SDK AI config to SimpleAI config format
+      const simpleAIConfig = {
+        provider: (config.provider as 'openai' | 'ollama' | 'none') || 'none',
+        apiKey: config.apiKey,
+        endpoint: config.apiEndpoint || config.ollamaHost,
+        model: config.model
+      };
+
+      // Configure the SimpleAI instance
+      await this.ai.configure(simpleAIConfig);
+
+      // Also update the SDK configuration
       const currentConfig = this.getConfig();
       const updatedConfig = {
         ...currentConfig,

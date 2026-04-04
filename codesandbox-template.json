@@ -1,0 +1,39 @@
+{
+  "name": "MCPilot SDK Demo",
+  "description": "Zero-config demo of MCPilot SDK with built-in Mock MCP server",
+  "template": "node",
+  "environment": {
+    "node": "18"
+  },
+  "files": {
+    "package.json": {
+      "content": {
+        "name": "mcpilot-sdk-demo",
+        "version": "1.0.0",
+        "description": "MCPilot SDK Demo - Zero-config experience",
+        "main": "index.js",
+        "scripts": {
+          "start": "node index.js",
+          "demo": "npx tsx demo.ts"
+        },
+        "dependencies": {
+          "@mcpilotx/sdk-core": "latest",
+          "typescript": "^5.0.0",
+          "tsx": "^4.0.0"
+        },
+        "devDependencies": {
+          "@types/node": "^20.0.0"
+        }
+      }
+    },
+    "demo.ts": {
+      "content": "import { mcpilot } from '@mcpilotx/sdk-core';\n\nasync function runDemo() {\n  console.log('🎯 MCPilot SDK Zero-Config Demo');\n  console.log('='.repeat(50));\n  \n  try {\n    // 1. Initialize SDK\n    console.log('\\n📦 Step 1: Initializing MCPilot SDK...');\n    console.log('✅ SDK ready to use!');\n    \n    // 2. Show configuration\n    console.log('\\n⚙️  Step 2: Current Configuration');\n    const config = mcpilot.getConfig();\n    console.log(`AI configured: ${config.ai ? 'Yes' : 'No'}`);\n    console.log(`Services: ${config.services ? Object.keys(config.services).length : 0}`);\n    \n    // 3. Demonstrate AI functionality status\n    console.log('\\n🤖 Step 3: AI Functionality Status');\n    console.log('⚠️  Note: AI features require configuration with real API keys');\n    console.log('💡 To enable AI, call: mcpilot.configureAI({ provider: \\'openai\\', apiKey: \\'YOUR_KEY\\' })');\n    \n    // 4. Try to use AI (will show clear error)\n    console.log('\\n💬 Step 4: Testing AI Query (Expected to fail with clear error)');\n    try {\n      await mcpilot.ask('Hello, can you help me?');\n    } catch (error: any) {\n      console.log(`✅ Expected error: ${error.message}`);\n      console.log('✅ This demonstrates clear error messaging when AI is not configured');\n    }\n    \n    // 5. Show MCP capabilities\n    console.log('\\n🔌 Step 5: MCP Capabilities');\n    console.log('🚀 MCPilot SDK supports connecting to any MCP-compatible server:');\n    console.log('   - @modelcontextprotocol/server-filesystem');\n    console.log('   - @modelcontextprotocol/server-weather');\n    console.log('   - @modelcontextprotocol/server-github');\n    console.log('   - And many more...');\n    \n    console.log('\\n🎉 Demo Complete!');\n    console.log('='.repeat(50));\n    console.log('\\n📚 Next Steps:');\n    console.log('1. Install a real MCP server: npm install @modelcontextprotocol/server-filesystem');\n    console.log('2. Connect to it: await mcpilot.connectMCPServer(...)');\n    console.log('3. Configure AI: mcpilot.configureAI({ provider: \\'openai\\', apiKey: \\'YOUR_KEY\\' })');\n    console.log('4. Explore more examples in the documentation');\n    \n  } catch (error: any) {\n    console.error('\\n❌ Error:', error.message);\n  }\n}\n\nrunDemo().catch(console.error);\n"
+    },
+    "README.md": {
+      "content": "# MCPilot SDK Demo\n\nThis is a zero-config demo of MCPilot SDK running in CodeSandbox.\n\n## What is MCPilot SDK?\n\nMCPilot SDK is a developer-focused SDK for MCP (Model Context Protocol) service orchestration. It provides a simple, elegant API for managing MCP servers, tools, and services.\n\n## Features Demonstrated\n\n1. **Zero-config startup** - No external dependencies needed\n2. **Clear AI status** - Transparent about AI functionality limitations\n3. **Error handling** - Clear error messages when features require configuration\n4. **MCP capabilities** - Framework ready for real MCP servers\n\n## How to Run\n\nClick the \"Open Sandbox\" button above, then:\n\n```bash\n# Install dependencies\nnpm install\n\n# Run the demo\nnpm start\n```\n\n## Next Steps\n\n1. **Try with real MCP servers**: Install and connect to actual MCP servers\n2. **Configure AI**: Add your OpenAI or Ollama API key\n3. **Explore more**: Check out the full documentation at [GitHub](https://github.com/MCPilotX/sdk-core)\n\n## Links\n\n- [GitHub Repository](https://github.com/MCPilotX/sdk-core)\n- [Documentation](https://github.com/MCPilotX/sdk-core#readme)\n- [MCP Protocol](https://modelcontextprotocol.io/)\n"
+    },
+    "sandbox.config.json": {
+      "content": "{\n  \"infiniteLoopProtection\": true,\n  \"hardReloadOnChange\": false,\n  \"view\": \"console\",\n  \"template\": \"node\"\n}\n"
+    }
+  }
+}

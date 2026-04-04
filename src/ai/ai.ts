@@ -261,7 +261,16 @@ export class SimpleAI {
     
     // Check if AI is enabled
     if (!this.enabled || !this.config || this.config.provider === 'none') {
-      return this.getFallbackSuggestions(query);
+      throw new AIError(
+        'AI_NOT_CONFIGURED',
+        'AI provider not configured. Please call configureAI() with a valid API key.',
+        'config',
+        [
+          'Run: mcpilot.configureAI({ provider: "openai", apiKey: "YOUR_API_KEY" })',
+          'Get OpenAI API key: https://platform.openai.com/api-keys',
+          'Or use Ollama: mcpilot.configureAI({ provider: "ollama", endpoint: "http://localhost:11434" })'
+        ]
+      );
     }
     
     try {
