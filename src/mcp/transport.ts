@@ -78,7 +78,26 @@ export class StdioTransport extends BaseTransport {
 
       // Set up stderr reader
       this.process.stderr?.on('data', (data: Buffer) => {
-        this.emit('error', new Error(`Process stderr: ${data.toString()}`));
+        const stderrOutput = data.toString().trim();
+        
+        // Log stderr output for debugging
+        console.log(`[MCP Server stderr] ${stderrOutput}`);
+        
+        // Only emit error for actual error messages, not normal server startup messages
+        // Check if this looks like a normal server startup message
+        const isNormalStartupMessage = 
+          stderrOutput.includes('Secure MCP') ||
+          stderrOutput.includes('Server running on') ||
+          stderrOutput.includes('Listening on') ||
+          stderrOutput.includes('Started') ||
+          stderrOutput.match(/^\[.*\]/); // Common log format
+        
+        if (!isNormalStartupMessage && 
+            (stderrOutput.toLowerCase().includes('error') || 
+             stderrOutput.toLowerCase().includes('failed') ||
+             stderrOutput.toLowerCase().includes('fatal'))) {
+          this.emit('error', new Error(`Process stderr: ${stderrOutput}`));
+        }
       });
 
       // Handle process exit

@@ -46,7 +46,7 @@ export class MCPClient extends EventEmitter {
   constructor(config: MCPClientConfig) {
     super();
     this.config = {
-      autoConnect: true,
+      autoConnect: false, // Default disable auto-connect requests to avoid server not being ready
       timeout: 30000,
       maxRetries: 3,
       ...config,
