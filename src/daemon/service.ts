@@ -133,7 +133,7 @@ export class ServiceManager {
     } catch (error: any) {
       service.status = 'error';
       this.saveServices();
-      throw new Error(`Failed to start service ${name}: ${error.message}`);
+      throw new Error(`Failed to start service ${name}: ${error.message}`, { cause: error });
     }
   }
 

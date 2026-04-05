@@ -419,7 +419,7 @@ export class StdioTransport extends BaseTransport {
       this.connected = true;
       this.emit('connected');
     } catch (error) {
-      throw new Error(`Failed to start process: ${error}`);
+      throw new Error(`Failed to start process: ${error}`, { cause: error });
     }
   }
 
@@ -551,7 +551,7 @@ export class SSETransport extends BaseTransport {
       this.httpTransport = new HTTPTransport(this.config);
       await this.httpTransport.connect();
     } catch (error) {
-      throw new Error(`Failed to connect SSE: ${error}`);
+      throw new Error(`Failed to connect SSE: ${error}`, { cause: error });
     }
   }
 

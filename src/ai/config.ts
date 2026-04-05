@@ -57,7 +57,7 @@ export class SimpleAIConfigManager {
       logger.info('[AI] Configuration saved to file');
     } catch (error: any) {
       logger.error(`[AI] Failed to save configuration: ${error.message}`);
-      throw new Error(`Failed to save configuration: ${error.message}`);
+      throw new Error(`Failed to save configuration: ${error.message}`, { cause: error });
     }
   }
 
