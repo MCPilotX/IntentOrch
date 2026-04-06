@@ -1016,26 +1016,133 @@ Output only JSON, no other content.`;
   }
 
   /**
-   * Simple parameter mapping
+   * Enhanced parameter mapping with better handling of parameter name mismatches
    */
   private simpleParameterMapping(intentParams: Record<string, any>, tool: Tool): Record<string, any> {
     const mapped: Record<string, any> = {};
     const schema = tool.inputSchema;
     
+    // Common parameter name mappings (intent param -> tool param)
+    // Also include reverse mappings for better coverage
+    const commonMappings: Record<string, string[]> = {
+      // File operations
+      'filename': ['path', 'file', 'filepath', 'filename', 'name'],
+      'path': ['path', 'filepath', 'filename', 'directory', 'name'],
+      'directory': ['directory', 'path', 'folder', 'dir', 'name'],
+      'content': ['content', 'text', 'data', 'body'],
+      'file': ['path', 'filename', 'filepath', 'name'],
+      'name': ['name', 'path', 'filename', 'filepath', 'directory'],
+      
+      // Git operations
+      'repo': ['repository', 'repo', 'repo_path', 'path'],
+      'repository': ['repo', 'repository', 'path'],
+      'branch': ['branch', 'ref', 'target'],
+      'target': ['branch', 'ref', 'target'],
+      'message': ['message', 'commit_message', 'msg'],
+      'commit_message': ['message', 'commit_message', 'msg'],
+      
+      // Shell operations
+      'command': ['command', 'cmd', 'shell_command'],
+      'cmd': ['command', 'cmd', 'shell_command'],
+      'args': ['args', 'arguments', 'parameters'],
+      'arguments': ['args', 'arguments', 'parameters'],
+      'parameters': ['args', 'arguments', 'parameters'],
+      
+      // Web operations
+      'url': ['url', 'uri', 'link', 'address'],
+      'uri': ['url', 'uri', 'link', 'address'],
+      'method': ['method', 'http_method', 'verb'],
+      'http_method': ['method', 'http_method', 'verb'],
+      'headers': ['headers', 'http_headers'],
+      'http_headers': ['headers', 'http_headers'],
+      'body': ['body', 'data', 'content', 'payload'],
+      'data': ['body', 'data', 'content', 'payload'],
+      'payload': ['body', 'data', 'content', 'payload'],
+    };
+    
+    // Also build a reverse lookup for tool parameter names
+    const toolParamNames = Object.keys(schema.properties);
+    const toolParamLookup = new Set(toolParamNames);
+    
     // Try to map based on parameter names
     for (const [paramName, paramValue] of Object.entries(intentParams)) {
-      // Check if parameter exists in schema
-      if (schema.properties[paramName]) {
-        mapped[paramName] = paramValue;
-      } else {
-        // Try to find similar parameter name
-        const similarParam = Object.keys(schema.properties).find(key => 
-          key.toLowerCase().includes(paramName.toLowerCase()) || 
-          paramName.toLowerCase().includes(key.toLowerCase())
-        );
-        if (similarParam) {
-          mapped[similarParam] = paramValue;
+      let mappedParamName: string | undefined;
+      
+      // 1. Direct match (case-insensitive)
+      const directMatch = toolParamNames.find(toolParam => 
+        toolParam.toLowerCase() === paramName.toLowerCase()
+      );
+      if (directMatch) {
+        mappedParamName = directMatch;
+      }
+      // 2. Check common mappings
+      else if (commonMappings[paramName]) {
+        for (const possibleName of commonMappings[paramName]) {
+          if (toolParamLookup.has(possibleName)) {
+            mappedParamName = possibleName;
+            break;
+          }
         }
+      }
+      // 3. Try to find similar parameter name (fuzzy match with better logic)
+      if (!mappedParamName) {
+        // First, check if any tool parameter is in the common mappings for this param
+        for (const toolParam of toolParamNames) {
+          if (commonMappings[toolParam]?.includes(paramName)) {
+            mappedParamName = toolParam;
+            break;
+          }
+        }
+        
+        // If still not found, try fuzzy matching
+        if (!mappedParamName) {
+          const similarParam = toolParamNames.find(toolParam => {
+            // Remove underscores and normalize
+            const normalizedToolParam = toolParam.toLowerCase().replace(/_/g, '');
+            const normalizedIntentParam = paramName.toLowerCase().replace(/_/g, '');
+            
+            // Check for various similarity patterns
+            return (
+              // Exact match after normalization
+              normalizedToolParam === normalizedIntentParam ||
+              // One contains the other
+              normalizedToolParam.includes(normalizedIntentParam) ||
+              normalizedIntentParam.includes(normalizedToolParam) ||
+              // Common abbreviations
+              (paramName === 'cmd' && toolParam === 'command') ||
+              (paramName === 'uri' && toolParam === 'url') ||
+              (paramName === 'target' && toolParam === 'branch') ||
+              // Check for common suffixes
+              toolParam.toLowerCase().endsWith(paramName.toLowerCase()) ||
+              paramName.toLowerCase().endsWith(toolParam.toLowerCase()) ||
+              // Check for common prefixes
+              toolParam.toLowerCase().startsWith(paramName.toLowerCase()) ||
+              paramName.toLowerCase().startsWith(toolParam.toLowerCase())
+            );
+          });
+          
+          if (similarParam) {
+            mappedParamName = similarParam;
+          }
+        }
+      }
+      
+      // 4. If still not found, check if we can use the parameter anyway
+      // (if additionalProperties is true or not specified)
+      if (!mappedParamName) {
+        if (schema.additionalProperties !== false) {
+          // Allow unknown parameters if additionalProperties is not explicitly false
+          mappedParamName = paramName;
+        } else {
+          // Log warning but don't fail - let tool validation handle it
+          console.warn(`Parameter "${paramName}" not found in tool schema for "${tool.name}". Tool may reject this parameter.`);
+          continue;
+        }
+      }
+      
+      // Map the parameter
+      if (mappedParamName) {
+        mapped[mappedParamName] = paramValue;
       }
     }
     

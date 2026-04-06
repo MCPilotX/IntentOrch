@@ -46,7 +46,11 @@
     "test:watch": "jest --watch",
     "lint": "eslint src/**/*.ts",
     "prepublishOnly": "npm run build",
-    "postbuild": "node scripts/import-extensions.js"
+    "postbuild": "node scripts/import-extensions.js",
+    "docs:validate": "node scripts/sync-docs.js validate",
+    "docs:prepare": "node scripts/sync-docs.js prepare-npm",
+    "docs:sync": "node scripts/sync-docs.js all",
+    "docs:verify": "node scripts/sync-docs.js verify"
   },
   "dependencies": {
     "dockerode": "^4.0.2",
@@ -95,11 +99,11 @@
   },
   "homepage": "https://github.com/MCPilotX/sdk-core#readme",
   "files": [
-    "dist/**/*.js",
-    "dist/**/*.d.ts",
+    "LICENSE",
     "README.md",
-    "README.ZH_CN.md",
-    "LICENSE"
+    "dist/**/*.d.ts",
+    "dist/**/*.js",
+    "docs/"
   ],
   "publishConfig": {
     "access": "public",

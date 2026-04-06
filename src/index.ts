@@ -98,6 +98,9 @@ export {
   shouldRetry,
 } from './core/error-handler';
 
+// Export performance monitoring
+export { PerformanceMonitor, getPerformanceMonitor } from './core/performance-monitor';
+
 /**
  * Quick start function - Create and return SDK instance
  */

@@ -9,6 +9,11 @@
 
 MCPilot SDK Core 提供了集成AI能力、MCP工具管理和智能运行时检测所需的一切 - 配置最少，灵活性最大。
 
+## 🤖 核心理念
+**告诉AI你想要什么，剩下的交给它编排** - MCPilot SDK Core让您专注于表达需求，我们处理复杂的AI编排、工具管理和运行时检测。
+
+---
+
 ## 🚀 快速开始
 
 ### 安装
@@ -40,14 +45,15 @@ console.log(response); // 基于上下文的AI响应
 ```
 
 ## ✨ 核心功能
+**告诉AI你想要什么，剩下的交给它编排** - 以下是MCPilot SDK Core为您提供的核心能力：
 
 ### 🤖 **AI集成变得简单**
 ```typescript
-// 使用您偏好的提供商配置AI
+// 配置AI提供商（当前主要支持DeepSeek）
 await sdk.configureAI({
-  provider: 'openai', // 或 'anthropic', 'google', 'azure'
-  apiKey: process.env.OPENAI_API_KEY,
-  model: 'gpt-4'
+  provider: 'deepseek', // 主要支持DeepSeek，实验性支持OpenAI、Ollama
+  apiKey: process.env.DEEPSEEK_API_KEY,
+  model: 'deepseek-chat'
 });
 
 // 自然地提问
@@ -71,10 +77,13 @@ const fileContent = await sdk.executeTool('read_file', { path: 'README.md' });
 
 ### 🧠 **智能运行时检测**
 ```typescript
+import { EnhancedRuntimeDetector } from '@mcpilotx/sdk-core';
+
 // 自动检测项目类型和设置
-const detection = await sdk.detectRuntime();
-console.log(detection.type); // 'node', 'python', 'docker' 等
-console.log(detection.tools); // 此运行时可用的工具
+const detection = await EnhancedRuntimeDetector.detect('./path/to/project');
+console.log(detection.runtime); // 'node', 'python', 'docker' 等
+console.log(detection.confidence); // 检测置信度
+console.log(detection.source); // 检测来源
 ```
 
 ### 📡 **高级传输层**
@@ -220,22 +229,19 @@ const sseConfig: TransportConfig = {
 import { AIConfig } from '@mcpilotx/sdk-core';
 
 const aiConfig: AIConfig = {
-  provider: 'openai', // 'anthropic', 'google', 'azure', 'deepseek', 'cohere', 'ollama', 'local', 'custom', 'none'
-  model: 'gpt-4-turbo',
-  apiKey: process.env.AI_API_KEY,
-  apiEndpoint: 'https://api.openai.com/v1', // 可选：自定义API端点
+  provider: 'deepseek', // 主要支持DeepSeek，实验性支持OpenAI、Ollama
+  model: 'deepseek-chat',
+  apiKey: process.env.DEEPSEEK_API_KEY,
+  apiEndpoint: 'https://api.deepseek.com/v1', // DeepSeek API端点
   timeout: 30000, // 请求超时时间（毫秒）
   maxTokens: 2000,
   temperature: 0.7,
-  // Azure特定配置
-  apiVersion: '2024-02-01', // Azure API版本
-  region: 'eastus', // Azure区域
-  // 本地模型配置
-  ollamaHost: 'http://localhost:11434', // Ollama主机地址
-  localModelPath: './models', // 本地模型路径
-  // 嵌入模型配置
-  embeddingProvider: 'openai',
-  embeddingModel: 'text-embedding-3-small'
+  // 实验性功能（未来版本支持）
+  // ollamaHost: 'http://localhost:11434', // Ollama主机地址（实验性）
+  // localModelPath: './models', // 本地模型路径（计划中）
+  // 嵌入模型配置（计划中）
+  // embeddingProvider: 'deepseek',
+  // embeddingModel: 'text-embedding'
 };
 ```
 

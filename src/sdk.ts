@@ -766,7 +766,15 @@ export class MCPilotSDK {
       arguments: args,
     };
 
-    return await this.toolRegistry.executeTool(toolCall);
+    const result = await this.toolRegistry.executeTool(toolCall);
+    
+    // If the tool execution resulted in an error, throw an exception
+    if (result.isError) {
+      const errorText = result.content.find(c => c.type === 'text')?.text || `Tool "${toolName}" execution failed`;
+      throw new Error(errorText);
+    }
+    
+    return result;
   }
 
   /**
@@ -793,7 +801,7 @@ export class MCPilotSDK {
         return await client.callTool(tool.name, args);
       };
 
-      this.toolRegistry.registerMCPTool(tool, executor, serverName, serverName);
+      this.toolRegistry.registerTool(tool, executor, serverName, serverName);
     });
   }
 

@@ -32,9 +32,9 @@ export class ToolRegistry {
   // ==================== Tool Registration ====================
 
   /**
-   * Register MCP tool
+   * Register tool
    */
-  registerMCPTool(
+  registerTool(
     tool: Tool,
     executor: ToolExecutor,
     serverId: string,
@@ -64,16 +64,16 @@ export class ToolRegistry {
   }
 
   /**
-   * Batch register MCP tools
+   * Batch register tools
    */
-  registerMCPTools(
+  registerTools(
     tools: Tool[],
     executorFactory: (toolName: string) => ToolExecutor,
     serverId: string,
     serverName?: string,
   ): void {
     tools.forEach(tool => {
-      this.registerMCPTool(tool, executorFactory(tool.name), serverId, serverName);
+      this.registerTool(tool, executorFactory(tool.name), serverId, serverName);
     });
   }
 
@@ -269,23 +269,77 @@ export class ToolRegistry {
 
   private validateToolArguments(tool: Tool, args: Record<string, any>): void {
     const schema = tool.inputSchema;
+    const toolName = tool.name;
+    const errors: string[] = [];
 
     // Check required parameters
     if (schema.required) {
       for (const requiredParam of schema.required) {
         if (!(requiredParam in args)) {
-          throw new Error(`Missing required parameter: ${requiredParam}`);
+          errors.push(`Missing required parameter: "${requiredParam}"`);
         }
       }
     }
 
-    // Check parameter types (simplified validation)
+    // Check parameter types and unknown parameters
     for (const [paramName, paramValue] of Object.entries(args)) {
-      if (!schema.properties[paramName]) {
+      const paramSchema = schema.properties[paramName];
+      
+      if (!paramSchema) {
         if (schema.additionalProperties === false) {
-          throw new Error(`Unknown parameter: ${paramName}`);
+          errors.push(`Unknown parameter: "${paramName}". Tool "${toolName}" does not accept this parameter.`);
+        }
+        // If additionalProperties is true or not specified, allow unknown parameters
+        continue;
+      }
+
+      // Basic type validation
+      if (paramSchema.type) {
+        const expectedType = paramSchema.type;
+        const actualType = typeof paramValue;
+        
+        // Handle array type specially
+        if (expectedType === 'array' && !Array.isArray(paramValue)) {
+          errors.push(`Parameter "${paramName}" should be an array, but got ${actualType}`);
+        }
+        // Handle other type mismatches (simplified)
+        else if (expectedType !== 'array' && expectedType !== actualType) {
+          // Allow some flexibility: number can accept string that can be parsed as number
+          if (expectedType === 'number' && typeof paramValue === 'string') {
+            if (isNaN(Number(paramValue))) {
+              errors.push(`Parameter "${paramName}" should be a number, but got string that cannot be parsed as number: "${paramValue}"`);
+            }
+          } else if (expectedType === 'string' && typeof paramValue !== 'string') {
+            errors.push(`Parameter "${paramName}" should be a string, but got ${actualType}`);
+          } else if (expectedType === 'boolean' && typeof paramValue !== 'boolean') {
+            errors.push(`Parameter "${paramName}" should be a boolean, but got ${actualType}`);
+          } else if (expectedType === 'object' && (typeof paramValue !== 'object' || paramValue === null || Array.isArray(paramValue))) {
+            errors.push(`Parameter "${paramName}" should be an object, but got ${actualType}`);
+          }
         }
       }
+
+      // Check enum values if specified
+      if (paramSchema.enum && !paramSchema.enum.includes(paramValue)) {
+        errors.push(`Parameter "${paramName}" value "${paramValue}" is not valid. Allowed values: ${paramSchema.enum.join(', ')}`);
+      }
+    }
+
+    // If there are errors, throw a comprehensive error message
+    if (errors.length > 0) {
+      const errorMessage = [
+        `Tool "${toolName}" parameter validation failed:`,
+        ...errors.map(error => `  - ${error}`),
+        '',
+        `Tool schema:`,
+        `  Required parameters: ${schema.required ? schema.required.join(', ') : 'none'}`,
+        `  Available parameters: ${Object.keys(schema.properties).join(', ')}`,
+        '',
+        `Provided parameters:`,
+        ...Object.entries(args).map(([key, value]) => `  - ${key}: ${typeof value} = ${JSON.stringify(value)}`),
+      ].join('\n');
+      
+      throw new Error(errorMessage);
     }
   }
 

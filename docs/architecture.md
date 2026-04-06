@@ -63,14 +63,19 @@ MCPilot SDK Core
 class MCPilotSDK {
   // 核心组件
   private configManager: ConfigManager;
-  private toolRegistry: ToolRegistry;
-  private mcpClients: Map<string, MCPClient>;
-  
-  // 运行时适配器注册表
-  private runtimeAdapters: RuntimeAdapterRegistry;
-  
-  // 服务管理器
-  private serviceManager: ServiceManager;
+  private initialized = false;
+  private logger: SDKOptions['logger'];
+
+  // AI 实例
+  private ai: SimpleAI;
+
+  // Cloud Intent Engine
+  private cloudIntentEngine?: CloudIntentEngine;
+
+  // MCP 相关属性
+  private mcpClients: Map<string, MCPClient> = new Map();
+  private toolRegistry: ToolRegistry = new ToolRegistry();
+  private mcpOptions: SDKOptions['mcp'];
 }
 ```
 
@@ -692,11 +697,11 @@ class CustomToolExecutor implements ToolExecutor {
 - **负载均衡**: 请求分发
 - **故障转移**: 高可用性
 
-### 3. 高级 AI 集成
+### 3. AI 集成能力
 
-- **多模型支持**: 多个 AI 提供商
-- **上下文管理**: 长期对话上下文
-- **学习能力**: 自适应行为
+- **AI 提供商支持**: 主要支持 DeepSeek，实验性支持 OpenAI、Ollama
+- **上下文管理**: 基础对话上下文支持
+- **意图识别**: 智能工具调用和意图解析
 
 ### 4. 监控和运维
 

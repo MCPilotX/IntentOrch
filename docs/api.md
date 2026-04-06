@@ -88,7 +88,7 @@ async connectMCPServer(
 **MCPClientConfig 类型：**
 ```typescript
 interface MCPClientConfig {
-  // 传输类型：stdio、http 或 sse
+  // 传输配置
   transport: {
     type: 'stdio' | 'http' | 'sse';
     
@@ -99,12 +99,27 @@ interface MCPClientConfig {
     // HTTP/SSE 传输的 URL
     url?: string;
     
-    // 其他传输选项
-    [key: string]: any;
+    // HTTP/SSE 传输的请求头
+    headers?: Record<string, string>;
+    
+    // stdio 传输的日志过滤配置
+    logFilter?: {
+      ignorePatterns?: string[];
+      keepPatterns?: string[];
+      verbose?: boolean;
+      bufferSize?: number;
+      timeout?: number;
+    };
   };
   
-  // 其他配置选项
-  [key: string]: any;
+  // 是否自动连接（默认：false）
+  autoConnect?: boolean;
+  
+  // 请求超时时间（毫秒，默认：30000）
+  timeout?: number;
+  
+  // 最大重试次数（默认：3）
+  maxRetries?: number;
 }
 ```
 
@@ -244,17 +259,13 @@ async executeTool(
 interface ToolResult {
   // 工具执行结果内容
   content: Array<{
-    type: 'text' | 'image' | 'error';
+    type: 'text' | 'image' | 'resource';
     text?: string;
     data?: any;
-    mimeType?: string;
   }>;
   
-  // 是否成功
-  isError: boolean;
-  
-  // 错误信息（如果有）
-  error?: string;
+  // 是否成功（可选）
+  isError?: boolean;
 }
 ```
 

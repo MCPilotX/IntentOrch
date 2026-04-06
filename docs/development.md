@@ -61,42 +61,90 @@ sdk-core/
 ├── src/                    # 源代码
 │   ├── index.ts           # 主入口文件
 │   ├── sdk.ts             # SDK 主类
+│   ├── ai/                # AI 集成模块
+│   │   ├── ai.ts          # AI 核心功能
+│   │   ├── cloud-intent-engine.ts  # 云意图引擎
+│   │   ├── command.ts     # 命令处理
+│   │   ├── config.ts      # AI 配置
+│   │   ├── enhanced-intent.ts  # 增强意图识别
+│   │   ├── index.ts       # AI 模块导出
+│   │   └── intent.ts      # 意图处理
 │   ├── core/              # 核心功能模块
-│   │   ├── config-manager.ts
-│   │   ├── logger.ts
-│   │   ├── error-handler.ts
-│   │   └── types.ts
-│   ├── mcp/               # MCP 协议模块
-│   │   ├── client.ts
-│   │   ├── tool-registry.ts
-│   │   ├── transport.ts
-│   │   └── types.ts
-│   ├── runtime/           # 运行时适配器
-│   │   ├── adapter.ts
-│   │   ├── detector.ts
-│   │   ├── node-adapter.ts
-│   │   ├── python-adapter.ts
-│   │   └── docker-adapter.ts
+│   │   ├── ai-config.ts   # AI 配置管理
+│   │   ├── config-manager.ts  # 配置管理器
+│   │   ├── config-validator.ts  # 配置验证器
+│   │   ├── constants.ts   # 常量定义
+│   │   ├── error-ai.ts    # AI 错误处理
+│   │   ├── error-handler.ts  # 错误处理器
+│   │   ├── index.ts       # 核心模块导出
+│   │   ├── logger.ts      # 日志系统
+│   │   ├── performance-monitor.ts  # 性能监控
+│   │   ├── providers.ts   # 服务提供商
+│   │   ├── retry-manager.ts  # 重试管理器
+│   │   └── types.ts       # 类型定义
 │   ├── daemon/            # 守护进程功能
-│   │   ├── intent-engine.ts
-│   │   ├── orchestrator.ts
-│   │   └── process.ts
-│   └── ai/                # AI 集成
-│       ├── ai.ts
-│       ├── intent.ts
-│       └── config.ts
-├── __tests__/             # 测试文件
-│   ├── sdk.test.ts
+│   │   ├── index.ts       # 守护进程模块导出
+│   │   ├── intent-engine.ts  # 意图引擎
+│   │   ├── orchestrator.ts  # 编排器
+│   │   ├── pm.ts          # 进程管理
+│   │   ├── process.ts     # 进程处理
+│   │   ├── server.ts      # 服务器
+│   │   └── service.ts     # 服务管理
+│   ├── mcp/               # MCP 协议模块
+│   │   ├── client.ts      # MCP 客户端
+│   │   ├── index.ts       # MCP 模块导出
+│   │   ├── tool-registry.ts  # 工具注册表
+│   │   ├── transport.ts   # 传输层
+│   │   └── types.ts       # MCP 类型定义
+│   └── runtime/           # 运行时适配器
+│       ├── adapter-advanced.ts  # 高级适配器
+│       ├── adapter.ts     # 基础适配器接口
+│       ├── detector-advanced.ts  # 高级检测器
+│       ├── detector.ts    # 运行时检测器
+│       ├── docker-adapter.ts  # Docker 适配器
+│       ├── docker.ts      # Docker 运行时
+│       ├── executable-analyzer.ts  # 可执行文件分析器
+│       ├── go-adapter.ts  # Go 适配器
+│       ├── index.ts       # 运行时模块导出
+│       ├── node-adapter.ts  # Node.js 适配器
+│       ├── node.ts        # Node.js 运行时
+│       ├── python-adapter.ts  # Python 适配器
+│       ├── python.ts      # Python 运行时
+│       ├── rust-adapter.ts  # Rust 适配器
+│       └── rust.ts        # Rust 运行时
+├── tests/                 # 测试文件（实际目录）
+│   ├── improvements.test.ts
 │   ├── logger.test.ts
+│   ├── sdk-simple.test.ts
+│   ├── sdk.test.ts
 │   └── setup.ts
 ├── examples/              # 示例代码
+│   ├── 1-basic-sdk-usage.js
+│   ├── 2-ai-integration.js
+│   ├── 3-mcp-tools.js
+│   ├── analyze-readme-example.ts
 │   ├── basic-usage.ts
-│   ├── test-core-functionality.ts
-│   └── mock-mcp-server.js
+│   ├── cloud-intent-engine-demo.ts
+│   ├── developer-starter-kit.js
+│   ├── end-to-end-test.ts
+│   ├── enhanced-intent-tracking-demo.ts
+│   ├── filesystem-server-demo.ts
+│   ├── fix-ask-method-example.ts
+│   ├── http-transport-demo.ts
+│   ├── improved-stdio-transport.ts
+│   ├── mcp-integration-test.js
+│   ├── mcp-tool-discovery.md
+│   ├── mock-filesystem-server.cjs
+│   ├── mock-mcp-server.js
+│   ├── quick-test.js
+│   ├── real-world-scenarios.ts
+│   ├── run-all-examples.sh
+│   └── zero-config-demo.ts
 ├── docs/                  # 文档
 │   ├── api.md
 │   ├── architecture.md
-│   └── development.md
+│   ├── development.md
+│   └── README.ZH_CN.md
 ├── dist/                  # 构建输出
 ├── package.json           # 项目配置
 ├── tsconfig.json          # TypeScript 配置
