@@ -1,4 +1,4 @@
-# MCPilot SDK Core
+# IntentOrch
 
 <div align="right">
   <small>
