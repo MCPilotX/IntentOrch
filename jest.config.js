@@ -13,10 +13,10 @@ export default {
   coverageReporters: ['text', 'lcov', 'html'],
   coverageThreshold: {
     global: {
-      branches: 0,
-      functions: 0,
-      lines: 0,
-      statements: 0
+      branches: 20,
+      functions: 20,
+      lines: 20,
+      statements: 20
     }
   },
   collectCoverageFrom: [

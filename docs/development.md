@@ -19,7 +19,7 @@
 
 ```bash
 git clone https://github.com/MCPilotX/mcpilot.git
-cd mcpilot/packages/sdk-core
+cd mcpilot/packages/intentorch
 ```
 
 2. **安装依赖**
@@ -57,7 +57,7 @@ npm test
 ### 目录结构
 
 ```
-sdk-core/
+intentorch/
 ├── src/                    # 源代码
 │   ├── index.ts           # 主入口文件
 │   ├── sdk.ts             # SDK 主类
@@ -385,7 +385,7 @@ npm test -- --coverage
 
 ```typescript
 // examples/new-feature-usage.ts
-import { mcpilot } from '@mcpilotx/sdk-core';
+import { mcpilot } from '@mcpilotx/intentorch';
 
 async function demonstrateNewFeature() {
   // 初始化 SDK

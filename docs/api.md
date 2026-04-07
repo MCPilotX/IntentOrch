@@ -11,7 +11,7 @@ MCPilot SDK Core provides a concise and elegant API for MCP (Model Context Proto
 The main SDK class that provides all functionality.
 
 ```typescript
-import { MCPilotSDK } from '@mcpilotx/sdk-core';
+import { MCPilotSDK } from '@mcpilotx/intentorch';
 
 const sdk = new MCPilotSDK(options);
 ```
@@ -49,7 +49,7 @@ interface SDKOptions {
 The SDK also provides a pre-initialized singleton instance:
 
 ```typescript
-import { mcpilot } from '@mcpilotx/sdk-core';
+import { mcpilot } from '@mcpilotx/intentorch';
 
 // 直接使用，无需初始化
 await mcpilot.initMCP();
@@ -676,7 +676,7 @@ import {
   ServiceNotFoundError,
   ToolNotFoundError,
   MCPConnectionError
-} from '@mcpilotx/sdk-core';
+} from '@mcpilotx/intentorch';
 ```
 
 ## 实用函数
@@ -686,7 +686,7 @@ import {
 创建 SDK 实例的快捷函数。
 
 ```typescript
-import { createSDK } from '@mcpilotx/sdk-core';
+import { createSDK } from '@mcpilotx/intentorch';
 
 const sdk = createSDK(options);
 ```
@@ -696,7 +696,7 @@ const sdk = createSDK(options);
 发现本地 MCP 服务器。
 
 ```typescript
-import { discoverLocalMCPServers } from '@mcpilotx/sdk-core';
+import { discoverLocalMCPServers } from '@mcpilotx/intentorch';
 
 const servers = await discoverLocalMCPServers();
 console.log('Discovered servers:', servers);
@@ -707,7 +707,7 @@ console.log('Discovered servers:', servers);
 ### 获取 SDK 版本
 
 ```typescript
-import { version } from '@mcpilotx/sdk-core';
+import { version } from '@mcpilotx/intentorch';
 
 console.log(`MCPilot SDK version: ${version}`);
 ```

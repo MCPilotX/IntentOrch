@@ -177,7 +177,7 @@ For complete documentation including examples, tutorials, and the latest updates
 
 - **GitHub Repository**: https://github.com/MCPilotX/sdk-core
 - **Issue Tracker**: https://github.com/MCPilotX/sdk-core/issues
-- **NPM Package**: https://www.npmjs.com/package/@mcpilotx/sdk-core
+- **NPM Package**: https://www.npmjs.com/package/@mcpilotx/intentorch
 
 ## 🆘 Getting Help
 
@@ -190,7 +190,7 @@ If you need assistance:
 
 ## 📦 Package Information
 
-- **Package Name**: @mcpilotx/sdk-core
+- **Package Name**: @mcpilotx/intentorch
 - **Version**: ${await getPackageVersion()}
 - **License**: Apache 2.0
 - **TypeScript Support**: Full type definitions included

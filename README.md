@@ -8,7 +8,7 @@
   </small>
 </div>
 
-[![npm version](https://img.shields.io/npm/v/@mcpilotx/sdk-core.svg)](https://www.npmjs.com/package/@mcpilotx/sdk-core)
+[![npm version](https://img.shields.io/npm/v/@mcpilotx/intentorch.svg)](https://www.npmjs.com/package/@mcpilotx/intentorch)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.0+-3178c6.svg)](https://www.typescriptlang.org/)
 [![Node.js](https://img.shields.io/badge/Node.js-18%2B-339933.svg)](https://nodejs.org/)
@@ -41,13 +41,13 @@ Building production applications? Learn advanced configurations and optimization
 ### 1. Install the SDK
 
 ```bash
-npm install @mcpilotx/sdk-core
+npm install @mcpilotx/intentorch
 ```
 
 ### 2. Your First AI Interaction
 
 ```typescript
-import { createSDK } from '@mcpilotx/sdk-core';
+import { createSDK } from '@mcpilotx/intentorch';
 
 // Create SDK instance
 const sdk = createSDK();
@@ -78,7 +78,7 @@ console.log(answer);
 Create a file `quick-test.js`:
 
 ```javascript
-const { createSDK } = require('@mcpilotx/sdk-core');
+const { createSDK } = require('@mcpilotx/intentorch');
 
 async function quickTest() {
   const sdk = createSDK();
@@ -116,7 +116,7 @@ export DEEPSEEK_API_KE=your_key_here &&  node quick-test.js
 ### Example 1: File Operations with MCP
 
 ```typescript
-import { MCPilotSDK } from '@mcpilotx/sdk-core';
+import { MCPilotSDK } from '@mcpilotx/intentorch';
 
 const mcpConfig = {
   servers: [
@@ -165,7 +165,7 @@ try {
 ### Example 2: Custom Tool Integration
 
 ```typescript
-import { MCPilotSDK, ToolRegistry } from '@mcpilotx/sdk-core';
+import { MCPilotSDK, ToolRegistry } from '@mcpilotx/intentorch';
 
 // Create SDK first
 const sdk = new MCPilotSDK({
@@ -204,7 +204,7 @@ console.log('Calculation result:', calculation);
 ### Example 3: Intelligent Runtime Detection
 
 ```typescript
-import { MCPilotSDK, EnhancedRuntimeDetector } from '@mcpilotx/sdk-core';
+import { MCPilotSDK, EnhancedRuntimeDetector } from '@mcpilotx/intentorch';
 
 const sdk = new MCPilotSDK();
 
@@ -233,7 +233,7 @@ console.log('Project Advice:', advice);
 ### Example 4: Automated Code Review
 
 ```typescript
-import { MCPilotSDK } from '@mcpilotx/sdk-core';
+import { MCPilotSDK } from '@mcpilotx/intentorch';
 import fs from 'fs/promises';
 
 class CodeReviewer {
@@ -290,7 +290,7 @@ console.log('Code Review:', review);
 ### Advanced Configuration 1: Custom Transport with Log Filtering
 
 ```typescript
-import { TransportFactory, StdioLogFilterConfig } from '@mcpilotx/sdk-core';
+import { TransportFactory, StdioLogFilterConfig } from '@mcpilotx/intentorch';
 
 // Create a transport with intelligent log filtering
 const logFilter: StdioLogFilterConfig = {
@@ -333,7 +333,7 @@ const sdk = new MCPilotSDK({
 ### Advanced Configuration 2: Performance-Optimized SDK
 
 ```typescript
-import { MCPilotSDK, PerformanceMonitor } from '@mcpilotx/sdk-core';
+import { MCPilotSDK, PerformanceMonitor } from '@mcpilotx/intentorch';
 
 // Create SDK with performance monitoring
 const sdk = new MCPilotSDK({
@@ -376,7 +376,7 @@ setInterval(async () => {
 ### Advanced Configuration 3: Multi-Server Orchestration
 
 ```typescript
-import { MCPilotSDK, discoverLocalMCPServers } from '@mcpilotx/sdk-core';
+import { MCPilotSDK, discoverLocalMCPServers } from '@mcpilotx/intentorch';
 
 // Discover all local MCP servers
 const localServers = await discoverLocalMCPServers();
@@ -443,7 +443,7 @@ console.log('Multi-server results:', results);
 ### Advanced Configuration 4: Service Management with Built-in Runtimes
 
 ```typescript
-import { MCPilotSDK } from '@mcpilotx/sdk-core';
+import { MCPilotSDK } from '@mcpilotx/intentorch';
 
 const sdk = new MCPilotSDK();
 
@@ -508,7 +508,7 @@ console.log(`Service '${serviceName}' stopped`);
 export DEEPSEEK_API_KEY=your_key_here
 
 # Run the quick test
-npx @mcpilotx/sdk-core test
+npx @mcpilotx/intentorch test
 ```
 
 ### 2. Run Examples
@@ -525,8 +525,8 @@ node examples/1-basic-sdk-usage.js
 
 ```bash
 # Clone the repository
-git clone https://github.com/MCPilotX/sdk-core.git
-cd sdk-core
+git clone https://github.com/MCPilotX/intentorch.git
+cd intentorch
 
 # Install dependencies
 npm install
@@ -562,7 +562,7 @@ Apache 2.0 - See [LICENSE](LICENSE) for details.
 ## 🆘 Support
 
 - **Documentation**: See [docs/](docs/) for detailed guides
-- **Issues**: [GitHub Issues](https://github.com/MCPilotX/sdk-core/issues)
+- **Issues**: [GitHub Issues](https://github.com/MCPilotX/intentorch/issues)
 - **Examples**: Check [examples/](examples/) directory
 - **Community**: Join our Discord/Slack (link in GitHub)
 
@@ -573,7 +573,7 @@ Apache 2.0 - See [LICENSE](LICENSE) for details.
 Start building AI-powered applications with MCPilot SDK Core today!
 
 ```typescript
-import { createSDK } from '@mcpilotx/sdk-core';
+import { createSDK } from '@mcpilotx/intentorch';
 
 const sdk = createSDK();
 const future = await sdk.ask("What amazing things can I build with this SDK?");

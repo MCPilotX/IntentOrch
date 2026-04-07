@@ -237,7 +237,7 @@ async function runAIExamples() {
     console.log('\nNext Steps:');
     console.log('• Run: node 3-mcp-tools.js for tool management examples');
     console.log('• Run: node developer-starter-kit.js for complete overview');
-    console.log('• Explore: ../sdk-core/examples/ for more AI examples');
+    console.log('• Explore: ../intentorch/examples/ for more AI examples');
     
   } catch (error) {
     console.error('❌ AI examples failed:', error.message);

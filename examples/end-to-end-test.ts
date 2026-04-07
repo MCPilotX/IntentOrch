@@ -3,7 +3,7 @@
  * Demonstrates a complete workflow using the SDK
  */
 
-import { createSDK, MCPilotSDK, EnhancedRuntimeDetector, ToolRegistry } from '@mcpilotx/sdk-core';
+import { createSDK, MCPilotSDK, EnhancedRuntimeDetector, ToolRegistry } from '@mcpilotx/intentorch';
 
 async function endToEndTest() {
   console.log('=== MCPilot SDK Core End-to-End Test ===\n');
@@ -79,7 +79,7 @@ async function endToEndTest() {
   
   console.log('7. Testing MCP server discovery...');
   try {
-    const { discoverLocalMCPServers } = await import('@mcpilotx/sdk-core');
+    const { discoverLocalMCPServers } = await import('@mcpilotx/intentorch');
     const servers = await discoverLocalMCPServers();
     console.log(`✅ MCP servers discovered: ${servers.length} servers found\n`);
   } catch (error: any) {
@@ -112,7 +112,7 @@ async function endToEndTest() {
   console.log('10. Testing performance monitoring...');
   try {
     // Try to use PerformanceMonitor if available
-    const { PerformanceMonitor } = await import('@mcpilotx/sdk-core');
+    const { PerformanceMonitor } = await import('@mcpilotx/intentorch');
     const monitor = new PerformanceMonitor();
     console.log('✅ Performance monitor created\n');
     

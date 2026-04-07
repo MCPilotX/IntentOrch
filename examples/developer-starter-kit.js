@@ -334,7 +334,7 @@ async function runStarterKit() {
     console.log('\n🚀 Next Steps:');
     console.log('1. Check detailed documentation: package/README.md');
     console.log('2. Run specialized tests: quick-test.js, final-mvp-test.js');
-    console.log('3. Explore examples directory: ../sdk-core/examples/');
+    console.log('3. Explore examples directory: ../intentorch/examples/');
     console.log('4. Integrate real MCP servers');
     console.log('5. Build your first AI application');
     

@@ -94,7 +94,7 @@ async function fixAskMethodExample() {
     // ==================== 完整的工作示例 ====================
     console.log('\n🚀 完整的工作示例:');
     console.log('-'.repeat(40));
-    console.log('import { MCPilotSDK } from \'@mcpilotx/sdk-core\';');
+    console.log('import { MCPilotSDK } from \'@mcpilotx/intentorch\';');
     console.log('');
     console.log('async function analyzeReadme() {');
     console.log('  // 1. 创建SDK实例');

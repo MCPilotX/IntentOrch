@@ -1,5 +1,5 @@
 {
-  "name": "@mcpilotx/sdk-core",
+  "name": "@mcpilotx/intentorch",
   "version": "0.5.0",
   "description": "Core SDK for MCP service orchestration - Developer-focused, simple and elegant",
   "license": "Apache-2.0",
@@ -91,13 +91,13 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/MCPilotX/sdk-core.git",
-    "directory": "sdk-core"
+    "url": "git+https://github.com/MCPilotX/IntentOrch.git",
+    "directory": "IntentOrch"
   },
   "bugs": {
-    "url": "https://github.com/MCPilotX/sdk-core/issues"
+    "url": "https://github.com/MCPilotX/IntentOrch/issues"
   },
-  "homepage": "https://github.com/MCPilotX/sdk-core#readme",
+  "homepage": "https://github.com/MCPilotX/IntentOrch#readme",
   "files": [
     "LICENSE",
     "README.md",

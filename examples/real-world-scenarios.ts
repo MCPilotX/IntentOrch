@@ -3,7 +3,7 @@
  * These examples show practical applications of the SDK
  */
 
-import { createSDK, MCPilotSDK, EnhancedRuntimeDetector, ToolRegistry, discoverLocalMCPServers } from '@mcpilotx/sdk-core';
+import { createSDK, MCPilotSDK, EnhancedRuntimeDetector, ToolRegistry, discoverLocalMCPServers } from '@mcpilotx/intentorch';
 
 // ==================== Scenario 1: Project Setup Assistant ====================
 

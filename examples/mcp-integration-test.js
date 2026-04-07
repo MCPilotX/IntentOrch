@@ -1,6 +1,6 @@
 /**
  * MCP集成测试：DeepSeek + 意图引擎 + MCP服务器
- * 基于mcpilotx-sdk-core-0.5.0.tgz实现完整MVP流程
+ * 基于mcpilotx-intentorch-0.5.0.tgz实现完整MVP流程
  */
 
 import { CloudIntentEngine } from './package/dist/ai/cloud-intent-engine.js';
