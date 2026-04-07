@@ -1,4 +1,4 @@
-import { MCPilotSDK, mcpilot } from '../src/sdk';
+import { MCPilotSDK, IntentOrchSDK, mcpilot, intentorch } from '../src/sdk';
 import { EnhancedRuntimeDetector } from '../src/runtime/detector-advanced';
 import { ConfigManager } from '../src/core/config-manager';
 import { RuntimeAdapterRegistry } from '../src/runtime/adapter-advanced';
@@ -10,8 +10,8 @@ jest.mock('../src/core/config-manager');
 jest.mock('../src/runtime/adapter-advanced');
 jest.mock('../src/ai/ai');
 
-describe('MCPilotSDK (Simple Version)', () => {
-  let sdk: MCPilotSDK;
+describe('IntentOrchSDK (Simple Version, formerly MCPilotSDK)', () => {
+  let sdk: IntentOrchSDK;
   let mockLogger: any;
 
   beforeEach(() => {
@@ -97,16 +97,16 @@ describe('MCPilotSDK (Simple Version)', () => {
   describe('init()', () => {
     it('should initialize SDK successfully', () => {
       sdk.init();
-      expect(mockLogger.info).toHaveBeenCalledWith('MCPilot SDK initialized successfully');
+      expect(mockLogger.info).toHaveBeenCalledWith('IntentOrch SDK initialized successfully');
     });
 
     it('should not re-initialize if already initialized', () => {
       sdk.init();
       sdk.init(); // Second call should not re-initialize
-      // The first init logs: 'MCPilot SDK initialized successfully'
+      // The first init logs: 'IntentOrch SDK initialized successfully'
       // The registerRuntimeAdapters logs: 'Runtime adapter factories registered successfully'
       // So total should be 2, but the important thing is that ConfigManager.init is only called once
-      expect(mockLogger.info).toHaveBeenCalledWith('MCPilot SDK initialized successfully');
+      expect(mockLogger.info).toHaveBeenCalledWith('IntentOrch SDK initialized successfully');
       // ConfigManager.init should only be called once
       expect(ConfigManager.init).toHaveBeenCalledTimes(1);
     });
@@ -323,7 +323,7 @@ describe('MCPilotSDK (Simple Version)', () => {
       expect(sdk).toBeInstanceOf(MCPilotSDK);
       
       // Test init (already done in beforeEach)
-      expect(mockLogger.info).toHaveBeenCalledWith('MCPilot SDK initialized successfully');
+      expect(mockLogger.info).toHaveBeenCalledWith('IntentOrch SDK initialized successfully');
       
       // Test addService
       const serviceName = await sdk.addService({ name: 'test', path: '/path' });

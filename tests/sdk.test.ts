@@ -66,7 +66,7 @@ describe('IntentOrchSDK (formerly MCPilotSDK)', () => {
     });
 
     it('should create SDK instance with custom logger', () => {
-      expect(sdk).toBeInstanceOf(MCPilotSDK);
+      expect(sdk).toBeInstanceOf(IntentOrchSDK);
       expect(mockLogger.info).not.toHaveBeenCalled();
     });
 
