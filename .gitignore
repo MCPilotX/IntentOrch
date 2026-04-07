@@ -271,3 +271,6 @@ Session.vim
 \#*#
 
 # End of project-specific ignores
+
+# NPM documentation temporary directory
+.npm-docs-temp/
