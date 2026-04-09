@@ -100,6 +100,10 @@ export class DockerAdapter implements RuntimeAdapter {
         } catch (buildError) {
           throw new Error(`Failed to build Docker image: ${buildError.message}`);
         }
+      } else {
+        // Dockerfile specified but doesn't exist - just log a warning
+        console.warn(`[Docker] Dockerfile not found at ${dockerfilePath}, skipping build`);
+        // Continue without building - user may have pre-built image or will pull from registry
       }
     }
 

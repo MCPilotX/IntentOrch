@@ -230,6 +230,7 @@ export class ServiceManager {
       name: service.name,
       status: service.status,
       pid: service.pid,
+      port: service.port,
       runtime: service.runtime,
       installedAt: service.installedAt,
       startedAt: service.startedAt,

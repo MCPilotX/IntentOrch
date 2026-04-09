@@ -184,10 +184,8 @@ export class PreExecutionValidator {
       }
     }
 
-    // Validate enum values
-    if (paramSchema.enum !== undefined && !paramSchema.enum.includes(value)) {
-      warnings.push(`Parameter "${paramName}" value ${value} is not in allowed values: ${paramSchema.enum.join(', ')}`);
-    }
+    // Validate enum values - Note: enum validation is handled in validateTypeSpecific method
+    // This method only handles warnings, errors are handled elsewhere
   }
 
   /**
@@ -324,7 +322,8 @@ export class PreExecutionValidator {
           warnings.push(`Parameter "${paramName}" does not match pattern ${schema.pattern}`);
         }
         if (schema.enum && !schema.enum.includes(value)) {
-          warnings.push(`Parameter "${paramName}" value "${value}" is not in allowed values: ${schema.enum.join(', ')}`);
+          // Generate warning for invalid enum values (not an error)
+          warnings.push(`Parameter "${paramName}" value "${value}" is not valid. Allowed values: ${schema.enum.join(', ')}`);
         }
         break;
 

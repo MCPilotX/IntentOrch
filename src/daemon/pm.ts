@@ -146,24 +146,11 @@ export class ProcessManager extends EventEmitter {
     if (instance.status !== 'running') {await this.startService(name);}
     if (!instance.adapter) {throw new Error(`Adapter for ${name} not initialized.`);}
 
-    // Check if service has tools
-    if (!instance.tools || instance.tools.length === 0) {
-      throw new Error(`No tools available for service ${name}`);
-    }
-
-    // Find the tool by name
-    const tool = instance.tools.find((t: any) => t.name === method);
-    if (!tool) {
-      throw new Error(`Tool ${method} not found in service ${name}`);
-    }
-
-    // Check if tool has a handler
-    if (!tool.handler || typeof tool.handler !== 'function') {
-      throw new Error(`Tool ${method} does not have a handler`);
-    }
-
-    // Call the tool handler
-    return await tool.handler(params);
+    // Call the tool via MCP protocol
+    return await instance.adapter.call('tools/call', {
+      name: method,
+      arguments: params,
+    });
   }
 
   getStatuses() {

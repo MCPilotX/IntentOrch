@@ -196,9 +196,19 @@ export class ToolMappingManager {
    * Find mapping for intent action and target with fuzzy matching
    */
   findMapping(action: string, target: string): ToolMapping | undefined {
+    // Handle null/undefined inputs
+    if (action === null || action === undefined || target === null || target === undefined) {
+      return undefined;
+    }
+    
     // Normalize inputs
     const normalizedAction = action.toLowerCase().trim();
     const normalizedTarget = target.toLowerCase().trim();
+    
+    // Handle empty inputs - they shouldn't match anything
+    if (normalizedAction === '' || normalizedTarget === '') {
+      return undefined;
+    }
     
     // First check exact match in custom mappings
     for (const mapping of this.customMappings) {
@@ -214,33 +224,56 @@ export class ToolMappingManager {
       }
     }
 
-    // Try fuzzy matching for action
+    // Try fuzzy matching for action - only allow shorter strings to be contained in longer ones
+    // This prevents "list!@#" from matching "list" (we want "lst" to match "list", not vice versa)
     for (const mapping of this.customMappings) {
-      if (mapping.intentAction.includes(normalizedAction) || normalizedAction.includes(mapping.intentAction)) {
-        if (mapping.intentTarget.includes(normalizedTarget) || normalizedTarget.includes(mapping.intentTarget)) {
-          return mapping;
-        }
+      // Only match if normalizedAction is contained in mapping.intentAction (e.g., "lst" in "list")
+      // OR if mapping.intentAction is contained in normalizedAction AND they're similar length
+      const actionMatches = mapping.intentAction.includes(normalizedAction) || 
+        (normalizedAction.includes(mapping.intentAction) && 
+         Math.abs(normalizedAction.length - mapping.intentAction.length) <= 2);
+      
+      const targetMatches = mapping.intentTarget.includes(normalizedTarget) || 
+        (normalizedTarget.includes(mapping.intentTarget) && 
+         Math.abs(normalizedTarget.length - mapping.intentTarget.length) <= 2);
+      
+      if (actionMatches && targetMatches) {
+        return mapping;
       }
     }
 
     // Try fuzzy matching in default mappings
     for (const mapping of this.mappings) {
-      if (mapping.intentAction.includes(normalizedAction) || normalizedAction.includes(mapping.intentAction)) {
-        if (mapping.intentTarget.includes(normalizedTarget) || normalizedTarget.includes(mapping.intentTarget)) {
-          return mapping;
-        }
+      const actionMatches = mapping.intentAction.includes(normalizedAction) || 
+        (normalizedAction.includes(mapping.intentAction) && 
+         Math.abs(normalizedAction.length - mapping.intentAction.length) <= 2);
+      
+      const targetMatches = mapping.intentTarget.includes(normalizedTarget) || 
+        (normalizedTarget.includes(mapping.intentTarget) && 
+         Math.abs(normalizedTarget.length - mapping.intentTarget.length) <= 2);
+      
+      if (actionMatches && targetMatches) {
+        return mapping;
       }
     }
 
-    // Try to find by partial target match
+    // Try to find by partial target match - with length restriction
     for (const mapping of this.customMappings) {
-      if (mapping.intentTarget.includes(normalizedTarget) || normalizedTarget.includes(mapping.intentTarget)) {
+      const targetMatches = mapping.intentTarget.includes(normalizedTarget) || 
+        (normalizedTarget.includes(mapping.intentTarget) && 
+         Math.abs(normalizedTarget.length - mapping.intentTarget.length) <= 2);
+      
+      if (targetMatches) {
         return mapping;
       }
     }
 
     for (const mapping of this.mappings) {
-      if (mapping.intentTarget.includes(normalizedTarget) || normalizedTarget.includes(mapping.intentTarget)) {
+      const targetMatches = mapping.intentTarget.includes(normalizedTarget) || 
+        (normalizedTarget.includes(mapping.intentTarget) && 
+         Math.abs(normalizedTarget.length - mapping.intentTarget.length) <= 2);
+      
+      if (targetMatches) {
         return mapping;
       }
     }

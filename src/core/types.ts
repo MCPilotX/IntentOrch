@@ -110,6 +110,12 @@ export interface AIConfig {
   ollamaHost?: string;
   // Custom provider configuration
   customConfig?: Record<string, any>;
+  // Additional configuration options
+  enabled?: boolean;
+  useLocalEmbeddings?: boolean;
+  useVectorSearch?: boolean;
+  transformersTimeout?: number;
+  fallbackMode?: string;
 }
 
 export interface RegistryConfig {

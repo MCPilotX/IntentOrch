@@ -11,8 +11,8 @@ export type {
   SDKOptions,
   ServiceStatus,
   AskOptions,
-  AskResult,
 } from './sdk';
+export type { AskResult } from './ai';
 
 // Export type definitions
 export type {

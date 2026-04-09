@@ -7,9 +7,16 @@ import { exec } from 'child_process';
 import { promisify } from 'util';
 import { logger } from '../core/logger';
 
-const execAsync = promisify(exec);
+const defaultExecAsync = promisify(exec);
+
+export type ExecAsyncFunction = (command: string) => Promise<{ stdout: string; stderr: string }>;
 
 export class PythonAdapter implements RuntimeAdapter {
+  private execAsync: ExecAsyncFunction;
+
+  constructor(execAsync?: ExecAsyncFunction) {
+    this.execAsync = execAsync || defaultExecAsync;
+  }
   getSpawnArgs(config: ServiceConfig) {
     const venvPath = path.join(VENVS_DIR, config.name);
     const pythonPath = path.join(venvPath, 'bin', 'python');
@@ -37,7 +44,7 @@ export class PythonAdapter implements RuntimeAdapter {
         logger.info(`Creating Python virtual environment for ${config.name} at ${venvPath}`);
 
         // Create virtual environment
-        const { stdout, stderr } = await execAsync(`python3 -m venv "${venvPath}"`);
+        const { stdout, stderr } = await this.execAsync(`python3 -m venv "${venvPath}"`);
 
         if (stderr && !stderr.includes('created virtual environment')) {
           logger.warn(`Virtual environment creation warnings: ${stderr}`);
@@ -69,7 +76,7 @@ export class PythonAdapter implements RuntimeAdapter {
 
     try {
       // Check if pip is available
-      await execAsync(`${pipPath} --version`);
+      await this.execAsync(`${pipPath} --version`);
 
       const pythonConfig = config.runtimeConfig?.python;
       const deps = pythonConfig?.dependencies;
@@ -80,7 +87,7 @@ export class PythonAdapter implements RuntimeAdapter {
         // Install each dependency
         for (const dep of deps) {
           try {
-            const { stdout, stderr } = await execAsync(`${pipPath} install "${dep}"`);
+            const { stdout, stderr } = await this.execAsync(`${pipPath} install "${dep}"`);
             logger.info(`Installed dependency: ${dep}`);
 
             if (stderr && stderr.includes('WARNING')) {
@@ -99,7 +106,7 @@ export class PythonAdapter implements RuntimeAdapter {
 
         if (fs.existsSync(requirementsPath)) {
           logger.info(`Installing dependencies from requirements file: ${requirementsPath}`);
-          const { stdout, stderr } = await execAsync(`${pipPath} install -r "${requirementsPath}"`);
+          const { stdout, stderr } = await this.execAsync(`${pipPath} install -r "${requirementsPath}"`);
 
           if (stderr && stderr.includes('WARNING')) {
             logger.warn(`Requirements installation warnings: ${stderr}`);

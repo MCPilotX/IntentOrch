@@ -166,6 +166,7 @@ export class FallbackManager {
       condition: (error, toolCall, attemptCount) => {
         return error?.message?.includes('timeout') ||
                error?.message?.includes('timed out') ||
+               error?.message?.includes('Request timed out') ||
                (attemptCount < 2 && error?.message?.includes('network'));
       },
       action: async (toolCall, context) => {
@@ -173,6 +174,10 @@ export class FallbackManager {
         const newArgs = { ...toolCall.arguments };
         const currentTimeout = newArgs.timeout || newArgs.Timeout || 5000;
         newArgs.timeout = currentTimeout * 2; // Double the timeout
+        // Also update Timeout if it exists
+        if (newArgs.Timeout !== undefined) {
+          newArgs.Timeout = currentTimeout * 2;
+        }
 
         const newToolCall: ToolCall = {
           name: toolCall.name,
@@ -199,7 +204,7 @@ export class FallbackManager {
       description: 'Degrade complex operation to simpler one',
       priority: 4,
       condition: (error, toolCall, attemptCount) => {
-        return attemptCount >= 2 && this.options.enableDegradation;
+        return (attemptCount >= 2 || error?.message?.includes('Search failed') || error?.message?.includes('Analysis failed')) && this.options.enableDegradation;
       },
       action: async (toolCall, context) => {
         const degradedToolCall = this.degradeOperation(toolCall);
@@ -381,7 +386,7 @@ export class FallbackManager {
       if (!result.isError) {
         return result;
       }
-      lastError = result.content[0]?.text || 'Tool execution returned error';
+      lastError = new Error(result.content[0]?.text || 'Tool execution returned error');
       context.errors.push(lastError);
     } catch (error) {
       lastError = error;
@@ -408,7 +413,26 @@ export class FallbackManager {
               console.log(`Operation degraded: ${fallbackResult.message}`);
             }
             
-            return fallbackResult.result!;
+            // Update tool call if strategy modified it
+            if (fallbackResult.toolCall) {
+              currentToolCall = fallbackResult.toolCall;
+            }
+            
+            // Try execution with the new/modified tool call
+            try {
+              const result = await executeFn(currentToolCall);
+              if (!result.isError) {
+                return result;
+              }
+              lastError = new Error(result.content[0]?.text || 'Tool execution returned error');
+              context.errors.push(lastError);
+            } catch (error) {
+              lastError = error;
+              context.errors.push(error);
+            }
+            
+            context.attemptCount++;
+            continue; // Try next strategy
           } else {
             if (this.options.logFallbacks) {
               console.log(`Fallback strategy "${strategy.name}" failed: ${fallbackResult.message}`);
@@ -416,10 +440,11 @@ export class FallbackManager {
             lastError = fallbackResult.message;
             context.errors.push(fallbackResult.message);
             
-            // Update tool call if strategy modified it
-            if (fallbackResult.toolCall) {
-              currentToolCall = fallbackResult.toolCall;
-            }
+            // Only update tool call if strategy succeeded
+            // Don't update for failed strategies
+            
+            // Increment attempt count for failed strategy
+            context.attemptCount++;
           }
         } catch (error) {
           lastError = error;
@@ -469,19 +494,19 @@ ${suggestions}`;
     // Analyze errors for specific suggestions
     const errorText = errors.map(e => String(e)).join(' ').toLowerCase();
     
-    if (errorText.includes('not found') || errorText.includes('not available')) {
+    if (errorText.includes('not found') || errorText.includes('not available') || errorText.includes('cannot extract intent')) {
       suggestions.push('• Check if the tool is properly registered');
       suggestions.push('• Verify tool name spelling');
       suggestions.push('• Try alternative tool names');
     }
     
-    if (errorText.includes('parameter') || errorText.includes('argument')) {
+    if (errorText.includes('parameter') || errorText.includes('argument') || errorText.includes('validation')) {
       suggestions.push('• Check parameter names and types');
       suggestions.push('• Provide required parameters');
       suggestions.push('• Simplify complex parameters');
     }
     
-    if (errorText.includes('timeout') || errorText.includes('network')) {
+    if (errorText.includes('timeout') || errorText.includes('timed out') || errorText.includes('network')) {
       suggestions.push('• Check network connectivity');
       suggestions.push('• Increase timeout value');
       suggestions.push('• Try again later');

@@ -118,6 +118,15 @@ export class DaemonServer {
   // Test AI connection
   static async testAIConnection(orchestrator: Orchestrator): Promise<any> {
     try {
+      // Check if orchestrator exists and has getConfig method
+      if (!orchestrator || typeof orchestrator.getConfig !== 'function') {
+        return {
+          success: false,
+          error: 'AI configuration not set. Use "mcp ai use <provider>" to configure AI.',
+          data: null,
+        };
+      }
+
       const config = orchestrator.getConfig();
       const aiConfig = config.ai;
 
@@ -329,21 +338,34 @@ export class DaemonServer {
           },
         };
       } else {
-        const errorText = await response.text();
         let errorMessage = `API returned ${response.status}`;
+        let errorText = '';
+
+        try {
+          // Try to get error text if response.text exists
+          if (typeof response.text === 'function') {
+            errorText = await response.text();
+          } else if (response.statusText) {
+            errorText = response.statusText;
+          }
+        } catch (textError) {
+          // Ignore text extraction errors
+        }
 
         // Parse error message if possible
-        try {
-          const errorData = JSON.parse(errorText);
-          if (errorData.error?.message) {
-            errorMessage = errorData.error.message;
-          } else if (errorData.message) {
-            errorMessage = errorData.message;
-          }
-        } catch {
-          // If not JSON, use raw text
-          if (errorText && errorText.length < 200) {
-            errorMessage = `${errorMessage}: ${errorText}`;
+        if (errorText) {
+          try {
+            const errorData = JSON.parse(errorText);
+            if (errorData.error?.message) {
+              errorMessage = errorData.error.message;
+            } else if (errorData.message) {
+              errorMessage = errorData.message;
+            }
+          } catch {
+            // If not JSON, use raw text
+            if (errorText && errorText.length < 200) {
+              errorMessage = `${errorMessage}: ${errorText}`;
+            }
           }
         }
 

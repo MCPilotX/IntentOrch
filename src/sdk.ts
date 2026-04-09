@@ -160,12 +160,12 @@ export class IntentOrchSDK {
     try {
       const config = ConfigManager.getServiceConfig(name);
       if (!config) {
-        throw new Error(`Service '${name}' not found`);
+        throw new Error(`Service "${name}" not found`);
       }
 
       const runtime = config.runtime || config.detectedRuntime;
       if (!runtime) {
-        throw new Error(`Runtime type not specified for service '${name}'`);
+        throw new Error(`Runtime type not specified for service "${name}"`);
       }
 
       // Create runtime adapter and start service
@@ -188,12 +188,12 @@ export class IntentOrchSDK {
     try {
       const config = ConfigManager.getServiceConfig(name);
       if (!config) {
-        throw new Error(`Service '${name}' not found`);
+        throw new Error(`Service "${name}" not found`);
       }
 
       const runtime = config.runtime || config.detectedRuntime;
       if (!runtime) {
-        throw new Error(`Runtime type not specified for service '${name}'`);
+        throw new Error(`Runtime type not specified for service "${name}"`);
       }
 
       // Create runtime adapter and stop service
@@ -224,7 +224,7 @@ export class IntentOrchSDK {
     try {
       const config = ConfigManager.getServiceConfig(name);
       if (!config) {
-        throw new Error(`Service '${name}' not found`);
+        throw new Error(`Service "${name}" not found`);
       }
 
       const runtime = config.runtime || config.detectedRuntime;
@@ -245,7 +245,12 @@ export class IntentOrchSDK {
         pid: status.pid,
         uptime: status.uptime,
       };
-    } catch (error) {
+    } catch (error: any) {
+      // If the error is "Service not found", re-throw it
+      if (error.message && error.message.includes(`Service "${name}" not found`)) {
+        throw error;
+      }
+      
       this.logger.error(`Failed to get status for service '${name}': ${error}`);
       return {
         name,
@@ -320,10 +325,13 @@ export class IntentOrchSDK {
 
       // Also update the SDK configuration
       const currentConfig = this.getConfig();
+      const currentAiConfig = currentConfig.ai;
       const updatedConfig = {
         ...currentConfig,
         ai: {
-          ...currentConfig.ai,
+          provider: config.provider || currentAiConfig?.provider || 'none',
+          model: config.model || currentAiConfig?.model || '',
+          ...currentAiConfig,
           ...config,
         },
       };

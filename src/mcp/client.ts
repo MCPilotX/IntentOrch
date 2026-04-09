@@ -88,6 +88,10 @@ export class MCPClient extends EventEmitter {
 
     try {
       await this.transport.disconnect();
+    } catch (error) {
+      this.emitEvent('error', error);
+      throw error;
+    } finally {
       this.connected = false;
 
       // Clean up all pending requests
@@ -98,9 +102,6 @@ export class MCPClient extends EventEmitter {
       this.pendingRequests.clear();
 
       this.emitEvent('disconnected');
-    } catch (error) {
-      this.emitEvent('error', error);
-      throw error;
     }
   }
 
@@ -136,12 +137,10 @@ export class MCPClient extends EventEmitter {
       }
     }
     
-    const toolCall: ToolCall = {
+    const response = await this.sendRequest(MCP_METHODS.TOOLS_CALL, {
       name: toolName,
       arguments: mappedArguments,
-    };
-
-    const response = await this.sendRequest(MCP_METHODS.TOOLS_CALL, { call: toolCall });
+    });
 
     // Ensure response is a valid ToolResult
     const toolResult = response as ToolResult;
