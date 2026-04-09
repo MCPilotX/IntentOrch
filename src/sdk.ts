@@ -10,7 +10,7 @@ import { RuntimeAdapterRegistry } from './runtime/adapter-advanced';
 import { EnhancedRuntimeDetector } from './runtime/detector-advanced';
 
 // AI imports
-import { SimpleAI, AIError } from './ai/ai';
+import { AI, AIError, type AskResult } from './ai/ai';
 import { CloudIntentEngine, type CloudIntentEngineConfig } from './ai/cloud-intent-engine';
 
 // MCP related imports
@@ -61,16 +61,6 @@ export interface AskOptions {
   maxTokens?: number;
 }
 
-export interface AskResult {
-  answer: string;
-  toolCalls?: Array<{
-    service: string;
-    tool: string;
-    params: Record<string, any>;
-  }>;
-  confidence: number;
-}
-
 /**
  * IntentOrch SDK Core Class
  * Provides unified API interface, designed for developers
@@ -81,7 +71,7 @@ export class IntentOrchSDK {
   private logger: SDKOptions['logger'];
 
   // AI instance
-  private ai: SimpleAI;
+  private ai: AI;
 
   // Cloud Intent Engine
   private cloudIntentEngine?: CloudIntentEngine;
@@ -99,7 +89,7 @@ export class IntentOrchSDK {
     };
 
     // Initialize AI instance
-    this.ai = new SimpleAI();
+    this.ai = new AI();
 
     // Save MCP options
     this.mcpOptions = options.mcp;
@@ -294,32 +284,9 @@ export class IntentOrchSDK {
     this.ensureInitialized();
 
     try {
-      // Use SimpleAI instance to process query
+      // Use AI instance to process query
       // This will throw AIError if AI is not configured
-      const aiResult = await this.ai.ask(query);
-
-      // Convert SimpleAI result to SDK AskResult format
-      if (aiResult.type === 'tool_call' && aiResult.tool) {
-        return {
-          answer: `AI suggests using tool: ${aiResult.tool.tool} from service: ${aiResult.tool.service}`,
-          toolCalls: [{
-            service: aiResult.tool.service,
-            tool: aiResult.tool.tool,
-            params: aiResult.tool.params,
-          }],
-          confidence: aiResult.confidence || 0.5,
-        };
-      } else if (aiResult.type === 'suggestions') {
-        return {
-          answer: aiResult.message || 'AI feature not enabled or configured incorrectly',
-          confidence: 0.3,
-        };
-      } else {
-        return {
-          answer: 'AI processed your query but no specific action was suggested.',
-          confidence: aiResult.confidence || 0.5,
-        };
-      }
+      return await this.ai.ask(query);
     } catch (error) {
       // Re-throw AIError as is for clear error messages
       if (error instanceof AIError) {
@@ -338,8 +305,8 @@ export class IntentOrchSDK {
     this.ensureInitialized();
 
     try {
-      // Convert SDK AI config to SimpleAI config format
-      const simpleAIConfig = {
+      // Convert SDK AI config to AI config format
+      const aiConfig = {
         provider: (config.provider as 'openai' | 'anthropic' | 'google' | 'azure' | 'deepseek' | 'ollama' | 'none') || 'none',
         apiKey: config.apiKey,
         endpoint: config.apiEndpoint || config.ollamaHost,
@@ -348,8 +315,8 @@ export class IntentOrchSDK {
         region: config.region,
       };
 
-      // Configure the SimpleAI instance
-      await this.ai.configure(simpleAIConfig);
+      // Configure the AI instance
+      await this.ai.configure(aiConfig);
 
       // Also update the SDK configuration
       const currentConfig = this.getConfig();
@@ -381,7 +348,7 @@ export class IntentOrchSDK {
     this.ensureInitialized();
 
     try {
-      // Get status from SimpleAI instance
+      // Get status from AI instance
       const aiStatus = this.ai.getStatus();
 
       // Get current config for additional details
@@ -410,7 +377,7 @@ export class IntentOrchSDK {
     this.ensureInitialized();
 
     try {
-      // Test connection using SimpleAI instance
+      // Test connection using AI instance
       const result = await this.ai.testConnection();
       return result;
     } catch (error) {
@@ -744,7 +711,18 @@ export class IntentOrchSDK {
   /**
    * List all available tools
    */
-  listTools(): Array<{ name: string; description: string; serverName?: string }> {
+  listTools(): Array<{ 
+    name: string; 
+    description: string; 
+    serverName?: string;
+    serverId: string;
+    inputSchema?: {
+      type: 'object';
+      properties: Record<string, any>;
+      required?: string[];
+      additionalProperties?: boolean;
+    };
+  }> {
     this.ensureInitialized();
 
     const tools = this.toolRegistry.getAllTools();
@@ -753,6 +731,7 @@ export class IntentOrchSDK {
       description: tool.tool.description,
       serverName: tool.metadata.serverName,
       serverId: tool.metadata.serverId,
+      inputSchema: tool.tool.inputSchema,
     }));
   }
 
@@ -768,13 +747,13 @@ export class IntentOrchSDK {
     };
 
     const result = await this.toolRegistry.executeTool(toolCall);
-    
+
     // If the tool execution resulted in an error, throw an exception
     if (result.isError) {
       const errorText = result.content.find(c => c.type === 'text')?.text || `Tool "${toolName}" execution failed`;
       throw new Error(errorText);
     }
-    
+
     return result;
   }
 
@@ -832,7 +811,7 @@ export class IntentOrchSDK {
     try {
       // Use provided config or create from SDK config
       const engineConfig = config || this.createCloudIntentEngineConfig();
-      
+
       this.cloudIntentEngine = new CloudIntentEngine(engineConfig);
       await this.cloudIntentEngine.initialize();
 
@@ -913,10 +892,10 @@ export class IntentOrchSDK {
     try {
       // 1. Parse intent
       const intentResult = await this.cloudIntentEngine.parseIntent(query);
-      
+
       // 2. Select tools
       const toolSelections = await this.cloudIntentEngine.selectTools(intentResult.intents);
-      
+
       // 3. Execute workflow
       const executionResult = await this.cloudIntentEngine.executeWorkflow(
         intentResult.intents,
@@ -924,7 +903,7 @@ export class IntentOrchSDK {
         intentResult.edges,
         async (toolName: string, params: Record<string, any>) => {
           return await this.executeTool(toolName, params);
-        }
+        },
       );
 
       return {
@@ -981,7 +960,7 @@ export class IntentOrchSDK {
 
     try {
       const plan = await this.cloudIntentEngine.parseAndPlan(query);
-      
+
       return {
         success: true,
         plan,
@@ -1033,7 +1012,7 @@ export class IntentOrchSDK {
         startedAt?: Date;
         completedAt?: Date;
       }) => void;
-    }
+    },
   ): Promise<{
     success: boolean;
     result?: any;
@@ -1090,10 +1069,10 @@ export class IntentOrchSDK {
     try {
       // Parse intent
       const intentResult = await this.cloudIntentEngine.parseIntent(query);
-      
+
       // Select tools
       const toolSelections = await this.cloudIntentEngine.selectTools(intentResult.intents);
-      
+
       // Execute with enhanced tracking
       const enhancedResult = await this.cloudIntentEngine.executeWorkflowWithTracking(
         intentResult.intents,
@@ -1102,7 +1081,7 @@ export class IntentOrchSDK {
         async (toolName: string, params: Record<string, any>) => {
           return await this.executeTool(toolName, params);
         },
-        callbacks
+        callbacks,
       );
 
       return {
@@ -1162,7 +1141,7 @@ export class IntentOrchSDK {
 
     try {
       const plan = await this.cloudIntentEngine.previewPlan(query);
-      
+
       return {
         success: true,
         plan,
@@ -1236,7 +1215,7 @@ export class IntentOrchSDK {
         startedAt?: Date;
         completedAt?: Date;
       }) => void;
-    }
+    },
   ): Promise<{
     success: boolean;
     result?: any;
@@ -1279,7 +1258,7 @@ export class IntentOrchSDK {
         async (toolName: string, params: Record<string, any>) => {
           return await this.executeTool(toolName, params);
         },
-        callbacks
+        callbacks,
       );
 
       return {
@@ -1305,7 +1284,7 @@ export class IntentOrchSDK {
     toolsCount: number;
     llmProvider: string;
     llmConfigured: boolean;
-  } {
+    } {
     this.ensureInitialized();
 
     if (!this.cloudIntentEngine) {
@@ -1332,7 +1311,7 @@ export class IntentOrchSDK {
 
     const tools = this.toolRegistry.getAllTools().map(t => t.tool);
     this.cloudIntentEngine.setAvailableTools(tools);
-    
+
     this.logger.info(`Updated Cloud Intent Engine with ${tools.length} tools`);
   }
 }

@@ -31,7 +31,7 @@ export { EnhancedRuntimeDetector } from './runtime/detector-advanced';
 export { ConfigManager } from './core/config-manager';
 
 // Export AI functionality (optional)
-export { SimpleAI } from './ai/ai';
+export { AI } from './ai/ai';
 
 // Export Cloud Intent Engine functionality
 export {

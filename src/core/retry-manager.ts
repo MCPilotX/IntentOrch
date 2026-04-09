@@ -35,8 +35,10 @@ export class RetryManager {
 
     let lastError: Error | undefined;
     const startTime = Date.now();
+    let actualAttempts = 0;
 
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      actualAttempts++;
       try {
         if (attempt > 0) {
           const delay = this.calculateDelay(attempt, initialDelay, maxDelay, backoffFactor, jitter);
@@ -53,24 +55,26 @@ export class RetryManager {
         return {
           success: true,
           result,
-          attempts: attempt + 1,
+          attempts: actualAttempts,
           totalTime: Date.now() - startTime,
         };
 
       } catch (error: any) {
-        lastError = error;
+        // Ensure error is an Error object
+        const errorObj = error instanceof Error ? error : new Error(String(error));
+        lastError = errorObj;
 
         // Check if it's a non-retryable error
-        if (this.isNonRetryableError(error, nonRetryableErrors)) {
-          logger.warn(`Non-retryable error encountered: ${error.message}`);
+        if (this.isNonRetryableError(errorObj, nonRetryableErrors)) {
+          logger.warn(`Non-retryable error encountered: ${errorObj.message}`);
           break;
         }
 
         // Check if it's a retryable error
         const shouldRetry = attempt < maxRetries &&
-          (retryableErrors.length === 0 || this.isRetryableError(error, retryableErrors));
+          (retryableErrors.length === 0 || this.isRetryableError(errorObj, retryableErrors));
 
-        logger.warn(`Attempt ${attempt + 1} failed: ${error.message}`);
+        logger.warn(`Attempt ${attempt + 1} failed: ${errorObj.message}`);
 
         if (shouldRetry) {
           const nextDelay = this.calculateDelay(attempt + 1, initialDelay, maxDelay, backoffFactor, jitter);
@@ -84,7 +88,7 @@ export class RetryManager {
     return {
       success: false,
       error: lastError || new Error('Operation failed'),
-      attempts: maxRetries + 1,
+      attempts: actualAttempts,
       totalTime: Date.now() - startTime,
     };
   }
@@ -230,13 +234,13 @@ export class RetryManager {
       }
 
       if (state === 'half-open') {
-        if (halfOpenAttempts >= halfOpenMaxAttempts) {
+        halfOpenAttempts++;
+        if (halfOpenAttempts > halfOpenMaxAttempts) {
           // Too many attempts in half-open state, reopen
           state = 'open';
           lastFailureTime = now;
           throw new Error('Circuit breaker re-opened - service still unavailable');
         }
-        halfOpenAttempts++;
       }
 
       try {
@@ -251,12 +255,21 @@ export class RetryManager {
           failureCount = 0;
           halfOpenAttempts = 0;
         } else {
-          // Operation failed, update failure count
+          // Operation failed
           failureCount++;
-          lastFailureTime = now;
 
-          if (failureCount >= failureThreshold) {
+          if (state === 'half-open') {
+            // Check if we've exceeded half-open max attempts
+            if (halfOpenAttempts >= halfOpenMaxAttempts) {
+              state = 'open';
+              lastFailureTime = now;
+              logger.error('Circuit breaker re-opened - service still unavailable');
+              throw new Error('Circuit breaker re-opened - service still unavailable');
+            }
+          } else if (failureCount >= failureThreshold && state === 'closed') {
+            // Only set lastFailureTime when circuit first opens
             state = 'open';
+            lastFailureTime = now;
             logger.error(`Circuit breaker opened after ${failureCount} failures`);
           }
         }
@@ -265,10 +278,19 @@ export class RetryManager {
       } catch (error: any) {
         // Update failure count
         failureCount++;
-        lastFailureTime = now;
 
-        if (failureCount >= failureThreshold) {
+        if (state === 'half-open') {
+          // Check if we've exceeded half-open max attempts
+          if (halfOpenAttempts >= halfOpenMaxAttempts) {
+            state = 'open';
+            lastFailureTime = now;
+            logger.error('Circuit breaker re-opened - service still unavailable');
+            throw new Error('Circuit breaker re-opened - service still unavailable');
+          }
+        } else if (failureCount >= failureThreshold && state === 'closed') {
+          // Only set lastFailureTime when circuit first opens
           state = 'open';
+          lastFailureTime = now;
           logger.error(`Circuit breaker opened after ${failureCount} failures`);
         }
 

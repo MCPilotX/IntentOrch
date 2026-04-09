@@ -1,7 +1,7 @@
 /**
  * Cloud LLM Intent Engine
  * Cloud LLM-based intent parsing and MCP capability auto-mapping engine
- * 
+ *
  * Core capabilities:
  * 1. Decompose natural language instructions into atomic intents (with parameters)
  * 2. Infer dependencies between atomic intents (generate DAG)
@@ -11,7 +11,7 @@
  */
 
 import { logger } from '../core/logger';
-import { SimpleAI, AIError, type SimpleAIConfig } from './ai';
+import { AI, AIError, type AIConfig } from './ai';
 import type { Tool } from '../mcp/types';
 
 // ==================== Type Definitions ====================
@@ -102,17 +102,17 @@ export interface WorkflowPlan {
 export interface EnhancedExecutionResult {
   success: boolean;
   finalResult?: any;
-  
+
   // Parsing phase information
   parsedIntents: AtomicIntent[];
   dependencies: DependencyEdge[];
-  
+
   // Tool selection information
   toolSelections: ToolSelectionResult[];
-  
+
   // Execution results
   executionSteps: EnhancedExecutionStep[];
-  
+
   // Statistics
   statistics: {
     totalSteps: number;
@@ -146,7 +146,7 @@ export interface ExecutionResult {
 
 export interface CloudIntentEngineConfig {
   llm: {
-    provider: SimpleAIConfig['provider'];
+    provider: AIConfig['provider'];
     apiKey?: string;
     endpoint?: string;
     model?: string;
@@ -171,7 +171,7 @@ export interface CloudIntentEngineConfig {
 // ==================== Main Engine Class ====================
 
 export class CloudIntentEngine {
-  private ai: SimpleAI;
+  private ai: AI;
   private config: CloudIntentEngineConfig;
   private availableTools: Tool[] = [];
   private toolCache: Map<string, Tool> = new Map();
@@ -201,7 +201,7 @@ export class CloudIntentEngine {
       },
     };
 
-    this.ai = new SimpleAI();
+    this.ai = new AI();
   }
 
   /**
@@ -230,12 +230,12 @@ export class CloudIntentEngine {
   setAvailableTools(tools: Tool[]): void {
     this.availableTools = tools;
     this.toolCache.clear();
-    
+
     // Build tool cache
     tools.forEach(tool => {
       this.toolCache.set(tool.name, tool);
     });
-    
+
     logger.info(`[CloudIntentEngine] Set ${tools.length} available tools`);
   }
 
@@ -248,7 +248,7 @@ export class CloudIntentEngine {
     try {
       // Build prompt
       const prompt = this.buildIntentParsePrompt(query);
-      
+
       // Call LLM to parse intent
       const llmResponse = await this.callLLM(prompt, {
         temperature: 0.1,
@@ -257,13 +257,13 @@ export class CloudIntentEngine {
 
       // Parse LLM response
       const parsedResult = this.parseIntentResponse(llmResponse);
-      
+
       logger.info(`[CloudIntentEngine] Parsed ${parsedResult.intents.length} intents with ${parsedResult.edges.length} dependencies`);
-      
+
       return parsedResult;
     } catch (error) {
       logger.error(`[CloudIntentEngine] Intent parsing failed: ${error}`);
-      
+
       // Fallback: use simple rule-based parsing
       return this.fallbackIntentParse(query);
     }
@@ -276,7 +276,7 @@ export class CloudIntentEngine {
     logger.info(`[CloudIntentEngine] Selecting tools for ${intents.length} intents`);
 
     const results: ToolSelectionResult[] = [];
-    
+
     // Process intents in parallel (limited by concurrency)
     const batchSize = this.config.execution.maxConcurrentTools || 3;
     for (let i = 0; i < intents.length; i += batchSize) {
@@ -300,7 +300,7 @@ export class CloudIntentEngine {
     intents: AtomicIntent[],
     toolSelections: ToolSelectionResult[],
     edges: DependencyEdge[],
-    toolExecutor: (toolName: string, params: Record<string, any>) => Promise<any>
+    toolExecutor: (toolName: string, params: Record<string, any>) => Promise<any>,
   ): Promise<ExecutionResult> {
     logger.info(`[CloudIntentEngine] Executing workflow with ${intents.length} steps`);
 
@@ -310,13 +310,13 @@ export class CloudIntentEngine {
     };
 
     const stepResults: ExecutionResult['stepResults'] = [];
-    
+
     // Build dependency graph
     const dependencyGraph = this.buildDependencyGraph(intents, edges);
-    
+
     // Topological sort
     const executionOrder = this.topologicalSort(dependencyGraph);
-    
+
     if (!executionOrder) {
       return {
         success: false,
@@ -329,7 +329,7 @@ export class CloudIntentEngine {
     for (const intentId of executionOrder) {
       const intent = intents.find(i => i.id === intentId);
       const toolSelection = toolSelections.find(s => s.intentId === intentId);
-      
+
       if (!intent || !toolSelection) {
         stepResults.push({
           intentId,
@@ -344,15 +344,15 @@ export class CloudIntentEngine {
         // Prepare parameters (support variable substitution)
         const resolvedParams = this.resolveParameters(
           toolSelection.mappedParameters,
-          context
+          context,
         );
 
         // Execute tool
         const result = await toolExecutor(toolSelection.toolName, resolvedParams);
-        
+
         // Save result to context
         context.results.set(intentId, result);
-        
+
         stepResults.push({
           intentId,
           toolName: toolSelection.toolName,
@@ -397,18 +397,18 @@ export class CloudIntentEngine {
     logger.info(`[CloudIntentEngine] Parsing and planning workflow: "${query}"`);
 
     const startTime = Date.now();
-    
+
     try {
       // Parse intent
       const intentResult = await this.parseIntent(query);
-      
+
       // Select tools
       const toolSelections = await this.selectTools(intentResult.intents);
-      
+
       // Build dependency graph and get execution order
       const dependencyGraph = this.buildDependencyGraph(intentResult.intents, intentResult.edges);
       const executionOrder = this.topologicalSort(dependencyGraph);
-      
+
       if (!executionOrder) {
         throw new Error('Circular dependency detected in workflow');
       }
@@ -445,7 +445,7 @@ export class CloudIntentEngine {
       onStepStarted?: (step: { intentId: string; toolName: string; intentDescription: string }) => void;
       onStepCompleted?: (step: EnhancedExecutionStep) => void;
       onStepFailed?: (step: EnhancedExecutionStep) => void;
-    }
+    },
   ): Promise<EnhancedExecutionResult> {
     logger.info(`[CloudIntentEngine] Executing workflow with enhanced tracking for ${intents.length} steps`);
 
@@ -456,13 +456,13 @@ export class CloudIntentEngine {
     };
 
     const executionSteps: EnhancedExecutionStep[] = [];
-    
+
     // Build dependency graph
     const dependencyGraph = this.buildDependencyGraph(intents, edges);
-    
+
     // Topological sort
     const executionOrder = this.topologicalSort(dependencyGraph);
-    
+
     if (!executionOrder) {
       return {
         success: false,
@@ -490,7 +490,7 @@ export class CloudIntentEngine {
     for (const intentId of executionOrder) {
       const intent = intents.find(i => i.id === intentId);
       const toolSelection = toolSelections.find(s => s.intentId === intentId);
-      
+
       if (!intent || !toolSelection) {
         const errorStep: EnhancedExecutionStep = {
           intentId,
@@ -507,7 +507,7 @@ export class CloudIntentEngine {
           completedAt: new Date(),
           duration: 0,
         };
-        
+
         executionSteps.push(errorStep);
         failedSteps++;
         continue;
@@ -515,7 +515,7 @@ export class CloudIntentEngine {
 
       const stepStartTime = Date.now();
       const stepStartedAt = new Date();
-      
+
       // Notify step started
       if (callbacks?.onStepStarted) {
         callbacks.onStepStarted({
@@ -529,18 +529,18 @@ export class CloudIntentEngine {
         // Prepare parameters (support variable substitution)
         const resolvedParams = this.resolveParameters(
           toolSelection.mappedParameters,
-          context
+          context,
         );
 
         // Execute tool
         const result = await toolExecutor(toolSelection.toolName, resolvedParams);
-        
+
         // Save result to context
         context.results.set(intentId, result);
-        
+
         const stepDuration = Date.now() - stepStartTime;
         totalStepDuration += stepDuration;
-        
+
         const successStep: EnhancedExecutionStep = {
           intentId,
           intentDescription: intent.description,
@@ -556,7 +556,7 @@ export class CloudIntentEngine {
           completedAt: new Date(),
           duration: stepDuration,
         };
-        
+
         executionSteps.push(successStep);
         successfulSteps++;
 
@@ -570,7 +570,7 @@ export class CloudIntentEngine {
         const errorMessage = error instanceof Error ? error.message : String(error);
         const stepDuration = Date.now() - stepStartTime;
         totalStepDuration += stepDuration;
-        
+
         const failedStep: EnhancedExecutionStep = {
           intentId,
           intentDescription: intent.description,
@@ -586,7 +586,7 @@ export class CloudIntentEngine {
           completedAt: new Date(),
           duration: stepDuration,
         };
-        
+
         executionSteps.push(failedStep);
         failedSteps++;
 
@@ -646,7 +646,7 @@ export class CloudIntentEngine {
       onStepStarted?: (step: { intentId: string; toolName: string; intentDescription: string }) => void;
       onStepCompleted?: (step: EnhancedExecutionStep) => void;
       onStepFailed?: (step: EnhancedExecutionStep) => void;
-    }
+    },
   ): Promise<EnhancedExecutionResult> {
     logger.info(`[CloudIntentEngine] Confirming and executing workflow plan with ${plan.estimatedSteps} steps`);
 
@@ -655,7 +655,7 @@ export class CloudIntentEngine {
       plan.toolSelections,
       plan.dependencies,
       toolExecutor,
-      callbacks
+      callbacks,
     );
   }
 
@@ -710,7 +710,7 @@ Output only JSON, no other content.`;
     maxTokens?: number;
   }): Promise<string> {
     try {
-      // Use SimpleAI's raw API call
+      // Use AI's raw API call
       const response = await this.ai.callRawAPI({
         messages: [
           {
@@ -729,7 +729,7 @@ Output only JSON, no other content.`;
 
       // Extract text content from response based on provider
       let text = '';
-      
+
       if (response.choices && response.choices[0]?.message?.content) {
         // OpenAI, Azure, DeepSeek format
         text = response.choices[0].message.content;
@@ -770,7 +770,7 @@ Output only JSON, no other content.`;
       }
 
       const parsed = JSON.parse(jsonMatch[0]);
-      
+
       // Validate structure
       if (!Array.isArray(parsed.intents) || !Array.isArray(parsed.edges)) {
         throw new Error('Invalid response structure');
@@ -794,10 +794,12 @@ Output only JSON, no other content.`;
     const intents: AtomicIntent[] = [];
     const edges: DependencyEdge[] = [];
 
+    let intentCounter = 1;
+
     // Simple rule matching
     if (queryLower.includes('open') && queryLower.includes('web')) {
       intents.push({
-        id: 'A1',
+        id: `A${intentCounter++}`,
         type: 'open_web',
         description: 'Open webpage',
         parameters: { url: this.extractUrl(query) || 'https://www.example.com' },
@@ -806,12 +808,12 @@ Output only JSON, no other content.`;
 
     if (queryLower.includes('search')) {
       intents.push({
-        id: 'A2',
+        id: `A${intentCounter++}`,
         type: 'search',
         description: 'Search content',
         parameters: { keyword: this.extractKeyword(query) || 'default' },
       });
-      
+
       // Add dependency if there's an open web intent
       if (intents.some(i => i.type === 'open_web')) {
         edges.push({ from: 'A1', to: 'A2' });
@@ -820,15 +822,19 @@ Output only JSON, no other content.`;
 
     if (queryLower.includes('screenshot') || queryLower.includes('capture')) {
       intents.push({
-        id: 'A3',
+        id: `A${intentCounter++}`,
         type: 'screenshot',
         description: 'Take screenshot',
         parameters: {},
       });
-      
+
       // Add dependency if there's a search intent
       if (intents.some(i => i.type === 'search')) {
-        edges.push({ from: 'A2', to: 'A3' });
+        const searchIntent = intents.find(i => i.type === 'search');
+        const screenshotIntent = intents.find(i => i.type === 'screenshot');
+        if (searchIntent && screenshotIntent) {
+          edges.push({ from: searchIntent.id, to: screenshotIntent.id });
+        }
       }
     }
 
@@ -863,7 +869,7 @@ Output only JSON, no other content.`;
     try {
       // Build tool selection prompt
       const prompt = this.buildToolSelectionPrompt(intent);
-      
+
       // Call LLM to select tool
       const llmResponse = await this.callLLM(prompt, {
         temperature: 0.1,
@@ -872,11 +878,11 @@ Output only JSON, no other content.`;
 
       // Parse tool selection result
       const selection = this.parseToolSelectionResponse(llmResponse, intent);
-      
+
       return selection;
     } catch (error) {
       logger.error(`[CloudIntentEngine] Tool selection for intent ${intent.id} failed: ${error}`);
-      
+
       // Fallback: use keyword matching
       return this.fallbackToolSelection(intent);
     }
@@ -924,7 +930,7 @@ Output only JSON, no other content.`;
       }
 
       const parsed = JSON.parse(jsonMatch[0]);
-      
+
       // Validate structure
       if (!parsed.tool_name || !parsed.arguments || typeof parsed.confidence !== 'number') {
         throw new Error('Invalid tool selection response structure');
@@ -932,7 +938,7 @@ Output only JSON, no other content.`;
 
       // Get tool details from cache
       const tool = this.toolCache.get(parsed.tool_name);
-      
+
       return {
         intentId: intent.id,
         toolName: parsed.tool_name,
@@ -956,17 +962,17 @@ Output only JSON, no other content.`;
 
     for (const tool of this.availableTools) {
       let score = 0;
-      
+
       // Check tool name
       if (tool.name.toLowerCase().includes(intent.type.toLowerCase())) {
         score += 3;
       }
-      
+
       // Check tool description
       if (tool.description.toLowerCase().includes(intent.type.toLowerCase())) {
         score += 2;
       }
-      
+
       // Check for keyword matches
       const keywords = ['open', 'search', 'read', 'write', 'create', 'delete', 'list', 'get'];
       for (const keyword of keywords) {
@@ -974,7 +980,7 @@ Output only JSON, no other content.`;
           score += 1;
         }
       }
-      
+
       if (score > 0 && (!bestMatch || score > bestMatch.score)) {
         bestMatch = { tool, score };
       }
@@ -1021,7 +1027,7 @@ Output only JSON, no other content.`;
   private simpleParameterMapping(intentParams: Record<string, any>, tool: Tool): Record<string, any> {
     const mapped: Record<string, any> = {};
     const schema = tool.inputSchema;
-    
+
     // Common parameter name mappings (intent param -> tool param)
     // Also include reverse mappings for better coverage
     const commonMappings: Record<string, string[]> = {
@@ -1032,7 +1038,7 @@ Output only JSON, no other content.`;
       'content': ['content', 'text', 'data', 'body'],
       'file': ['path', 'filename', 'filepath', 'name'],
       'name': ['name', 'path', 'filename', 'filepath', 'directory'],
-      
+
       // Git operations
       'repo': ['repository', 'repo', 'repo_path', 'path'],
       'repository': ['repo', 'repository', 'path'],
@@ -1040,14 +1046,14 @@ Output only JSON, no other content.`;
       'target': ['branch', 'ref', 'target'],
       'message': ['message', 'commit_message', 'msg'],
       'commit_message': ['message', 'commit_message', 'msg'],
-      
+
       // Shell operations
       'command': ['command', 'cmd', 'shell_command'],
       'cmd': ['command', 'cmd', 'shell_command'],
       'args': ['args', 'arguments', 'parameters'],
       'arguments': ['args', 'arguments', 'parameters'],
       'parameters': ['args', 'arguments', 'parameters'],
-      
+
       // Web operations
       'url': ['url', 'uri', 'link', 'address'],
       'uri': ['url', 'uri', 'link', 'address'],
@@ -1059,18 +1065,18 @@ Output only JSON, no other content.`;
       'data': ['body', 'data', 'content', 'payload'],
       'payload': ['body', 'data', 'content', 'payload'],
     };
-    
+
     // Also build a reverse lookup for tool parameter names
     const toolParamNames = Object.keys(schema.properties);
     const toolParamLookup = new Set(toolParamNames);
-    
+
     // Try to map based on parameter names
     for (const [paramName, paramValue] of Object.entries(intentParams)) {
       let mappedParamName: string | undefined;
-      
+
       // 1. Direct match (case-insensitive)
-      const directMatch = toolParamNames.find(toolParam => 
-        toolParam.toLowerCase() === paramName.toLowerCase()
+      const directMatch = toolParamNames.find(toolParam =>
+        toolParam.toLowerCase() === paramName.toLowerCase(),
       );
       if (directMatch) {
         mappedParamName = directMatch;
@@ -1093,14 +1099,14 @@ Output only JSON, no other content.`;
             break;
           }
         }
-        
+
         // If still not found, try fuzzy matching
         if (!mappedParamName) {
           const similarParam = toolParamNames.find(toolParam => {
             // Remove underscores and normalize
             const normalizedToolParam = toolParam.toLowerCase().replace(/_/g, '');
             const normalizedIntentParam = paramName.toLowerCase().replace(/_/g, '');
-            
+
             // Check for various similarity patterns
             return (
               // Exact match after normalization
@@ -1120,13 +1126,13 @@ Output only JSON, no other content.`;
               paramName.toLowerCase().startsWith(toolParam.toLowerCase())
             );
           });
-          
+
           if (similarParam) {
             mappedParamName = similarParam;
           }
         }
       }
-      
+
       // 4. If still not found, check if we can use the parameter anyway
       // (if additionalProperties is true or not specified)
       if (!mappedParamName) {
@@ -1139,13 +1145,13 @@ Output only JSON, no other content.`;
           continue;
         }
       }
-      
+
       // Map the parameter
       if (mappedParamName) {
         mapped[mappedParamName] = paramValue;
       }
     }
-    
+
     return mapped;
   }
 
@@ -1169,14 +1175,14 @@ Output only JSON, no other content.`;
       /find\s+["']?([^"'\s]+)["']?/i,
       /look\s+for\s+["']?([^"'\s]+)["']?/i,
     ];
-    
+
     for (const pattern of patterns) {
       const match = query.match(pattern);
       if (match && match[1]) {
         return match[1];
       }
     }
-    
+
     return null;
   }
 
@@ -1185,12 +1191,12 @@ Output only JSON, no other content.`;
    */
   private buildDependencyGraph(intents: AtomicIntent[], edges: DependencyEdge[]): Map<string, Set<string>> {
     const graph = new Map<string, Set<string>>();
-    
+
     // Initialize graph with all intents
     intents.forEach(intent => {
       graph.set(intent.id, new Set());
     });
-    
+
     // Add edges
     edges.forEach(edge => {
       const dependencies = graph.get(edge.to);
@@ -1198,7 +1204,7 @@ Output only JSON, no other content.`;
         dependencies.add(edge.from);
       }
     });
-    
+
     return graph;
   }
 
@@ -1209,7 +1215,7 @@ Output only JSON, no other content.`;
     const sorted: string[] = [];
     const indegree = new Map<string, number>();
     const queue: string[] = [];
-    
+
     // Calculate indegree for each node
     graph.forEach((dependencies, node) => {
       indegree.set(node, dependencies.size);
@@ -1217,30 +1223,30 @@ Output only JSON, no other content.`;
         queue.push(node);
       }
     });
-    
+
     // Process nodes with zero indegree
     while (queue.length > 0) {
       const node = queue.shift()!;
       sorted.push(node);
-      
+
       // Decrease indegree of neighbors
       graph.forEach((dependencies, neighbor) => {
         if (dependencies.has(node)) {
           const newIndegree = (indegree.get(neighbor) || 0) - 1;
           indegree.set(neighbor, newIndegree);
-          
+
           if (newIndegree === 0) {
             queue.push(neighbor);
           }
         }
       });
     }
-    
+
     // Check for cycles
     if (sorted.length !== graph.size) {
       return null; // Cycle detected
     }
-    
+
     return sorted;
   }
 
@@ -1249,10 +1255,10 @@ Output only JSON, no other content.`;
    */
   private resolveParameters(
     parameters: Record<string, any>,
-    context: ExecutionContext
+    context: ExecutionContext,
   ): Record<string, any> {
     const resolved: Record<string, any> = {};
-    
+
     for (const [key, value] of Object.entries(parameters)) {
       if (typeof value === 'string') {
         // Simple variable substitution: {{intentId.result}}
@@ -1272,8 +1278,15 @@ Output only JSON, no other content.`;
         resolved[key] = value;
       }
     }
-    
+
     return resolved;
+  }
+
+  /**
+   * Get available tools
+   */
+  getAvailableTools(): any[] {
+    return [...this.availableTools];
   }
 
   /**
@@ -1284,7 +1297,7 @@ Output only JSON, no other content.`;
     toolsCount: number;
     llmProvider: string;
     llmConfigured: boolean;
-  } {
+    } {
     return {
       initialized: this.ai.getStatus().enabled,
       toolsCount: this.availableTools.length,

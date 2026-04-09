@@ -1,8 +1,24 @@
+/**
+ * Simple Intent Engine for testing purposes
+ * This is a mock implementation for testing
+ */
+
+export interface Tool {
+  name: string;
+  description: string;
+  capabilities: string[];
+}
+
+export interface IntentResult {
+  tool: string;
+  action: string;
+  params: Record<string, any>;
+}
+
 export class IntentEngine {
-  private availableTools: any[] = [];
+  private availableTools: Tool[];
 
   constructor() {
-    // For now, we'll have a simple hardcoded list of tools
     this.availableTools = [
       {
         name: 'filesystem',
@@ -17,28 +33,30 @@ export class IntentEngine {
     ];
   }
 
-  async parse(query: string) {
-    // Simple keyword matching for now
-    // In a real implementation, this would use vector search and LLM
-
-    const queryLower = query.toLowerCase();
-
-    if (queryLower.includes('file') || queryLower.includes('directory') || queryLower.includes('list')) {
+  async parse(query: string): Promise<IntentResult> {
+    const lowerQuery = query.toLowerCase();
+    
+    // Check for filesystem queries
+    if (lowerQuery.includes('list') && lowerQuery.includes('file')) {
       return {
         tool: 'filesystem',
         action: 'list_directory',
         params: { path: '.' },
       };
     }
-
-    if (queryLower.includes('calculate') || queryLower.includes('math') || queryLower.includes('add') || queryLower.includes('subtract')) {
+    
+    // Check for calculator queries
+    if (lowerQuery.includes('calculate') || 
+        lowerQuery.includes('add') || 
+        lowerQuery.includes('subtract') ||
+        lowerQuery.includes('math')) {
       return {
         tool: 'calculator',
         action: 'calculate',
         params: { expression: query },
       };
     }
-
+    
     // Default fallback
     return {
       tool: 'filesystem',
@@ -47,11 +65,11 @@ export class IntentEngine {
     };
   }
 
-  addTool(tool: any) {
+  addTool(tool: Tool): void {
     this.availableTools.push(tool);
   }
 
-  getTools() {
-    return this.availableTools;
+  getTools(): Tool[] {
+    return [...this.availableTools];
   }
 }

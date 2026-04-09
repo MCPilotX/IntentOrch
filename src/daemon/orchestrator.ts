@@ -1,4 +1,4 @@
-import { EnhancedIntentEngine } from '../ai/enhanced-intent';
+import { HybridAIParser } from '../ai';
 import { ProcessManager } from './pm';
 import * as fs from 'fs';
 import { CONFIG_PATH } from '../core/constants';
@@ -6,7 +6,7 @@ import { ConfigValidator } from '../core/config-validator';
 import { logger } from '../core/logger';
 
 export class Orchestrator {
-  private intentEngine: EnhancedIntentEngine | null;
+  private intentEngine: HybridAIParser | null;
   private config: any;
 
   constructor(private pm: ProcessManager) {
@@ -22,10 +22,13 @@ export class Orchestrator {
 
     // Check if AI is enabled
     if (this.config.ai?.enabled !== false) {
-      // Use enhanced AI intent engine
-      this.intentEngine = new EnhancedIntentEngine(this.config.ai);
+      // Use hybrid AI intent parser (replaces EnhancedIntentEngine)
+      this.intentEngine = new HybridAIParser({
+        aiConfig: this.config.ai,
+        confidenceThreshold: 0.6
+      });
 
-      logger.info('AI features enabled (vector database functionality removed)');
+      logger.info('AI features enabled (using HybridAIParser)');
     } else {
       // AI disabled
       this.intentEngine = null;
@@ -56,9 +59,9 @@ export class Orchestrator {
       logger.debug(`Available tools: ${availableTools.join(', ')}`);
 
       // 2. Use AI intent engine to parse user intent
-      const toolCall = await this.intentEngine.parse(query, availableTools);
+      const toolCall = await this.intentEngine.parse(query, { availableTools });
 
-      if (!toolCall) {
+      if (!toolCall || toolCall.service === 'unknown') {
         throw new Error('Unable to determine which service to use for your request.');
       }
 
@@ -76,8 +79,7 @@ export class Orchestrator {
     } catch (error: any) {
       logger.error(`Query execution failed: ${error.message}`);
 
-      // No vector database fallback available
-      throw new Error(`Query failed: ${error.message}. Vector database functionality has been removed.`);
+      throw new Error(`Query failed: ${error.message}`);
     }
   }
 
@@ -93,8 +95,8 @@ export class Orchestrator {
       this.config.ai = validatedConfig.ai;
 
       // Update intent engine configuration if it exists
-      if (this.intentEngine) {
-        this.intentEngine.updateConfig(validatedConfig.ai);
+      if (this.intentEngine && this.intentEngine.updateConfig) {
+        this.intentEngine.updateConfig({ aiConfig: validatedConfig.ai });
       }
 
       // Save to configuration file

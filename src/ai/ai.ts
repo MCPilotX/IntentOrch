@@ -1,10 +1,12 @@
 /**
- * Simplified AI Core Service
+ * AI Core Service
  * Focused on converting natural language to MCP tool calls
  */
 
 import chalk from 'chalk';
 import { logger } from '../core/logger';
+import { toolMappingManager } from './tool-mappings';
+import { RuleBasedParser } from './rule-based-parser';
 
 // AI provider types
 export type AIProvider =
@@ -16,8 +18,8 @@ export type AIProvider =
   | 'ollama'
   | 'none';
 
-// Simplified AI configuration
-export interface SimpleAIConfig {
+// AI configuration
+export interface AIConfig {
   provider: AIProvider;
   apiKey?: string;
   endpoint?: string;
@@ -36,22 +38,18 @@ export interface AskResult {
   confidence?: number;
 }
 
-// Tool call
-export interface ToolCall {
-  service: string;
-  tool: string;
-  params: Record<string, any>;
-}
+// Tool call (MCP standard format)
+export type ToolCall = import('../mcp/types').ToolCall;
 
 // Intent analysis result
-interface Intent {
+export interface Intent {
   action: string;
   target: string;
   params: Record<string, any>;
   confidence: number;
 }
 
-// Simplified AI error
+// AI error
 export class AIError extends Error {
   constructor(
     public code: string,
@@ -65,21 +63,23 @@ export class AIError extends Error {
 }
 
 /**
- * Simplified AI Core Service
+ * AI Core Service
  */
-export class SimpleAI {
-  private config: SimpleAIConfig | null = null;
+export class AI {
+  private config: AIConfig | null = null;
   private enabled: boolean = false;
   private client: any = null;
+  private ruleParser: RuleBasedParser;
 
   constructor() {
-    logger.info('[AI] Initializing simplified AI service');
+    this.ruleParser = new RuleBasedParser();
+    logger.info('[AI] Initializing AI service');
   }
 
   /**
    * Configure AI service
    */
-  async configure(config: SimpleAIConfig): Promise<void> {
+  async configure(config: AIConfig): Promise<void> {
     logger.info(`[AI] Configuring AI provider: ${config.provider}`);
 
     // Provider-specific validation
@@ -127,7 +127,8 @@ export class SimpleAI {
     // Initialize client
     await this.initializeClient();
 
-    this.enabled = true;
+    // Only enable if provider is not 'none'
+    this.enabled = config.provider !== 'none';
     logger.info(`[AI] ${config.provider} configuration completed`);
   }
 
@@ -143,7 +144,7 @@ export class SimpleAI {
     try {
       switch (this.config.provider) {
         case 'openai': {
-          // Simplified OpenAI client
+          // Standard OpenAI client
           this.client = {
             provider: 'openai',
             config: this.config,
@@ -153,7 +154,7 @@ export class SimpleAI {
         }
 
         case 'anthropic': {
-          // Simplified Anthropic client
+          // Standard Anthropic client
           this.client = {
             provider: 'anthropic',
             config: this.config,
@@ -163,7 +164,7 @@ export class SimpleAI {
         }
 
         case 'google': {
-          // Simplified Google (Gemini) client
+          // Standard Google (Gemini) client
           this.client = {
             provider: 'google',
             config: this.config,
@@ -173,7 +174,7 @@ export class SimpleAI {
         }
 
         case 'azure': {
-          // Simplified Azure OpenAI client
+          // Standard Azure OpenAI client
           const azureEndpoint = this.config.endpoint || 'https://YOUR_RESOURCE.openai.azure.com';
           this.client = {
             provider: 'azure',
@@ -185,7 +186,7 @@ export class SimpleAI {
         }
 
         case 'deepseek': {
-          // Simplified DeepSeek client
+          // Standard DeepSeek client
           this.client = {
             provider: 'deepseek',
             config: this.config,
@@ -195,7 +196,7 @@ export class SimpleAI {
         }
 
         case 'ollama': {
-          // Simplified Ollama client
+          // Standard Ollama client
           this.client = {
             provider: 'ollama',
             endpoint: this.config.endpoint || 'http://localhost:11434',
@@ -541,14 +542,36 @@ export class SimpleAI {
       );
     }
 
+    // Check for empty or very short queries
+    if (!query || query.trim().length === 0) {
+      return {
+        type: 'suggestions',
+        message: 'Please provide a query',
+        suggestions: ['Try asking something like: "list files in current directory"', 'Or: "start http service"'],
+      };
+    }
+
+    if (query.trim().length < 3) {
+      return {
+        type: 'suggestions',
+        message: 'Please provide more details',
+        suggestions: ['Try asking something like: "list files in current directory"', 'Or: "start http service"'],
+      };
+    }
+
     try {
       // 1. Analyze intent
       const intent = await this.analyzeIntent(query);
 
-      // 2. Map to tool call
+      // 2. Check if intent is unknown
+      if (intent.action === 'unknown' || intent.confidence < 0.4) {
+        return this.getFallbackSuggestions(query);
+      }
+
+      // 3. Map to tool call (already returns MCP standard format)
       const toolCall = this.mapIntentToTool(intent);
 
-      // 3. Return tool call
+      // 4. Return tool call
       return {
         type: 'tool_call',
         tool: toolCall,
@@ -563,82 +586,51 @@ export class SimpleAI {
   }
 
   /**
-   * Analyze intent (simplified version)
+   * Parse intent from natural language query (synchronous version)
+   * This is the core intent parsing logic used by both sync and async methods
    */
-  private async analyzeIntent(query: string): Promise<Intent> {
-    // Simplified intent analysis: keyword matching
+  private async parseIntentCore(query: string): Promise<Intent> {
+    const result = await this.ruleParser.parse(query);
 
-    const queryLower = query.toLowerCase();
+    // Map RuleBasedParser (service:method) back to AI Intent (action:target)
+    // RuleBasedParser.method -> Intent.action
+    // RuleBasedParser.service -> Intent.target
+    return {
+      action: result.method,
+      target: result.service,
+      params: result.parameters,
+      confidence: result.confidence,
+    };
+  }
 
-    // Common intent patterns
-    const patterns = [
-      // File operations
-      {
-        regex: /(list|show|display).*(file|directory|folder)/i,
-        action: 'list',
-        target: 'files',
-        confidence: 0.8,
-      },
-      {
-        regex: /(read|view|open).*file/i,
-        action: 'read',
-        target: 'file',
-        confidence: 0.7,
-      },
+  /**
+   * Parse intent from natural language query (synchronous public method)
+   * For testing and simple use cases without AI
+   */
+  async parseIntent(query: string): Promise<Intent> {
+    return await this.parseIntentCore(query);
+  }
 
-      // Service operations
-      {
-        regex: /(start|launch|run).*service/i,
-        action: 'start',
-        target: 'service',
-        confidence: 0.9,
-      },
-      {
-        regex: /(stop|halt|terminate).*service/i,
-        action: 'stop',
-        target: 'service',
-        confidence: 0.9,
-      },
-      {
-        regex: /(status|check).*service/i,
-        action: 'status',
-        target: 'service',
-        confidence: 0.8,
-      },
-
-      // General queries
-      {
-        regex: /(help|what can you do)/i,
-        action: 'help',
-        target: 'general',
-        confidence: 0.9,
-      },
-    ];
-
-    // Find matching pattern
-    for (const pattern of patterns) {
-      if (pattern.regex.test(query)) {
-        return {
-          action: pattern.action,
-          target: pattern.target,
-          params: this.extractParams(query),
-          confidence: pattern.confidence,
-        };
-      }
+  /**
+   * Analyze intent with optional LLM fallback (async public method)
+   * This is the main intent analysis method that can use AI when available
+   */
+  async analyzeIntent(query: string): Promise<Intent> {
+    // First try rule-based parsing
+    const parsedIntent = await this.parseIntentCore(query);
+    
+    // If we found a valid intent, return it
+    if (parsedIntent.action !== 'unknown' && parsedIntent.confidence >= 0.7) {
+      return parsedIntent;
     }
 
-    // If no match, use LLM analysis (if available)
+    // If no match found and LLM is available, use it
     if (this.config?.provider !== 'none' && this.client) {
       return await this.analyzeWithLLM(query);
     }
 
-    // Default intent
-    return {
-      action: 'unknown',
-      target: 'unknown',
-      params: {},
-      confidence: 0.3,
-    };
+    // Return the unknown intent from parseIntentCore
+    return parsedIntent;
   }
 
   /**
@@ -1031,99 +1023,151 @@ export class SimpleAI {
   }
 
   /**
-   * Map intent to tool call
+   * Map intent to tool call (compatible with ToolRegistry)
+   * Returns a ToolCall that can be executed by ToolRegistry.executeTool()
+   * Uses ToolMappingManager for flexible tool name mapping
    */
   private mapIntentToTool(intent: Intent): ToolCall {
-    // Simplified mapping logic
+    // Try to find tool mapping for this intent
+    const mapping = toolMappingManager.findMapping(intent.action, intent.target);
+    
+    if (mapping) {
+      // Map intent parameters to tool parameters
+      const toolParams = toolMappingManager.mapParameters(mapping, intent.params);
+      
+      return {
+        name: mapping.primaryTool,
+        arguments: toolParams,
+      };
+    }
+    
+    // Fallback to hardcoded mappings for backward compatibility
+    return this.mapIntentToToolFallback(intent);
+  }
+
+  /**
+   * Fallback mapping for backward compatibility
+   * Used when no tool mapping is found
+   */
+  private mapIntentToToolFallback(intent: Intent): ToolCall {
+    // Enhanced mapping logic with better parameter handling
 
     switch (intent.action) {
       case 'list':
         return {
-          service: 'filesystem',
-          tool: 'list_directory',
-          params: { path: intent.params.path || '.' },
+          name: 'filesystem.list_directory',
+          arguments: { 
+            path: intent.params.path || '.',
+            recursive: intent.params.recursive || false,
+            showHidden: intent.params.showHidden || false
+          },
         };
 
       case 'read':
         return {
-          service: 'filesystem',
-          tool: 'read_file',
-          params: { path: intent.params.path || 'README.md' },
+          name: 'filesystem.read_file',
+          arguments: { 
+            path: intent.params.path || 'README.md',
+            encoding: intent.params.encoding || 'utf-8'
+          },
+        };
+
+      case 'write':
+        return {
+          name: 'filesystem.write_file',
+          arguments: {
+            path: intent.params.path || '/tmp/unknown.txt',
+            content: intent.params.content || '',
+            encoding: intent.params.encoding || 'utf-8',
+            append: intent.params.append || false
+          },
+        };
+
+      case 'ping':
+        return {
+          name: 'network.ping_host',
+          arguments: {
+            host: intent.params.host || 'localhost',
+            count: intent.params.count || 4,
+            timeout: intent.params.timeout || 5000
+          },
         };
 
       case 'start':
         return {
-          service: 'service_manager',
-          tool: 'start_service',
-          params: { name: intent.params.service || 'default' },
+          name: 'service_manager.start_service',
+          arguments: { 
+            name: intent.params.service || intent.params.name || 'default',
+            wait: intent.params.wait || true,
+            timeout: intent.params.timeout || 30000
+          },
         };
 
       case 'stop':
         return {
-          service: 'service_manager',
-          tool: 'stop_service',
-          params: { name: intent.params.service || 'default' },
+          name: 'service_manager.stop_service',
+          arguments: { 
+            name: intent.params.service || intent.params.name || 'default',
+            force: intent.params.force || false,
+            timeout: intent.params.timeout || 30000
+          },
         };
 
       case 'status':
         return {
-          service: 'service_manager',
-          tool: 'get_status',
-          params: { name: intent.params.service },
+          name: 'service_manager.get_status',
+          arguments: { 
+            name: intent.params.service || intent.params.name,
+            detailed: intent.params.detailed || false
+          },
+        };
+
+      case 'analyze':
+        return {
+          name: 'ai.analyze_query',
+          arguments: {
+            query: intent.params.query || '',
+            context: intent.params.context || {}
+          },
         };
 
       case 'help':
         return {
-          service: 'system',
-          tool: 'show_help',
-          params: {},
+          name: 'system.show_help',
+          arguments: {
+            topic: intent.params.topic || 'general',
+            detailed: intent.params.detailed || false
+          },
         };
 
       default:
         return {
-          service: 'system',
-          tool: 'unknown',
-          params: { intent },
+          name: 'system.unknown',
+          arguments: { 
+            intent: JSON.stringify(intent),
+            message: `Unknown intent action: ${intent.action}`,
+            suggestions: ['Try rephrasing your query', 'Use help for available commands']
+          },
         };
     }
   }
 
   /**
-   * Get fallback suggestions (when AI is not available)
+   * Get fallback suggestions (when AI is not available or intent is unknown)
    */
   private getFallbackSuggestions(query: string): AskResult {
-    const suggestions: string[] = [];
-
-    // Analyze query to provide traditional command suggestions
-    const queryLower = query.toLowerCase();
-
-    if (queryLower.includes('file') || queryLower.includes('directory')) {
-      suggestions.push('mcp service list');
-      suggestions.push('List files: ls or dir');
-    }
-
-    if (queryLower.includes('service') && queryLower.includes('start')) {
-      suggestions.push('mcp service start <service-name>');
-    }
-
-    if (queryLower.includes('service') && queryLower.includes('stop')) {
-      suggestions.push('mcp service stop <service-name>');
-    }
-
-    if (queryLower.includes('status') || queryLower.includes('check')) {
-      suggestions.push('mcp service status');
-    }
-
-    if (suggestions.length === 0) {
-      suggestions.push('mcp --help to see all commands');
-      suggestions.push('mcp service --help to see service commands');
-    }
+    const suggestions: string[] = [
+      'mcp service list',
+      'mcp service status',
+      'mcp --help to see all commands',
+      'Try rephrasing your query with more specific keywords like "read", "list", or "start"',
+    ];
 
     return {
       type: 'suggestions',
-      message: 'AI feature not enabled or configured incorrectly',
+      message: `I couldn't quite understand "${query}". Here are some things you can try:`,
       suggestions,
-      help: 'You can:',
+      help: 'Common commands:',
     };
   }
 
@@ -1181,27 +1225,27 @@ export class SimpleAI {
       switch (provider) {
         case 'openai':
           return await this.callOpenAIRaw(options, apiKey!, model);
-        
+
         case 'anthropic':
           return await this.callAnthropicRaw(options, apiKey!, model);
-        
+
         case 'google':
           return await this.callGoogleRaw(options, apiKey!, model);
-        
+
         case 'azure':
           return await this.callAzureRaw(options, apiKey!, model);
-        
+
         case 'deepseek':
           return await this.callDeepSeekRaw(options, apiKey!, model);
-        
+
         case 'ollama':
           return await this.callOllamaRaw(options, model);
-        
+
         default:
           throw new AIError(
             'UNSUPPORTED_PROVIDER',
             `Raw API calls not supported for provider: ${provider}`,
-            'execution'
+            'execution',
           );
       }
     } catch (error: any) {
@@ -1209,7 +1253,7 @@ export class SimpleAI {
       throw new AIError(
         'API_CALL_FAILED',
         `Raw API call failed: ${error.message}`,
-        'execution'
+        'execution',
       );
     }
   }
@@ -1220,7 +1264,7 @@ export class SimpleAI {
   private async callOpenAIRaw(
     options: any,
     apiKey: string,
-    model: string
+    model: string,
   ): Promise<any> {
     const requestBody: any = {
       model,
@@ -1262,7 +1306,7 @@ export class SimpleAI {
   private async callAnthropicRaw(
     options: any,
     apiKey: string,
-    model: string
+    model: string,
   ): Promise<any> {
     // Anthropic has different API structure
     const requestBody: any = {
@@ -1295,7 +1339,7 @@ export class SimpleAI {
   private async callGoogleRaw(
     options: any,
     apiKey: string,
-    model: string
+    model: string,
   ): Promise<any> {
     // Google Gemini API structure
     const requestBody: any = {
@@ -1317,7 +1361,7 @@ export class SimpleAI {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify(requestBody),
-      }
+      },
     );
 
     if (!response.ok) {
@@ -1333,7 +1377,7 @@ export class SimpleAI {
   private async callAzureRaw(
     options: any,
     apiKey: string,
-    model: string
+    model: string,
   ): Promise<any> {
     const endpoint = this.config?.endpoint || 'https://YOUR_RESOURCE.openai.azure.com';
     const apiVersion = this.config?.apiVersion || '2024-02-15-preview';
@@ -1374,7 +1418,7 @@ export class SimpleAI {
   private async callDeepSeekRaw(
     options: any,
     apiKey: string,
-    model: string
+    model: string,
   ): Promise<any> {
     const requestBody: any = {
       model,
@@ -1409,7 +1453,7 @@ export class SimpleAI {
    */
   private async callOllamaRaw(
     options: any,
-    model: string
+    model: string,
   ): Promise<any> {
     const endpoint = this.config?.endpoint || 'http://localhost:11434';
 

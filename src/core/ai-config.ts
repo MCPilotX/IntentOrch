@@ -25,7 +25,7 @@ const question = (query: string): Promise<string> => {
   });
 };
 
-export interface SimpleAIConfig {
+export interface AIConfig {
   provider: AIProvider;
   apiKey?: string;
   model?: string;
@@ -39,9 +39,9 @@ export interface SimpleAIConfig {
   };
 }
 
-export class SimpleAIConfigParser {
+export class AIConfigParser {
   // Parse simple command: mcp ai use openai sk-xxx [model]
-  static parse(args: string[]): SimpleAIConfig | null {
+  static parse(args: string[]): AIConfig | null {
     if (args.length === 0) {
       return null;
     }
@@ -141,7 +141,7 @@ export class SimpleAIConfigParser {
   }
 
   // Apply configuration to system
-  static async applyConfig(config: SimpleAIConfig, confirm: boolean = true): Promise<boolean> {
+  static async applyConfig(config: AIConfig, confirm: boolean = true): Promise<boolean> {
     try {
       // Read current configuration
       let currentConfig;

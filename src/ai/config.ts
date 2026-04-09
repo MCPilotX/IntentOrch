@@ -6,7 +6,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { logger } from '../core/logger';
-import { SimpleAIConfig } from './ai';
+import { AIConfig } from './ai';
 
 // Configuration file path
 const CONFIG_DIR = process.env.MCPILOT_CONFIG_DIR ||
@@ -16,8 +16,8 @@ const CONFIG_FILE = path.join(CONFIG_DIR, 'ai-config.json');
 /**
  * Simplified AI configuration manager
  */
-export class SimpleAIConfigManager {
-  private config: SimpleAIConfig | null = null;
+export class AIConfigManager {
+  private config: AIConfig | null = null;
 
   constructor() {
     this.loadConfig();
@@ -64,14 +64,14 @@ export class SimpleAIConfigManager {
   /**
    * Get current configuration
    */
-  getConfig(): SimpleAIConfig {
+  getConfig(): AIConfig {
     return this.config || { provider: 'none' };
   }
 
   /**
    * Update configuration
    */
-  async updateConfig(config: SimpleAIConfig): Promise<void> {
+  async updateConfig(config: AIConfig): Promise<void> {
     // Validate configuration
     this.validateConfig(config);
 
@@ -87,7 +87,7 @@ export class SimpleAIConfigManager {
   /**
    * Validate configuration
    */
-  private validateConfig(config: SimpleAIConfig): void {
+  private validateConfig(config: AIConfig): void {
     // Basic validation
     if (!config.provider) {
       throw new Error('Provider is required');
@@ -124,13 +124,13 @@ export class SimpleAIConfigManager {
   /**
    * Parse configuration from command line arguments
    */
-  parseFromArgs(args: string[]): SimpleAIConfig {
+  parseFromArgs(args: string[]): AIConfig {
     if (args.length === 0) {
       throw new Error('No arguments provided');
     }
 
     const provider = args[0].toLowerCase();
-    const config: SimpleAIConfig = { provider: 'none' };
+    const config: AIConfig = { provider: 'none' };
 
     // Parse provider
     if (provider === 'openai' || provider === 'ollama') {

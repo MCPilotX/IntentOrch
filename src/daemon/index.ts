@@ -7,7 +7,6 @@
 export { Orchestrator } from './orchestrator';
 
 // Export intent engine
-export { IntentEngine } from './intent-engine';
 
 // Export process management
 export { ProcessManager } from './pm';

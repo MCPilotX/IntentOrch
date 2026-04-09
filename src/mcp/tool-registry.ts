@@ -4,6 +4,9 @@
  */
 
 import { Tool, ToolCall, ToolResult } from './types';
+import { ParameterMapper } from './parameter-mapper';
+import { PreExecutionValidator, ValidationResult } from './pre-execution-validator';
+import { FallbackManager, defaultFallbackManager } from './fallback-manager';
 
 export interface ToolExecutor {
   (args: Record<string, any>): Promise<ToolResult>;
@@ -132,7 +135,7 @@ export class ToolRegistry {
   // ==================== Tool Execution ====================
 
   /**
-   * Execute tool
+   * Execute tool with fallback mechanisms
    */
   async executeTool(toolCall: ToolCall): Promise<ToolResult> {
     const registeredTool = this.tools.get(toolCall.name);
@@ -184,6 +187,69 @@ export class ToolRegistry {
         content: [{
           type: 'text',
           text: errorMessage,
+        }],
+        isError: true,
+      };
+    }
+
+    // Get available tool names for fallback manager
+    const availableToolNames = this.getAllTools().map(t => t.tool.name);
+
+    // Define execution function for fallback manager
+    const executeFn = async (tc: ToolCall): Promise<ToolResult> => {
+      const tool = this.tools.get(tc.name);
+      if (!tool) {
+        return {
+          content: [{
+            type: 'text',
+            text: `Tool "${tc.name}" not found during fallback execution`,
+          }],
+          isError: true,
+        };
+      }
+
+      try {
+        // Validate parameters
+        this.validateToolArguments(tool.tool, tc.arguments);
+
+        // Execute tool
+        const result = await tool.executor(tc.arguments);
+
+        // Update usage statistics
+        tool.metadata.lastUsed = Date.now();
+        tool.metadata.usageCount = (tool.metadata.usageCount || 0) + 1;
+
+        return result;
+      } catch (error) {
+        return {
+          content: [{
+            type: 'text',
+            text: `Tool execution failed: ${error instanceof Error ? error.message : String(error)}`,
+          }],
+          isError: true,
+        };
+      }
+    };
+
+    // Use fallback manager for execution
+    return await defaultFallbackManager.executeWithFallback(
+      toolCall,
+      executeFn,
+      availableToolNames
+    );
+  }
+
+  /**
+   * Execute tool directly without fallback mechanisms (for internal use)
+   */
+  async executeToolDirect(toolCall: ToolCall): Promise<ToolResult> {
+    const registeredTool = this.tools.get(toolCall.name);
+
+    if (!registeredTool) {
+      return {
+        content: [{
+          type: 'text',
+          text: `Tool "${toolCall.name}" not found`,
         }],
         isError: true,
       };
@@ -270,75 +336,73 @@ export class ToolRegistry {
   private validateToolArguments(tool: Tool, args: Record<string, any>): void {
     const schema = tool.inputSchema;
     const toolName = tool.name;
-    const errors: string[] = [];
-
-    // Check required parameters
-    if (schema.required) {
-      for (const requiredParam of schema.required) {
-        if (!(requiredParam in args)) {
-          errors.push(`Missing required parameter: "${requiredParam}"`);
-        }
-      }
-    }
-
-    // Check parameter types and unknown parameters
-    for (const [paramName, paramValue] of Object.entries(args)) {
-      const paramSchema = schema.properties[paramName];
+    
+    try {
+      // Use PreExecutionValidator for comprehensive validation
+      const validator = new PreExecutionValidator({
+        validationLevel: ParameterMapper.getConfig().validationLevel,
+        enforceRequired: ParameterMapper.getConfig().enforceRequired,
+        logWarnings: ParameterMapper.getConfig().logWarnings,
+      });
       
-      if (!paramSchema) {
-        if (schema.additionalProperties === false) {
-          errors.push(`Unknown parameter: "${paramName}". Tool "${toolName}" does not accept this parameter.`);
-        }
-        // If additionalProperties is true or not specified, allow unknown parameters
-        continue;
+      const validationResult = validator.validate(toolName, schema, args);
+      
+      // Update the arguments with normalized parameters
+      Object.keys(args).forEach(key => delete args[key]);
+      Object.assign(args, validationResult.normalizedArgs);
+      
+      // Log warnings if any
+      if (validationResult.warnings.length > 0) {
+        console.warn(`Parameter warnings for tool "${toolName}":`, validationResult.warnings);
       }
-
-      // Basic type validation
-      if (paramSchema.type) {
-        const expectedType = paramSchema.type;
-        const actualType = typeof paramValue;
-        
-        // Handle array type specially
-        if (expectedType === 'array' && !Array.isArray(paramValue)) {
-          errors.push(`Parameter "${paramName}" should be an array, but got ${actualType}`);
-        }
-        // Handle other type mismatches (simplified)
-        else if (expectedType !== 'array' && expectedType !== actualType) {
-          // Allow some flexibility: number can accept string that can be parsed as number
-          if (expectedType === 'number' && typeof paramValue === 'string') {
-            if (isNaN(Number(paramValue))) {
-              errors.push(`Parameter "${paramName}" should be a number, but got string that cannot be parsed as number: "${paramValue}"`);
-            }
-          } else if (expectedType === 'string' && typeof paramValue !== 'string') {
-            errors.push(`Parameter "${paramName}" should be a string, but got ${actualType}`);
-          } else if (expectedType === 'boolean' && typeof paramValue !== 'boolean') {
-            errors.push(`Parameter "${paramName}" should be a boolean, but got ${actualType}`);
-          } else if (expectedType === 'object' && (typeof paramValue !== 'object' || paramValue === null || Array.isArray(paramValue))) {
-            errors.push(`Parameter "${paramName}" should be an object, but got ${actualType}`);
-          }
-        }
+      
+      // Log suggestions if any
+      if (validationResult.suggestions.length > 0) {
+        console.info(`Parameter suggestions for tool "${toolName}":`, validationResult.suggestions);
       }
+      
+      // If validation failed, throw error with detailed information
+      if (!validationResult.success) {
+        const errorMessage = [
+          `Tool "${toolName}" parameter validation failed:`,
+          ...validationResult.errors,
+          '',
+          'Tool schema:',
+          `  Required parameters: ${schema.required ? schema.required.join(', ') : 'none'}`,
+          `  Available parameters: ${Object.keys(schema.properties).join(', ')}`,
+          '',
+          'Provided parameters:',
+          ...Object.entries(args).map(([key, value]) => `  - ${key}: ${typeof value} = ${JSON.stringify(value)}`),
+          '',
+          'Validation warnings:',
+          ...validationResult.warnings.map(w => `  - ${w}`),
+          '',
+          'Suggestions:',
+          ...validationResult.suggestions.map(s => `  - ${s}`),
+        ].join('\n');
 
-      // Check enum values if specified
-      if (paramSchema.enum && !paramSchema.enum.includes(paramValue)) {
-        errors.push(`Parameter "${paramName}" value "${paramValue}" is not valid. Allowed values: ${paramSchema.enum.join(', ')}`);
+        throw new Error(errorMessage);
       }
-    }
-
-    // If there are errors, throw a comprehensive error message
-    if (errors.length > 0) {
+      
+    } catch (error) {
+      // If validation throws an error, provide detailed error message
       const errorMessage = [
         `Tool "${toolName}" parameter validation failed:`,
-        ...errors.map(error => `  - ${error}`),
+        error instanceof Error ? error.message : String(error),
         '',
-        `Tool schema:`,
+        'Tool schema:',
         `  Required parameters: ${schema.required ? schema.required.join(', ') : 'none'}`,
         `  Available parameters: ${Object.keys(schema.properties).join(', ')}`,
         '',
-        `Provided parameters:`,
+        'Provided parameters:',
         ...Object.entries(args).map(([key, value]) => `  - ${key}: ${typeof value} = ${JSON.stringify(value)}`),
+        '',
+        'Parameter mapping suggestions:',
+        ...ParameterMapper.getMappingSuggestions(toolName, schema).map(m => 
+          `  - Use "${m.sourceName}" for "${m.targetName}"`
+        ),
       ].join('\n');
-      
+
       throw new Error(errorMessage);
     }
   }

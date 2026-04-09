@@ -3,14 +3,14 @@
  * Provides unified interface for AI functionality
  */
 
-// Export simplified AI functionality
-export { SimpleAI, AIError, type SimpleAIConfig, type AskResult, type ToolCall } from './ai';
-export { SimpleAIConfigManager } from './config';
-export { SimpleAICommand } from './command';
+// Export AI functionality
+export { AI, AIError, type AIConfig, type AskResult, type ToolCall } from './ai';
+export { AIConfigManager } from './config';
+export { AICommand } from './ai-command';
 
 // Export Cloud LLM Intent Engine
-export { 
-  CloudIntentEngine, 
+export {
+  CloudIntentEngine,
   type CloudIntentEngineConfig,
   type AtomicIntent,
   type DependencyEdge,
@@ -21,12 +21,41 @@ export {
   // Enhanced types for user access
   type EnhancedExecutionStep,
   type WorkflowPlan,
-  type EnhancedExecutionResult
+  type EnhancedExecutionResult,
 } from './cloud-intent-engine';
 
-// Legacy exports (for backward compatibility)
-export { EnhancedIntentEngine } from './enhanced-intent';
-export { IntentEngine } from './intent';
+// New Intent Parser Architecture (Recommended)
+export {
+  // Core interfaces and types
+  type IntentResult,
+  type IntentParser,
+  type ParserContext,
+  type ParserType,
+  type ParserConfig,
+  type ParserSelectionStrategy,
+  
+  // Parser implementations
+  RuleBasedParser,
+  HybridAIParser,
+  type HybridAIParserConfig,
+  
+  // Factory and selector
+  IntentParserFactory,
+  type ParserFactoryConfig,
+  IntentParserSelector,
+  type ParserSelectorConfig,
+  type SelectionResult,
+  
+  // Utilities
+  IntentParserUtils,
+  IntentParserExamples,
+} from './intent-parser-index';
+
+// Legacy exports (for backward compatibility - DEPRECATED)
+/** @deprecated Use EnhancedIntentEngineAdapter or HybridAIParser instead */
+export { EnhancedIntentEngineAdapter as EnhancedIntentEngine } from './legacy-adapters';
+/** @deprecated Use IntentEngineAdapter or RuleBasedParser instead */
+export { IntentEngineAdapter as IntentEngine } from './legacy-adapters';
 
 import { logger } from '../core/logger';
 
@@ -65,5 +94,22 @@ export async function getAIStatus(config?: any) {
     timestamp: new Date().toISOString(),
     version: '0.2.1',
     note: 'Vector database functionality has been removed. Use external AI services for semantic search.',
+  };
+}
+
+/**
+ * Get intent parser system status
+ */
+export async function getIntentParserStatus() {
+  const availableParsers = ['RuleBasedParser', 'HybridAIParser'];
+  const legacyEngines = ['EnhancedIntentEngine', 'IntentEngine'];
+  
+  return {
+    availableParsers,
+    legacyEngines,
+    recommendedParser: 'HybridAIParser',
+    migrationAvailable: true,
+    timestamp: new Date().toISOString(),
+    note: 'New intent parser architecture eliminates code duplication and provides true AI integration.',
   };
 }

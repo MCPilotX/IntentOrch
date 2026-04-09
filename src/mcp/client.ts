@@ -25,6 +25,7 @@ import {
   MCP_ERROR_CODES,
 } from './types';
 import { Transport, TransportFactory } from './transport';
+import { ParameterMapper } from './parameter-mapper';
 
 export class MCPClient extends EventEmitter {
   private config: MCPClientConfig;
@@ -118,23 +119,40 @@ export class MCPClient extends EventEmitter {
   }
 
   async callTool(toolName: string, arguments_: Record<string, any>): Promise<ToolResult> {
+    // Get tool definition to understand parameter schema
+    const tool = this.findTool(toolName);
+    
+    let mappedArguments = arguments_;
+    
+    // If tool definition is available, use ParameterMapper to normalize parameters
+    if (tool) {
+      try {
+        const { normalized } = ParameterMapper.validateAndNormalize(toolName, tool.inputSchema, arguments_);
+        mappedArguments = normalized;
+      } catch (error) {
+        // If parameter mapping fails, still try with original arguments
+        // but log the warning
+        console.warn(`Parameter mapping failed for tool "${toolName}":`, error instanceof Error ? error.message : String(error));
+      }
+    }
+    
     const toolCall: ToolCall = {
       name: toolName,
-      arguments: arguments_,
+      arguments: mappedArguments,
     };
 
     const response = await this.sendRequest(MCP_METHODS.TOOLS_CALL, { call: toolCall });
-    
+
     // Ensure response is a valid ToolResult
     const toolResult = response as ToolResult;
-    
+
     // Check if the tool execution failed (isError flag)
     if (toolResult.isError) {
       // Create a proper error from the tool result content
       const errorMessage = toolResult.content?.[0]?.text || 'Tool execution failed';
       throw new Error(`Tool "${toolName}" execution failed: ${errorMessage}`);
     }
-    
+
     return toolResult;
   }
 
