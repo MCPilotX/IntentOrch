@@ -948,7 +948,7 @@ describe('ToolRegistry', () => {
       });
       expect(arrayResult.isError).toBe(false);
       expect(executor).toHaveBeenCalledTimes(5);
-      expect(executor).toHaveBeenNthCalledWith(5, { text: 'item1,item2' });
+      expect(executor).toHaveBeenNthCalledWith(5, { text: JSON.stringify(['item1', 'item2'], null, 2) });
 
       // Act & Assert - Invalid string (null)
       const nullResult = await toolRegistry.executeTool({

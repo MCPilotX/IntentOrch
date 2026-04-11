@@ -150,6 +150,9 @@ export class ParameterMapper {
         // File system specific mappings
         { sourceName: 'name', targetName: 'path' },
         { sourceName: 'filename', targetName: 'path' },
+        { sourceName: 'text', targetName: 'content' },
+        { sourceName: 'data', targetName: 'content' },
+        { sourceName: 'body', targetName: 'content' },
       ],
       priority: 10,
     },
@@ -184,6 +187,7 @@ export class ParameterMapper {
         { sourceName: 'endpoint', targetName: 'url' },
         { sourceName: 'path', targetName: 'url' },
         { sourceName: 'method', targetName: 'verb' },
+        { sourceName: 'verb', targetName: 'method' }, // Bidirectional mapping
         { sourceName: 'headers', targetName: 'metadata' },
         { sourceName: 'params', targetName: 'query' },
       ],
@@ -226,10 +230,13 @@ export class ParameterMapper {
       // Try to find mapping for this parameter
       const mapping = this.findMapping(toolName, sourceName, schemaProperties);
       if (mapping) {
-        // Apply mapping
-        targetParams[mapping.targetName] = mapping.transformation
-          ? mapping.transformation(value)
-          : value;
+        // Apply mapping only if target parameter doesn't already exist
+        // This prevents overwriting existing values (e.g., when both 'content' and 'text' are provided)
+        if (!(mapping.targetName in targetParams)) {
+          targetParams[mapping.targetName] = mapping.transformation
+            ? mapping.transformation(value)
+            : value;
+        }
 
         // Clean up the original parameter if it's not a valid property in schema
         if (!schemaProperties.includes(sourceName)) {
@@ -267,6 +274,16 @@ export class ParameterMapper {
     // First, check if sourceName directly matches any target property
     if (targetSchemaProperties.includes(sourceName)) {
       return null; // No mapping needed
+    }
+
+    // Check for case-insensitive match in target properties
+    const sourceLower = sourceName.toLowerCase();
+    const caseInsensitiveMatch = targetSchemaProperties.find(p => p.toLowerCase() === sourceLower);
+    if (caseInsensitiveMatch) {
+      return {
+        sourceName,
+        targetName: caseInsensitiveMatch,
+      };
     }
 
     // Apply mapping rules in priority order
@@ -380,6 +397,21 @@ export class ParameterMapper {
     // Check for unknown parameters based on validation level
     const schemaProperties = Object.keys(toolSchema.properties || {});
 
+    // Track which parameters were mapped from compatibility parameters
+    const mappedCompatibilityParams = new Set<string>();
+
+    // Check original parameters that were mapped
+    for (const [sourceName, value] of Object.entries(params)) {
+      if (!schemaProperties.includes(sourceName)) {
+        // Check if this parameter was mapped to a schema property
+        const mapping = this.findMapping(toolName, sourceName, schemaProperties);
+        if (mapping && this.config.logWarnings) {
+          // This is a compatibility parameter that was mapped
+          mappedCompatibilityParams.add(sourceName);
+        }
+      }
+    }
+
     if (toolSchema.additionalProperties === false) {
       for (const paramName of Object.keys(normalized)) {
         if (!schemaProperties.includes(paramName)) {
@@ -390,6 +422,8 @@ export class ParameterMapper {
             case ValidationLevel.STRICT:
               // Strict: reject all unknown parameters
               warnings.push(`Unknown parameter "${paramName}" for tool "${toolName}"`);
+              // Remove unknown parameter from normalized result
+              delete normalized[paramName];
               break;
 
             case ValidationLevel.COMPATIBLE:
@@ -409,6 +443,13 @@ export class ParameterMapper {
               break;
           }
         }
+      }
+    }
+
+    // Add warnings for compatibility parameters that were mapped
+    if (this.config.logWarnings) {
+      for (const sourceName of mappedCompatibilityParams) {
+        warnings.push(`Added compatibility parameter "${sourceName}" for tool "${toolName}"`);
       }
     }
 
@@ -536,24 +577,8 @@ export class ParameterMapper {
           }
         }
 
-        // Also ensure common aliases are present if they're commonly validated
-        // This helps with servers that validate wrong parameters
-        if (primary in result) {
-          // For path/name confusion (common issue)
-          if (primary === 'path') {
-            // Ensure 'name' is also present if it's a common validation target
-            if (!('name' in result)) {
-              result.name = result.path;
-            }
-          }
-          // For name/path confusion
-          else if (primary === 'name') {
-            // Ensure 'path' is also present if it's a common validation target
-            if (!('path' in result)) {
-              result.path = result.name;
-            }
-          }
-        }
+        // Note: We no longer automatically add 'name' when 'path' exists or vice versa
+        // This was causing confusion in warning messages
       }
     }
 

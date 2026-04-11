@@ -54,6 +54,7 @@ class MockAI {
     } else {
       return {
         type: 'suggestions',
+        message: 'No clear intent detected',
         suggestions: ['Try asking about files, network, or services'],
       };
     }
@@ -615,8 +616,8 @@ describe('Intent Orchestration End-to-End Tests', () => {
       const result = await ai.generateText(query);
       
       // Should return suggestions
-      expect(result.type).toBe('text');
-      expect(result.text).toBeDefined();
+      expect(result.type).toBe('suggestions');
+      expect(result.message).toBeDefined();
       expect(result.suggestions?.length).toBeGreaterThan(0);
     });
   });

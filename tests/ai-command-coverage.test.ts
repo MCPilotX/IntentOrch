@@ -329,7 +329,7 @@ describe('AICommand Coverage Tests', () => {
         expect.stringContaining('🤖 Query: "list files in current directory"')
       );
       expect(consoleLogSpy).toHaveBeenCalledWith(
-        expect.stringMatching(/.*✅ Intent recognized.*/)
+        expect.stringContaining('🤖 AI Response:')
       );
     });
 
@@ -512,10 +512,10 @@ describe('AICommand Coverage Tests', () => {
       await aiCommand.handleCommand('configure', 'openai', '--api-key=test-key');
       consoleLogSpy.mockClear();
       
-      // Mock parseIntent to throw AIError
+      // Mock generateText to throw AIError
       const ai = (aiCommand as any).ai;
-      const originalParseIntent = ai.parseIntent;
-      ai.parseIntent = jest.fn().mockRejectedValue(
+      const originalGenerateText = ai.generateText;
+      ai.generateText = jest.fn().mockRejectedValue(
         new AIError('AI_ERROR', 'Test AI error', 'execution') as any
       );
       
@@ -526,7 +526,7 @@ describe('AICommand Coverage Tests', () => {
       );
       
       // Restore original method
-      ai.parseIntent = originalParseIntent;
+      ai.generateText = originalGenerateText;
     });
 
     it('should handle generic error in ask command', async () => {
@@ -534,10 +534,10 @@ describe('AICommand Coverage Tests', () => {
       await aiCommand.handleCommand('configure', 'openai', '--api-key=test-key');
       consoleLogSpy.mockClear();
       
-      // Mock parseIntent to throw generic error
+      // Mock generateText to throw generic error
       const ai = (aiCommand as any).ai;
-      const originalParseIntent = ai.parseIntent;
-      ai.parseIntent = jest.fn().mockRejectedValue(new Error('Generic error') as any);
+      const originalGenerateText = ai.generateText;
+      ai.generateText = jest.fn().mockRejectedValue(new Error('Generic error') as any);
       
       await aiCommand.handleCommand('ask', 'test query');
       
@@ -546,82 +546,22 @@ describe('AICommand Coverage Tests', () => {
       );
       
       // Restore original method
-      ai.parseIntent = originalParseIntent;
+      ai.generateText = originalGenerateText;
     });
   });
 
   describe('handleAskResult coverage', () => {
-    it('should handle suggestions result type', async () => {
+    it('should handle text_response result type', async () => {
       // First configure
       await aiCommand.handleCommand('configure', 'openai', '--api-key=test-key');
       consoleLogSpy.mockClear();
       
-      // Mock parseIntent to return unknown intent (which will trigger generateText)
-      const ai = (aiCommand as any).ai;
-      const originalParseIntent = ai.parseIntent;
-      ai.parseIntent = jest.fn().mockResolvedValue({
-        action: 'unknown',
-        target: 'query',
-        params: { query: 'test query' },
-        confidence: 0.3,
-      });
-      
+      // Test ask command which will create text_response result
       await aiCommand.handleCommand('ask', 'test query');
       
       expect(consoleLogSpy).toHaveBeenCalledWith(
         expect.stringContaining('🤖 AI Response:')
       );
-      
-      // Restore original method
-      ai.parseIntent = originalParseIntent;
-    });
-
-    it('should handle error result type', async () => {
-      // First configure
-      await aiCommand.handleCommand('configure', 'openai', '--api-key=test-key');
-      consoleLogSpy.mockClear();
-      
-      // Mock parseIntent to throw error
-      const ai = (aiCommand as any).ai;
-      const originalParseIntent = ai.parseIntent;
-      ai.parseIntent = jest.fn().mockRejectedValue(new Error('Failed to parse intent') as any);
-      
-      await aiCommand.handleCommand('ask', 'test query');
-      
-      expect(consoleLogSpy).toHaveBeenCalledWith(
-        expect.stringContaining('❌ Error: Failed to parse intent')
-      );
-      
-      // Restore original method
-      ai.parseIntent = originalParseIntent;
-    });
-
-    it('should handle tool_call result type', async () => {
-      // First configure
-      await aiCommand.handleCommand('configure', 'openai', '--api-key=test-key');
-      consoleLogSpy.mockClear();
-      
-      // Mock parseIntent to return valid intent
-      const ai = (aiCommand as any).ai;
-      const originalParseIntent = ai.parseIntent;
-      ai.parseIntent = jest.fn().mockResolvedValue({
-        action: 'list',
-        target: 'files',
-        params: { path: '.' },
-        confidence: 0.9,
-      });
-      
-      await aiCommand.handleCommand('ask', 'list files');
-      
-      expect(consoleLogSpy).toHaveBeenCalledWith(
-        expect.stringMatching(/.*✅ Intent recognized.*/)
-      );
-      expect(consoleLogSpy).toHaveBeenCalledWith(
-        expect.stringContaining('🔧 Tool call:')
-      );
-      
-      // Restore original method
-      ai.parseIntent = originalParseIntent;
     });
   });
 

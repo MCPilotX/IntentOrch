@@ -17,6 +17,9 @@ import { CloudIntentEngine, type CloudIntentEngineConfig } from './ai/cloud-inte
 import { MCPClient, ToolRegistry, createMCPConfig, discoverLocalMCPServers } from './mcp';
 import type { Tool, ToolCall, ToolResult, MCPClientConfig } from './mcp/types';
 
+// Package version
+import packageJson from '../package.json' assert { type: 'json' };
+
 export interface SDKOptions {
   configPath?: string;
   autoInit?: boolean;
@@ -320,6 +323,21 @@ export class IntentOrchSDK {
       this.logger.info('Configuration updated successfully');
     } catch (error) {
       this.logger.error(`Failed to update configuration: ${error}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Reset configuration to defaults
+   */
+  async resetConfig(): Promise<void> {
+    this.ensureInitialized();
+
+    try {
+      ConfigManager.resetConfig();
+      this.logger.info('Configuration reset successfully');
+    } catch (error) {
+      this.logger.error(`Failed to reset configuration: ${error}`);
       throw error;
     }
   }
@@ -1781,6 +1799,20 @@ Use Markdown format for the analysis.`,
     this.cloudIntentEngine.setAvailableTools(tools);
 
     this.logger.info(`Updated Cloud Intent Engine with ${tools.length} tools`);
+  }
+
+  /**
+   * Get SDK version
+   */
+  getVersion(): string {
+    return packageJson.version;
+  }
+
+  /**
+   * Check if SDK is initialized
+   */
+  isInitialized(): boolean {
+    return this.initialized;
   }
 }
 

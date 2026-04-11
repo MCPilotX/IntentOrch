@@ -72,6 +72,18 @@ jest.mock('../src/ai/ai', () => {
         };
       }
       
+      async generateText(query: string): Promise<string> {
+        if (!this.mockConfigured) {
+          throw new Error('AI provider not configured');
+        }
+        
+        if (query.includes('list files')) {
+          return 'Mocked text response for list files query';
+        }
+        
+        return 'Mocked text response';
+      }
+      
       getFriendlyError(error: Error): string {
         return `Friendly error: ${error.message}`;
       }
@@ -209,7 +221,7 @@ describe('AICommand Simple Tests', () => {
         expect.stringContaining('🤖 Query: "list files in current directory"')
       );
       expect(consoleLogSpy).toHaveBeenCalledWith(
-        expect.stringContaining('✅ Intent recognized')
+        expect.stringContaining('🤖 AI Response:')
       );
     });
 

@@ -61,6 +61,21 @@ jest.mock('../src/ai/ai', () => {
           suggestions: ['Mocked suggestion'],
         };
       }
+      
+      async generateText(query: string): Promise<any> {
+        if (!this.mockConfigured) {
+          return {
+            type: 'text',
+            message: 'AI feature not enabled or configured incorrectly',
+            text: 'AI feature not enabled or configured incorrectly',
+          };
+        }
+        return {
+          type: 'text',
+          message: 'Mocked text response',
+          text: 'Mocked text response',
+        };
+      }
     },
   };
 });

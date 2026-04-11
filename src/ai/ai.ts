@@ -1240,7 +1240,6 @@ export class AI {
     }
   }
 
-
   /**
    * Get fallback suggestions (when AI is not available or intent is unknown)
    */

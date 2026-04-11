@@ -483,4 +483,31 @@ export class ConfigManager {
       logger.error(`Failed to save detection cache for ${serviceName}: ${error.message}`);
     }
   }
+
+  /**
+   * Reset configuration to defaults
+   */
+  static resetConfig(): void {
+    try {
+      // Clear caches
+      this.serviceConfigCache.clear();
+      this.servicesListCache = null;
+      this.globalConfigCache = null;
+      this.dockerHostsCache.clear();
+      this.runtimeProfilesCache.clear();
+
+      // Remove configuration files
+      if (fs.existsSync(this.GLOBAL_CONFIG_PATH)) {
+        fs.unlinkSync(this.GLOBAL_CONFIG_PATH);
+      }
+
+      // Reinitialize with default configuration
+      this.init();
+
+      logger.info('Configuration reset to defaults');
+    } catch (error: any) {
+      logger.error(`Failed to reset configuration: ${error.message}`);
+      throw error;
+    }
+  }
 }

@@ -60,7 +60,7 @@ describe('AI - Simple Extended Tests', () => {
       expect(error.code).toBe('TEST_ERROR');
       expect(error.message).toBe('Test error message');
       expect(error.category).toBe('config');
-      expect(error.suggestions).toContain('AI generated response');
+      expect(error.suggestions).toEqual(['suggestion1', 'suggestion2']);
     });
 
     it('should create AIError with default suggestions', () => {
@@ -269,25 +269,101 @@ describe('AI - Simple Extended Tests', () => {
     it('should handle generateText with configuration', async () => {
       await ai.configure(mockConfig);
       
-      // Mock the rule parser to avoid complex mocking
-      const mockParse = jest.fn<any>().mockResolvedValue({
-        service: 'unknown',
-        method: 'unknown',
-        parameters: {},
-        confidence: 0.1,
-        parserType: 'rule',
-        error: 'No matching intent found',
+      // Mock callRawAPI to return a valid response
+      const mockCallRawAPI = jest.fn<any>().mockResolvedValue({
+        choices: [{
+          message: {
+            content: 'Mocked AI response text'
+          }
+        }]
       });
       
-      // Mock the rule parser instance
-      ai['ruleParser'] = { parse: mockParse } as any;
+      // Mock the callRawAPI method
+      ai['callRawAPI'] = mockCallRawAPI;
       
       const result = await ai.generateText('some random query');
       
-      // The actual implementation might return 'tool_call' or 'suggestions'
-      // Let's just check that it returns a valid result object
-      expect(result).toBeDefined();
-      expect(['tool_call', 'suggestions', 'error']).toContain(result.type);
+      expect(result).toBe('Mocked AI response text');
+      expect(mockCallRawAPI).toHaveBeenCalledWith({
+        messages: [
+          {
+            role: 'system',
+            content: 'You are a helpful AI assistant.'
+          },
+          {
+            role: 'user',
+            content: 'some random query'
+          }
+        ],
+        temperature: 0.7,
+        maxTokens: 2000
+      });
+    });
+
+    it('should handle generateText with custom options', async () => {
+      await ai.configure(mockConfig);
+      
+      // Mock callRawAPI to return a valid response
+      const mockCallRawAPI = jest.fn<any>().mockResolvedValue({
+        choices: [{
+          message: {
+            content: 'Mocked AI response with custom options'
+          }
+        }]
+      });
+      
+      // Mock the callRawAPI method
+      ai['callRawAPI'] = mockCallRawAPI;
+      
+      const result = await ai.generateText('test query', {
+        temperature: 0.5,
+        maxTokens: 1000,
+        systemPrompt: 'You are a specialized assistant.'
+      });
+      
+      expect(result).toBe('Mocked AI response with custom options');
+      expect(mockCallRawAPI).toHaveBeenCalledWith({
+        messages: [
+          {
+            role: 'system',
+            content: 'You are a specialized assistant.'
+          },
+          {
+            role: 'user',
+            content: 'test query'
+          }
+        ],
+        temperature: 0.5,
+        maxTokens: 1000
+      });
+    });
+
+    it('should handle generateText with different response formats', async () => {
+      await ai.configure(mockConfig);
+      
+      // Test Anthropic format
+      const mockCallRawAPI = jest.fn<any>().mockResolvedValue({
+        content: [{
+          text: 'Anthropic format response'
+        }]
+      });
+      
+      ai['callRawAPI'] = mockCallRawAPI;
+      
+      const result = await ai.generateText('test query');
+      
+      expect(result).toBe('Anthropic format response');
+    });
+
+    it('should handle generateText errors', async () => {
+      await ai.configure(mockConfig);
+      
+      // Mock callRawAPI to throw error
+      const mockCallRawAPI = jest.fn<any>().mockRejectedValue(new Error('API error'));
+      
+      ai['callRawAPI'] = mockCallRawAPI;
+      
+      await expect(ai.generateText('test query')).rejects.toThrow(AIError);
     });
   });
 });

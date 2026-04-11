@@ -6,6 +6,7 @@ jest.mock('../src/ai/ai', () => ({
   AI: jest.fn().mockImplementation(() => ({
     configure: jest.fn().mockResolvedValue(undefined as any),
     ask: jest.fn().mockResolvedValue({ answer: 'Test answer' } as any),
+    generateText: jest.fn().mockResolvedValue('Test text response'),
     getStatus: jest.fn().mockReturnValue({ 
       enabled: true, 
       configured: true, 
@@ -246,9 +247,9 @@ describe('AICommand', () => {
     it('should handle generateText action', async () => {
       await aiCommand.handleCommand('ask', 'What is AI?');
       
-      // Verify AI.ask was called
+      // Verify AI.generateText was called
       const aiInstance = (aiCommand as any).ai;
-      expect(aiInstance.ask).toHaveBeenCalledWith('What is AI?');
+      expect(aiInstance.generateText).toHaveBeenCalledWith('What is AI?');
     });
 
     it('should handle status action', async () => {
