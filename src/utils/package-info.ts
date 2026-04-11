@@ -1,19 +1,51 @@
 /**
- * Package information utility - Simple and compatible solution
+ * Package information utility - Refactored for testability
  * 
  * This module provides a simple way to get package.json information
  * without using problematic JSON import assertions.
  * 
- * The solution: Use TypeScript's resolveJsonModule with a simple require wrapper
+ * Refactored to allow dependency injection for better testability.
  */
 
 // Cache for package.json data
 let _packageInfo: any = null;
 
+// Default dependencies that can be overridden in tests
+let dependencies = {
+  fs: require('fs'),
+  path: require('path'),
+  require: require
+};
+
+/**
+ * Set dependencies for testing
+ */
+export function setDependencies(newDeps: Partial<typeof dependencies>) {
+  dependencies = { ...dependencies, ...newDeps };
+}
+
+/**
+ * Reset dependencies to defaults
+ */
+export function resetDependencies() {
+  dependencies = {
+    fs: require('fs'),
+    path: require('path'),
+    require: require
+  };
+}
+
+/**
+ * Clear the package info cache
+ */
+export function clearCache() {
+  _packageInfo = null;
+}
+
 /**
  * Load package.json using the most compatible method
  */
-function loadPackageInfo(): any {
+export function loadPackageInfo(): any {
   if (_packageInfo) {
     return _packageInfo;
   }
@@ -21,13 +53,13 @@ function loadPackageInfo(): any {
   try {
     // Strategy 1: Direct require (works in CJS and with ts-node)
     // This works because TypeScript's resolveJsonModule is enabled
-    _packageInfo = require('../../package.json');
+    _packageInfo = dependencies.require('../../package.json');
     return _packageInfo;
   } catch (error1) {
     try {
       // Strategy 2: Use fs.readFileSync as fallback
-      const fs = require('fs');
-      const path = require('path');
+      const fs = dependencies.fs;
+      const path = dependencies.path;
       const packagePath = path.resolve(__dirname, '../../package.json');
       const content = fs.readFileSync(packagePath, 'utf8');
       _packageInfo = JSON.parse(content);
@@ -36,7 +68,7 @@ function loadPackageInfo(): any {
       // Strategy 3: Fallback to environment variables or defaults
       _packageInfo = {
         name: process.env.npm_package_name || '@mcpilotx/intentorch',
-        version: process.env.npm_package_version || '0.7.0',
+        version: process.env.npm_package_version || '0.7.1',
         description: process.env.npm_package_description || 'Intent-Driven MCP Orchestration Toolkit'
       };
       return _packageInfo;
@@ -80,5 +112,10 @@ export default {
   getPackageVersion,
   getPackageName,
   getPackageDescription,
-  getPackageInfo
+  getPackageInfo,
+  // Expose testability functions
+  setDependencies,
+  resetDependencies,
+  clearCache,
+  loadPackageInfo
 };

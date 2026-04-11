@@ -1,6 +1,6 @@
 {
   "name": "@mcpilotx/intentorch",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "type": "module",
   "description": "Intent-Driven MCP Orchestration Toolkit - Transform natural language into executable workflows with AI-powered intent parsing and MCP tool orchestration",
   "keywords": [
