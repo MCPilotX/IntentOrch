@@ -8,8 +8,7 @@
  * 2. Run: node github-pr-slack-en.js
  */
 
-import { createSDK } from '../../dist/index.js';
-//import { createSDK } from '@mcpilotx/intentorch';
+import { createSDK } from '@mcpilotx/intentorch';
 import dotenv from 'dotenv';
 
 dotenv.config();

@@ -8,7 +8,7 @@
  * 2. 运行: node github-pr-dingtalk.js
  */
 
-import { createSDK } from '../../dist/index.js';
+import { createSDK } from '@mcpilotx/intentorch';
 import dotenv from 'dotenv';
 
 dotenv.config();

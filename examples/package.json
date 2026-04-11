@@ -1,7 +1,7 @@
 {
   "type": "module",
   "dependencies": {
-    "@mcpilotx/intentorch": "^0.6.0",
+    "@mcpilotx/intentorch": "^0.7.0",
     "@modelcontextprotocol/server-github": "^2025.4.8",
     "@modelcontextprotocol/server-slack": "^2025.4.25"
   }
