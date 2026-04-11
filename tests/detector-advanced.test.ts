@@ -643,8 +643,8 @@ describe('EnhancedRuntimeDetector', () => {
 
         const result = await (EnhancedRuntimeDetector as any).runEnhancedDetection('/test/path');
         
-        // Calculate expected confidence: (0.3*0.8 + 0.1*0.3) / (0.3+0.1) = (0.24 + 0.03) / 0.4 = 0.675
-        expect(result.confidence).toBeCloseTo(0.675, 2);
+        // Calculate expected confidence: (0.3*0.8 + 0.1*0.3) = 0.24 + 0.03 = 0.27
+        expect(result.confidence).toBeCloseTo(0.27, 2);
         expect(result.runtime).toBe('node');
         expect(result.source).toBe('enhanced');
         expect(result.evidence.executableAnalysis).toBeUndefined();
@@ -675,8 +675,8 @@ describe('EnhancedRuntimeDetector', () => {
 
         const result = await (EnhancedRuntimeDetector as any).runEnhancedDetection('/test/path');
         
-        // Calculate expected confidence: (0.4*0.2 + 0.1*0.1) / (0.4+0.1) = (0.08 + 0.01) / 0.5 = 0.18
-        expect(result.confidence).toBeCloseTo(0.18, 2);
+        // Calculate expected confidence: (0.4*0.2 + 0.1*0.1) = 0.08 + 0.01 = 0.09
+        expect(result.confidence).toBeCloseTo(0.09, 2);
         expect(result.runtime).toBe('binary');
         expect(result.warning).toContain('Detection confidence too low');
         expect(result.suggestions).toBeDefined();

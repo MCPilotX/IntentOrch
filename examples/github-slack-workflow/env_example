@@ -1,0 +1,17 @@
+# AI 配置
+AI_PROVIDER=deepseek
+AI_API_KEY=sk-xxx
+AI_MODEL=deepseek-chat
+
+# GitHub 配置
+# 获取 Token: https://github.com/settings/tokens
+GITHUB_TOKEN=ghp_xxx
+REPO_OWNER=facebook
+REPO_NAME=react
+PR_NUMBER=1
+
+# Slack 配置
+# 创建 App 并获取 Token: https://api.slack.com/apps
+SLACK_TOKEN=xoxb-xxx
+SLACK_TEAM_ID=T0xxx
+SLACK_CHANNEL=intentorch

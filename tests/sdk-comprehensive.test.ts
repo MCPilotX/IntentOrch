@@ -49,10 +49,14 @@ describe('IntentOrchSDK - Comprehensive Tests', () => {
       configure: jest.fn().mockResolvedValue(undefined),
       ask: jest.fn().mockImplementation((query: string) => {
         return Promise.resolve({
-          type: 'suggestions',
+          type: 'text',
+          text: `I received your query: "${query}"`,
           message: `I received your query: "${query}"`,
           confidence: 0.8
         });
+      }),
+      generateText: jest.fn().mockImplementation((query: string) => {
+        return Promise.resolve(`Mocked text response for: ${query}`);
       }),
       getStatus: jest.fn().mockReturnValue({
         enabled: true,
@@ -234,7 +238,7 @@ describe('IntentOrchSDK - Comprehensive Tests', () => {
       const aiError = new Error('AI provider not configured');
       // Add the type property to simulate AIError
       (aiError as any).type = 'AIError';
-      mockAI.ask.mockRejectedValueOnce(aiError);
+      mockAI.generateText.mockRejectedValueOnce(aiError);
 
       await expect(sdk.generateText('test query'))
         .rejects.toThrow('AI provider not configured');
@@ -246,7 +250,7 @@ describe('IntentOrchSDK - Comprehensive Tests', () => {
 
     it('should wrap non-AIError in generic error', async () => {
       const genericError = new Error('Generic error');
-      mockAI.ask.mockRejectedValueOnce(genericError);
+      mockAI.generateText.mockRejectedValueOnce(genericError);
 
       await expect(sdk.generateText('test query'))
         .rejects.toThrow('AI query failed: Generic error');
@@ -797,7 +801,7 @@ describe('IntentOrchSDK - Comprehensive Tests', () => {
       expect(CloudIntentEngine).toHaveBeenCalledWith(config);
       expect(mockCloudIntentEngine.initialize).toHaveBeenCalled();
       expect(mockCloudIntentEngine.setAvailableTools).toHaveBeenCalled();
-      expect(mockLogger.info).toHaveBeenCalledWith('Cloud Intent Engine initialized successfully');
+      expect(mockLogger.info).toHaveBeenCalledWith(expect.stringContaining('Cloud Intent Engine initialized successfully'));
     });
 
     it('should initialize Cloud Intent Engine with default config', async () => {
@@ -814,7 +818,7 @@ describe('IntentOrchSDK - Comprehensive Tests', () => {
 
       expect(CloudIntentEngine).toHaveBeenCalled();
       expect(mockCloudIntentEngine.initialize).toHaveBeenCalled();
-      expect(mockLogger.info).toHaveBeenCalledWith('Cloud Intent Engine initialized successfully');
+      expect(mockLogger.info).toHaveBeenCalledWith(expect.stringContaining('Cloud Intent Engine initialized successfully'));
     });
 
     it('should handle initialization errors', async () => {

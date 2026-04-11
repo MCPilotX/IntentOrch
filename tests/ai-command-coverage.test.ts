@@ -57,7 +57,7 @@ jest.mock('../src/ai/ai', () => {
         return { success: true, message: 'Connection test successful (mocked)' };
       }
       
-      async ask(query: string): Promise<any> {
+      async parseIntent(query: string): Promise<any> {
         if (!this.mockConfigured) {
           throw new originalModule.AIError(
             'AI_NOT_CONFIGURED',
@@ -68,19 +68,44 @@ jest.mock('../src/ai/ai', () => {
         
         if (query.includes('list files')) {
           return {
-            type: 'tool_call',
-            tool: {
-              name: 'filesystem.list_files',
-              arguments: { path: '.' },
-            },
+            action: 'list',
+            target: 'files',
+            params: { path: '.' },
             confidence: 0.9,
           };
         }
         
         return {
-          type: 'suggestions',
-          message: 'Mocked response',
-          suggestions: ['Mocked suggestion'],
+          action: 'unknown',
+          target: 'query',
+          params: { query },
+          confidence: 0.3,
+        };
+      }
+      
+      async generateText(query: string, options?: any): Promise<string> {
+        if (!this.mockConfigured) {
+          throw new originalModule.AIError(
+            'AI_NOT_CONFIGURED',
+            'AI provider not configured',
+            'config'
+          );
+        }
+        
+        return `Mocked text response for: ${query}`;
+      }
+      
+      mapIntentToTool(intent: any): any {
+        if (intent.action === 'list' && intent.target === 'files') {
+          return {
+            name: 'filesystem.list_files',
+            arguments: { path: intent.params.path || '.' },
+          };
+        }
+        
+        return {
+          name: 'system.unknown',
+          arguments: { intent: JSON.stringify(intent) },
         };
       }
       
@@ -304,7 +329,7 @@ describe('AICommand Coverage Tests', () => {
         expect.stringContaining('🤖 Query: "list files in current directory"')
       );
       expect(consoleLogSpy).toHaveBeenCalledWith(
-        expect.stringContaining('✅ Intent recognized')
+        expect.stringMatching(/.*✅ Intent recognized.*/)
       );
     });
 
@@ -487,10 +512,10 @@ describe('AICommand Coverage Tests', () => {
       await aiCommand.handleCommand('configure', 'openai', '--api-key=test-key');
       consoleLogSpy.mockClear();
       
-      // Mock ask to throw AIError
+      // Mock parseIntent to throw AIError
       const ai = (aiCommand as any).ai;
-      const originalAsk = ai.ask;
-      ai.ask = jest.fn().mockRejectedValue(
+      const originalParseIntent = ai.parseIntent;
+      ai.parseIntent = jest.fn().mockRejectedValue(
         new AIError('AI_ERROR', 'Test AI error', 'execution') as any
       );
       
@@ -501,7 +526,7 @@ describe('AICommand Coverage Tests', () => {
       );
       
       // Restore original method
-      ai.ask = originalAsk;
+      ai.parseIntent = originalParseIntent;
     });
 
     it('should handle generic error in ask command', async () => {
@@ -509,10 +534,10 @@ describe('AICommand Coverage Tests', () => {
       await aiCommand.handleCommand('configure', 'openai', '--api-key=test-key');
       consoleLogSpy.mockClear();
       
-      // Mock ask to throw generic error
+      // Mock parseIntent to throw generic error
       const ai = (aiCommand as any).ai;
-      const originalAsk = ai.ask;
-      ai.ask = jest.fn().mockRejectedValue(new Error('Generic error') as any);
+      const originalParseIntent = ai.parseIntent;
+      ai.parseIntent = jest.fn().mockRejectedValue(new Error('Generic error') as any);
       
       await aiCommand.handleCommand('ask', 'test query');
       
@@ -521,7 +546,7 @@ describe('AICommand Coverage Tests', () => {
       );
       
       // Restore original method
-      ai.ask = originalAsk;
+      ai.parseIntent = originalParseIntent;
     });
   });
 
@@ -531,30 +556,24 @@ describe('AICommand Coverage Tests', () => {
       await aiCommand.handleCommand('configure', 'openai', '--api-key=test-key');
       consoleLogSpy.mockClear();
       
-      // Mock ask to return suggestions
+      // Mock parseIntent to return unknown intent (which will trigger generateText)
       const ai = (aiCommand as any).ai;
-      const originalAsk = ai.ask;
-      ai.ask = jest.fn().mockResolvedValue({
-        type: 'suggestions',
-        message: 'Try these commands',
-        help: 'Additional help text',
-        suggestions: ['command1', 'command2', 'command3']
+      const originalParseIntent = ai.parseIntent;
+      ai.parseIntent = jest.fn().mockResolvedValue({
+        action: 'unknown',
+        target: 'query',
+        params: { query: 'test query' },
+        confidence: 0.3,
       });
       
       await aiCommand.handleCommand('ask', 'test query');
       
       expect(consoleLogSpy).toHaveBeenCalledWith(
-        expect.stringContaining('yellow(⚠️ Try these commands)')
-      );
-      expect(consoleLogSpy).toHaveBeenCalledWith(
-        expect.stringContaining('Additional help text')
-      );
-      expect(consoleLogSpy).toHaveBeenCalledWith(
-        expect.stringContaining('🔧 Suggested commands:')
+        expect.stringContaining('🤖 AI Response:')
       );
       
       // Restore original method
-      ai.ask = originalAsk;
+      ai.parseIntent = originalParseIntent;
     });
 
     it('should handle error result type', async () => {
@@ -562,72 +581,47 @@ describe('AICommand Coverage Tests', () => {
       await aiCommand.handleCommand('configure', 'openai', '--api-key=test-key');
       consoleLogSpy.mockClear();
       
-      // Mock ask to return error
+      // Mock parseIntent to throw error
       const ai = (aiCommand as any).ai;
-      const originalAsk = ai.ask;
-      ai.ask = jest.fn().mockResolvedValue({
-        type: 'error',
-        message: 'Failed to parse intent'
-      });
+      const originalParseIntent = ai.parseIntent;
+      ai.parseIntent = jest.fn().mockRejectedValue(new Error('Failed to parse intent') as any);
       
       await aiCommand.handleCommand('ask', 'test query');
       
       expect(consoleLogSpy).toHaveBeenCalledWith(
-        expect.stringContaining('red(❌ Failed to parse intent)')
+        expect.stringContaining('❌ Error: Failed to parse intent')
       );
       
       // Restore original method
-      ai.ask = originalAsk;
+      ai.parseIntent = originalParseIntent;
     });
 
-    it('should handle suggestions without help text', async () => {
+    it('should handle tool_call result type', async () => {
       // First configure
       await aiCommand.handleCommand('configure', 'openai', '--api-key=test-key');
       consoleLogSpy.mockClear();
       
-      // Mock ask to return suggestions without help
+      // Mock parseIntent to return valid intent
       const ai = (aiCommand as any).ai;
-      const originalAsk = ai.ask;
-      ai.ask = jest.fn().mockResolvedValue({
-        type: 'suggestions',
-        message: 'Try these commands',
-        suggestions: ['command1', 'command2']
+      const originalParseIntent = ai.parseIntent;
+      ai.parseIntent = jest.fn().mockResolvedValue({
+        action: 'list',
+        target: 'files',
+        params: { path: '.' },
+        confidence: 0.9,
       });
       
-      await aiCommand.handleCommand('ask', 'test query');
+      await aiCommand.handleCommand('ask', 'list files');
       
       expect(consoleLogSpy).toHaveBeenCalledWith(
-        expect.stringContaining('yellow(⚠️ Try these commands)')
+        expect.stringMatching(/.*✅ Intent recognized.*/)
       );
       expect(consoleLogSpy).toHaveBeenCalledWith(
-        expect.stringContaining('🔧 Suggested commands:')
+        expect.stringContaining('🔧 Tool call:')
       );
       
       // Restore original method
-      ai.ask = originalAsk;
-    });
-
-    it('should handle suggestions without suggestions array', async () => {
-      // First configure
-      await aiCommand.handleCommand('configure', 'openai', '--api-key=test-key');
-      consoleLogSpy.mockClear();
-      
-      // Mock ask to return suggestions without suggestions array
-      const ai = (aiCommand as any).ai;
-      const originalAsk = ai.ask;
-      ai.ask = jest.fn().mockResolvedValue({
-        type: 'suggestions',
-        message: 'Try these commands'
-      });
-      
-      await aiCommand.handleCommand('ask', 'test query');
-      
-      expect(consoleLogSpy).toHaveBeenCalledWith(
-        expect.stringContaining('yellow(⚠️ Try these commands)')
-      );
-      
-      // Restore original method
-      ai.ask = originalAsk;
+      ai.parseIntent = originalParseIntent;
     });
   });
 

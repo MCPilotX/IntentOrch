@@ -375,8 +375,8 @@ export class IntentOrchSDK {
         throw error;
       }
 
-      this.logger.error(`Text generation failed: ${error}`);
-      throw new Error(`Text generation failed: ${error instanceof Error ? error.message : String(error)}`);
+      this.logger.error(`AI query failed: ${error}`);
+      throw new Error(`AI query failed: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 

@@ -144,6 +144,84 @@ export interface ExecutionResult {
   }>;
 }
 
+// ==================== Interactive Feedback Types ====================
+
+/**
+ * User confirmation option
+ */
+export interface ConfirmationOption {
+  id: string;
+  description: string;
+  suggestedAction: 'proceed' | 'reparse' | 'abort' | 'modify';
+  confidence?: number;
+  parsedIntents?: AtomicIntent[];
+  reason?: string;
+}
+
+/**
+ * User confirmation request
+ */
+export interface UserConfirmationRequest {
+  query: string;
+  parsedIntents: AtomicIntent[];
+  confidence: number;
+  reason: string;
+  options: ConfirmationOption[];
+  analysis?: {
+    isLikelySimpleQuery: boolean;
+    hasMultipleActions: boolean;
+    hasTemporalMarkers: boolean;
+    likelySingleToolMatch: string | null;
+    complexityScore: number;
+  };
+  timestamp: Date;
+}
+
+/**
+ * User confirmation response
+ */
+export interface UserConfirmationResponse {
+  selectedOptionId: string;
+  feedback?: string;
+  timestamp: Date;
+  userModifiedIntents?: AtomicIntent[]; // Optional: user can modify intents
+}
+
+/**
+ * Feedback learning record
+ */
+export interface FeedbackLearningRecord {
+  query: string;
+  originalIntents: AtomicIntent[];
+  userResponse: UserConfirmationResponse;
+  confidence: number;
+  success: boolean;
+  timestamp: Date;
+  learnedPattern?: string;
+}
+
+/**
+ * Confirmation configuration
+ */
+export interface ConfirmationConfig {
+  enabled: boolean;
+  confidenceThreshold: number; // Below this threshold, confirmation is required
+  autoProceedThreshold: number; // Above this threshold, auto proceed
+  maxOptions: number;
+  learnFromFeedback: boolean;
+  feedbackHistorySize: number;
+}
+
+/**
+ * Parse intent options with confirmation support
+ */
+export interface ParseIntentOptions {
+  requireConfirmation?: boolean;
+  confirmationCallback?: (request: UserConfirmationRequest) => Promise<UserConfirmationResponse>;
+  autoProceedOnHighConfidence?: boolean;
+  learningEnabled?: boolean;
+}
+
 // ==================== Configuration Interface ====================
 
 export interface CloudIntentEngineConfig {
@@ -259,40 +337,92 @@ export class CloudIntentEngine {
 
   /**
    * Parse natural language instruction into atomic intents and dependencies
-   * Enhanced to support @intentorch directives
+   * Enhanced with minimal decomposition principle and confidence assessment
    */
-  async parseIntent(query: string): Promise<IntentParseResult> {
+  async parseIntent(query: string): Promise<IntentParseResult>;
+  
+  /**
+   * Parse natural language instruction with interactive feedback confirmation
+   */
+  async parseIntent(query: string, options?: ParseIntentOptions): Promise<IntentParseResult>;
+  
+  async parseIntent(query: string, options?: ParseIntentOptions): Promise<IntentParseResult> {
     logger.info(`[CloudIntentEngine] Parsing intent: "${query}"`);
 
     try {
       // Step 1: Process @intentorch directives
       const directiveResult = intentorchDirectiveProcessor.processQuery(query);
 
-      // Step 2: Parse cleaned query with LLM
+      // Step 2: Pre-analyze query for minimal decomposition
+      const preAnalysis = this.preAnalyzeQuery(directiveResult.cleanedQuery);
+      
+      // Step 3: Parse cleaned query with LLM (using enhanced prompt)
       const prompt = this.buildIntentParsePrompt(directiveResult.cleanedQuery);
       const llmResponse = await this.callLLM(prompt, {
         temperature: 0.1,
         maxTokens: 1024,
       });
 
-      // Step 3: Parse LLM response
+      // Step 4: Parse LLM response
       const baseResult = this.parseIntentResponse(llmResponse);
 
-      // Step 4: Enhance workflow with @intentorch directives if present
+      // Step 5: Apply minimal decomposition correction if needed
+      const correctedResult = this.applyMinimalDecompositionCorrection(
+        baseResult, 
+        directiveResult.cleanedQuery,
+        preAnalysis
+      );
+
+      // Step 6: Assess confidence and log analysis
+      const confidence = this.assessParsingConfidence(correctedResult, directiveResult.cleanedQuery);
+      logger.info(`[CloudIntentEngine] Parsed ${correctedResult.intents.length} intents with ${correctedResult.edges.length} dependencies (confidence: ${confidence.toFixed(2)})`);
+
+      // Step 7: Enhance workflow with @intentorch directives if present
       let finalResult: IntentParseResult;
       if (directiveResult.hasDirectives) {
         logger.info(`[CloudIntentEngine] Enhancing workflow with ${directiveResult.directives.length} @intentorch directives`);
         finalResult = intentorchDirectiveProcessor.enhanceWorkflowWithDirectives(
-          baseResult,
+          correctedResult,
           directiveResult.directives,
         );
       } else {
-        finalResult = baseResult;
+        finalResult = correctedResult;
       }
 
-      logger.info(`[CloudIntentEngine] Parsed ${finalResult.intents.length} intents with ${finalResult.edges.length} dependencies`);
+      // Step 8: Check if interactive feedback confirmation is needed
+      if (options?.confirmationCallback && this.shouldRequestConfirmation(confidence, options)) {
+        logger.info(`[CloudIntentEngine] Low confidence (${confidence.toFixed(2)}), requesting user confirmation`);
+        
+        const confirmationRequest = this.buildConfirmationRequest(
+          query,
+          finalResult,
+          confidence,
+          preAnalysis,
+          options
+        );
+        
+        const userResponse = await options.confirmationCallback(confirmationRequest);
+        
+        // Handle user response
+        return this.handleConfirmationResponse(userResponse, finalResult, query, preAnalysis);
+      }
+
+      // Step 9: Log final result with confidence
       if (directiveResult.hasDirectives) {
         logger.info(`[CloudIntentEngine] Includes ${directiveResult.directives.length} AI summary steps from @intentorch directives`);
+      }
+
+      // Step 10: Log decomposition decision for debugging
+      this.logDecompositionDecision(
+        directiveResult.cleanedQuery,
+        baseResult.intents.length,
+        correctedResult.intents.length,
+        confidence
+      );
+
+      // Step 11: Record feedback for learning if enabled
+      if (options?.learningEnabled !== false) {
+        this.recordFeedbackForLearning(query, finalResult, confidence, null, true);
       }
 
       return finalResult;
@@ -697,59 +827,204 @@ export class CloudIntentEngine {
   // ==================== Private Methods ====================
 
   /**
-   * Build intent parsing prompt
+   * Build intent parsing prompt with minimal decomposition principle
+   * Generic SDK approach - no domain-specific hardcoding
    */
   private buildIntentParsePrompt(query: string): string {
-    return `You are a workflow parser. Please decompose the following natural language instruction into atomic intents and infer their dependencies.
+    // Get available tools information for context
+    const toolContext = this.generateToolContextForPrompt();
+    
+    return `You are an intelligent workflow analyzer. Please analyze the following user query and decide whether it needs to be decomposed into multiple steps.
 
-User instruction: "${query}"
+## User Query
+"${query}"
 
-Please output JSON format with the following fields:
-1. "intents": Array of atomic intents, each containing:
-   - "id": Unique identifier (e.g., A1, A2, A3...)
-   - "type": Short action name (e.g., open_web, search, screenshot, send_email, send_to_slack, fetch_pr_details, fetch_pr_changes)
-   - "description": Human-readable step description
-   - "parameters": Parameter dictionary extracted from instruction
+## Available Tools Context
+${toolContext}
 
-2. "edges": Array of dependency edges, each containing:
-   - "from": Source intent ID
-   - "to": Target intent ID
+## Analysis Principles (IMPORTANT)
 
-IMPORTANT RULES FOR PARAMETERS:
-1. When an intent depends on the output of another intent, use variable reference format: {{intentId}} or {{intentId.field}}
-   Example: If intent A3 needs content from intent A2, use {"content": "{{A2}}"}
-   Example: If intent A4 needs summary from intent A3, use {"message": "{{A3.summary}}"} or {"report_content": "{{A3}}"}
-   
-2. NEVER use hardcoded text like "来自 A3 的输出" or "output from A3". Always use variable references.
+### 1. MINIMAL DECOMPOSITION PRINCIPLE
+- **Default: Single Intent** - Most queries should be kept as a single intent
+- **Only decompose when explicitly needed** - Only if the query clearly requires multiple independent steps
+- **Single tool priority** - If a single tool can handle the entire query, use a single intent
 
-3. For send_to_slack intent type:
-   - Use {"channel": "#channel-name", "message": "{{previous_intent}}"} or {"channel": "#channel-name", "report_content": "{{previous_intent}}"}
-   - The message/report_content should reference the intent that generates the content
+### 2. WHEN TO DECOMPOSE (Only in these cases):
+- Query contains explicit sequence markers: "then", "next", "after that", "and then", "first...then..."
+- Query describes multiple independent actions: "analyze X and send to Y", "fetch data and process it"
+- No single tool can handle all requirements
 
-4. For fetch_pr_details intent type:
-   - Use {"repository": "owner/repo", "pr_number": number}
+### 3. WHEN TO KEEP SINGLE INTENT (Most cases):
+- Simple queries: "search for X", "get information about Y", "query data"
+- Single action queries: "open website", "take screenshot", "send message"
+- Tool-specific queries: queries that match a specific tool's purpose
+- Queries that a single tool can handle completely
 
-5. For fetch_pr_changes intent type:
-   - Use {"repository": "owner/repo", "pr_number": number}
+### 4. GENERAL GUIDELINES:
+- Simple data retrieval queries → SINGLE intent
+- Information search queries → SINGLE intent
+- Complex workflows with multiple actions → MAY need decomposition
+- Queries with temporal sequence → MAY need decomposition
 
-Dependencies should be inferred based on common sense (e.g., open webpage before searching, get results before taking screenshot).
+## Output Format
+Please output JSON with the following structure:
 
-Example output for "Analyze GitHub PR and send to Slack":
 {
   "intents": [
-    {"id": "A1", "type": "fetch_pr_details", "description": "Get PR details from GitHub", "parameters": {"repository": "facebook/react", "pr_number": 1}},
-    {"id": "A2", "type": "fetch_pr_changes", "description": "Get PR file changes", "parameters": {"repository": "facebook/react", "pr_number": 1}},
-    {"id": "A3", "type": "analyze_content", "description": "Analyze PR content and generate summary", "parameters": {"content": "{{A1}} and {{A2}}"}},
-    {"id": "A4", "type": "send_to_slack", "description": "Send analysis report to Slack", "parameters": {"channel": "#intentorch", "report_content": "{{A3}}"}}
+    {
+      "id": "A1",
+      "type": "action_type",
+      "description": "Step description",
+      "parameters": {}
+    }
+  ],
+  "edges": []
+}
+
+## Important Notes:
+1. Most queries should have only ONE intent in the "intents" array
+2. Only add multiple intents if decomposition is absolutely necessary
+3. For single intents, use the most appropriate tool name as the "type"
+4. For parameters, extract relevant information from the query
+5. Consider tool capabilities when deciding decomposition
+
+## Example Outputs:
+
+Example 1 (Single intent - simple query):
+{
+  "intents": [
+    {
+      "id": "A1",
+      "type": "search",
+      "description": "Search for information",
+      "parameters": {
+        "query": "latest AI developments"
+      }
+    }
+  ],
+  "edges": []
+}
+
+Example 2 (Single intent - data retrieval):
+{
+  "intents": [
+    {
+      "id": "A1",
+      "type": "get_data",
+      "description": "Retrieve data",
+      "parameters": {
+        "query": "customer information"
+      }
+    }
+  ],
+  "edges": []
+}
+
+Example 3 (Multiple intents - only when explicitly needed):
+{
+  "intents": [
+    {
+      "id": "A1",
+      "type": "fetch_details",
+      "description": "Get details from source",
+      "parameters": {
+        "source": "database",
+        "id": 123
+      }
+    },
+    {
+      "id": "A2",
+      "type": "analyze_content",
+      "description": "Analyze content",
+      "parameters": {
+        "content": "{{A1}}"
+      }
+    },
+    {
+      "id": "A3",
+      "type": "send_message",
+      "description": "Send analysis report",
+      "parameters": {
+        "channel": "#reports",
+        "message": "{{A2}}"
+      }
+    }
   ],
   "edges": [
-    {"from": "A1", "to": "A3"},
-    {"from": "A2", "to": "A3"},
-    {"from": "A3", "to": "A4"}
+    {"from": "A1", "to": "A2"},
+    {"from": "A2", "to": "A3"}
   ]
 }
 
 Output only JSON, no other content.`;
+  }
+
+  /**
+   * Generate tool context for prompt
+   */
+  private generateToolContextForPrompt(): string {
+    if (!this.availableTools || this.availableTools.length === 0) {
+      return "No tools available.";
+    }
+
+    // Group tools by likely capability
+    const singleStepTools = this.availableTools.filter(tool => 
+      this.isLikelySingleStepTool(tool)
+    );
+    
+    const multiStepTools = this.availableTools.filter(tool => 
+      !this.isLikelySingleStepTool(tool)
+    );
+
+    let context = "Available tools:\n";
+
+    if (singleStepTools.length > 0) {
+      context += "\nSingle-step tools (can handle complete queries):\n";
+      singleStepTools.forEach(tool => {
+        context += `- ${tool.name}: ${tool.description}\n`;
+      });
+    }
+
+    if (multiStepTools.length > 0) {
+      context += "\nMulti-step tools (may need decomposition):\n";
+      multiStepTools.forEach(tool => {
+        context += `- ${tool.name}: ${tool.description}\n`;
+      });
+    }
+
+    return context;
+  }
+
+  /**
+   * Check if a tool is likely single-step
+   */
+  private isLikelySingleStepTool(tool: Tool): boolean {
+    const toolName = tool.name.toLowerCase();
+    
+    // Single-step tool patterns
+    const singleStepPatterns = [
+      /^get-/, /^fetch-/, /^query-/, /^search-/, /^find-/, /^lookup-/,
+      /^read-/, /^retrieve-/, /^open-/, /^close-/, /^start-/, /^stop-/,
+      /^create-/, /^delete-/, /^update-/, /^send-/, /^post-/, /^notify-/
+    ];
+
+    // Multi-step tool patterns
+    const multiStepPatterns = [
+      /^analyze-/, /^process-/, /^transform-/, /^pipeline-/,
+      /^workflow-/, /^orchestrate-/, /^coordinate-/
+    ];
+
+    // Check patterns
+    if (singleStepPatterns.some(pattern => pattern.test(toolName))) {
+      return true;
+    }
+
+    if (multiStepPatterns.some(pattern => pattern.test(toolName))) {
+      return false;
+    }
+
+    // Default: assume single-step for simplicity
+    return true;
   }
 
   /**
@@ -969,7 +1244,7 @@ Output only JSON, no other content.`;
       // Strategy 4: Try to find any tool that can handle the intent type
       logger.debug(`[CloudIntentEngine] Attempting intent-type based matching for intent ${intent.id}`);
       const typeBasedMatch = this.intentTypeBasedToolSelection(intent);
-      if (typeBasedMatch.confidence > 0.2) {
+      if (typeBasedMatch && typeBasedMatch.confidence > 0.2) {
         logger.info(`[CloudIntentEngine] Type-based matching selected tool '${typeBasedMatch.toolName}' for intent ${intent.id} with confidence ${typeBasedMatch.confidence}`);
         return typeBasedMatch;
       }
@@ -1405,8 +1680,8 @@ Output only JSON, no other content.`;
       }
     }
 
-    // No type-based match found
-    throw new Error('No type-based match found');
+    // No type-based match found - return null to allow semantic-based or fallback selection
+    return null;
   }
 
   /**
@@ -1716,4 +1991,622 @@ Output only JSON, no other content.`;
       llmConfigured: !!this.config.llm.apiKey,
     };
   }
+
+  // ==================== Minimal Decomposition Helper Methods ====================
+
+  /**
+   * Pre-analyze query for minimal decomposition decision
+   */
+  private preAnalyzeQuery(query: string): QueryPreAnalysis {
+    const queryLower = query.toLowerCase();
+    
+    return {
+      query,
+      isLikelySimpleQuery: this.isLikelySimpleQuery(queryLower),
+      isLikelyDataRetrievalQuery: this.isLikelyDataRetrievalQuery(queryLower),
+      hasMultipleActions: this.hasMultipleActions(queryLower),
+      hasTemporalMarkers: this.hasTemporalMarkers(queryLower),
+      likelySingleToolMatch: this.findLikelySingleToolMatch(queryLower),
+      complexityScore: this.calculateQueryComplexity(queryLower)
+    };
+  }
+
+  /**
+   * Check if query is likely simple (should be single intent)
+   */
+  private isLikelySimpleQuery(queryLower: string): boolean {
+    // Generic simple query patterns - no domain-specific logic
+    const simplePatterns = [
+      /^(search|find|lookup|query|get|fetch|retrieve)\s+/,
+      /^open\s+/,
+      /^close\s+/,
+      /^start\s+/,
+      /^stop\s+/,
+      /^send\s+/,
+      /^create\s+/,
+      /^delete\s+/,
+      /^read\s+/,
+      /^write\s+/,
+      /^list\s+/,
+      /^show\s+/
+    ];
+
+    return simplePatterns.some(pattern => pattern.test(queryLower));
+  }
+
+  /**
+   * Check if query is likely a simple data retrieval query
+   */
+  private isLikelyDataRetrievalQuery(queryLower: string): boolean {
+    // Generic data retrieval patterns
+    const dataRetrievalPatterns = [
+      /^(get|fetch|retrieve|read|obtain)\s+/,
+      /data\s+(from|about)/,
+      /information\s+(about|on)/,
+      /query\s+(data|information)/
+    ];
+
+    return dataRetrievalPatterns.some(pattern => pattern.test(queryLower));
+  }
+
+  /**
+   * Check if query has multiple actions
+   */
+  private hasMultipleActions(queryLower: string): boolean {
+    const actionVerbs = [
+      'search', 'find', 'get', 'fetch', 'retrieve',
+      'analyze', 'process', 'send', 'post', 'create',
+      'update', 'delete', 'open', 'close', 'start', 'stop'
+    ];
+
+    const verbCount = actionVerbs.filter(verb => queryLower.includes(verb)).length;
+    return verbCount > 1;
+  }
+
+  /**
+   * Check if query has temporal markers indicating sequence
+   */
+  private hasTemporalMarkers(queryLower: string): boolean {
+    const temporalMarkers = [
+      'then', 'next', 'after', 'after that', 'and then',
+      'first', 'second', 'third', 'finally',
+      'step 1', 'step 2', 'step 3'
+    ];
+
+    return temporalMarkers.some(marker => queryLower.includes(marker));
+  }
+
+  /**
+   * Find likely single tool match for query
+   */
+  private findLikelySingleToolMatch(queryLower: string): string | null {
+    if (!this.availableTools || this.availableTools.length === 0) {
+      return null;
+    }
+
+    // Check for direct tool name matches
+    for (const tool of this.availableTools) {
+      const toolNameLower = tool.name.toLowerCase();
+      
+      // Check if tool name appears in query
+      if (queryLower.includes(toolNameLower)) {
+        return tool.name;
+      }
+
+      // Check for common tool patterns (generic)
+      if (toolNameLower.includes('search') && queryLower.includes('search')) {
+        return tool.name;
+      }
+
+      if (toolNameLower.includes('get') && queryLower.includes('get')) {
+        return tool.name;
+      }
+
+      if (toolNameLower.includes('fetch') && queryLower.includes('fetch')) {
+        return tool.name;
+      }
+
+      if (toolNameLower.includes('query') && queryLower.includes('query')) {
+        return tool.name;
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Calculate query complexity score (0-1)
+   */
+  private calculateQueryComplexity(queryLower: string): number {
+    let score = 0;
+
+    // Factor 1: Length
+    if (queryLower.length > 100) score += 0.3;
+    else if (queryLower.length > 50) score += 0.2;
+    else if (queryLower.length > 20) score += 0.1;
+
+    // Factor 2: Multiple actions
+    if (this.hasMultipleActions(queryLower)) score += 0.3;
+
+    // Factor 3: Temporal markers
+    if (this.hasTemporalMarkers(queryLower)) score += 0.3;
+
+    // Factor 4: Complex patterns
+    if (queryLower.includes('analyze') && queryLower.includes('send')) score += 0.2;
+    if (queryLower.includes('fetch') && queryLower.includes('process')) score += 0.2;
+
+    return Math.min(1, score);
+  }
+
+  /**
+   * Apply minimal decomposition correction
+   */
+  private applyMinimalDecompositionCorrection(
+    result: IntentParseResult,
+    query: string,
+    preAnalysis: QueryPreAnalysis
+  ): IntentParseResult {
+    // Rule 1: If it's a simple query but was decomposed, consider merging
+    if (preAnalysis.isLikelySimpleQuery && result.intents.length > 1 && preAnalysis.complexityScore < 0.5) {
+      logger.info(`[CloudIntentEngine] Simple query was decomposed into ${result.intents.length} intents, considering merge`);
+      
+      // If there's a likely single tool match, use it
+      if (preAnalysis.likelySingleToolMatch) {
+        return {
+          intents: [{
+            id: 'A1',
+            type: preAnalysis.likelySingleToolMatch,
+            description: `Execute: ${query}`,
+            parameters: { query }
+          }],
+          edges: []
+        };
+      }
+    }
+
+    // Rule 2: If AI returned single intent but pre-analysis suggests it might need decomposition,
+    // trust the AI (but log it)
+    if (result.intents.length === 1 && preAnalysis.complexityScore > 0.7) {
+      logger.info(`[CloudIntentEngine] Complex query kept as single intent by AI, trusting AI decision`);
+    }
+
+    // Rule 3: If too many intents were generated, try to merge
+    if (result.intents.length > 3 && preAnalysis.complexityScore < 0.6) {
+      logger.info(`[CloudIntentEngine] Query decomposed into ${result.intents.length} intents, which seems excessive. Attempting to merge.`);
+      
+      // Find the most appropriate single tool
+      const singleTool = preAnalysis.likelySingleToolMatch 
+        ? this.availableTools.find(t => t.name === preAnalysis.likelySingleToolMatch)
+        : this.findMostAppropriateToolForQuery(query);
+      
+      if (singleTool) {
+        return {
+          intents: [{
+            id: 'A1',
+            type: singleTool.name,
+            description: `Execute: ${query}`,
+            parameters: { query }
+          }],
+          edges: []
+        };
+      }
+    }
+
+    // Return original result if no correction needed
+    return result;
+  }
+
+  /**
+   * Assess parsing confidence
+   */
+  private assessParsingConfidence(result: IntentParseResult, query: string): number {
+    let confidence = 0.7; // Base confidence
+
+    const queryLower = query.toLowerCase();
+    
+    // Factor 1: Simple query check
+    const isSimpleQuery = this.isLikelySimpleQuery(queryLower);
+    if (isSimpleQuery && result.intents.length === 1) {
+      confidence += 0.1; // Simple queries should be single intent
+    } else if (isSimpleQuery && result.intents.length > 1) {
+      confidence -= 0.2; // Simple queries decomposed = lower confidence
+    }
+
+    // Factor 2: Tool existence check
+    const allToolsExist = result.intents.every(intent => {
+      return this.availableTools.some(tool => 
+        tool.name.toLowerCase().includes(intent.type.toLowerCase()) ||
+        intent.type.toLowerCase().includes(tool.name.toLowerCase())
+      );
+    });
+
+    if (allToolsExist) {
+      confidence += 0.1;
+    } else {
+      confidence -= 0.2;
+    }
+
+    // Factor 3: Parameter completeness
+    const hasParameters = result.intents.every(intent => 
+      intent.parameters && Object.keys(intent.parameters).length > 0
+    );
+
+    if (hasParameters) {
+      confidence += 0.1;
+    }
+
+    // Factor 4: Edge consistency
+    const validEdges = result.edges.every(edge => 
+      result.intents.some(i => i.id === edge.from) &&
+      result.intents.some(i => i.id === edge.to)
+    );
+
+    if (validEdges) {
+      confidence += 0.1;
+    }
+
+    return Math.max(0, Math.min(1, confidence));
+  }
+
+  /**
+   * Log decomposition decision for debugging
+   */
+  private logDecompositionDecision(
+    query: string,
+    originalIntentCount: number,
+    correctedIntentCount: number,
+    confidence: number
+  ): void {
+    const queryLower = query.toLowerCase();
+    
+    logger.debug(`[CloudIntentEngine] Decomposition decision for: "${query}"`);
+    logger.debug(`  - Original intents: ${originalIntentCount}`);
+    logger.debug(`  - Corrected intents: ${correctedIntentCount}`);
+    logger.debug(`  - Confidence: ${confidence.toFixed(2)}`);
+    
+    if (originalIntentCount !== correctedIntentCount) {
+      logger.debug(`  - Correction applied: ${originalIntentCount} → ${correctedIntentCount} intents`);
+    }
+  }
+
+  /**
+   * Find most appropriate tool for query
+   */
+  private findMostAppropriateToolForQuery(query: string): Tool | null {
+    if (!this.availableTools || this.availableTools.length === 0) {
+      return null;
+    }
+
+    const queryLower = query.toLowerCase();
+    let bestTool = null;
+    let bestScore = 0;
+
+    for (const tool of this.availableTools) {
+      let score = 0;
+      const toolNameLower = tool.name.toLowerCase();
+      const toolDescLower = tool.description.toLowerCase();
+
+      // Score based on name match
+      if (queryLower.includes(toolNameLower)) {
+        score += 3;
+      }
+
+      // Score based on common verbs
+      const commonVerbs = ['get', 'fetch', 'search', 'find', 'query', 'read', 'write'];
+      for (const verb of commonVerbs) {
+        if (queryLower.includes(verb) && (toolNameLower.includes(verb) || toolDescLower.includes(verb))) {
+          score += 2;
+        }
+      }
+
+      // Score based on description relevance
+      const queryWords = queryLower.split(/\W+/).filter(w => w.length > 2);
+      const toolDescWords = toolDescLower.split(/\W+/).filter(w => w.length > 2);
+      const overlappingWords = queryWords.filter(word => toolDescWords.includes(word));
+      score += overlappingWords.length;
+
+      if (score > bestScore) {
+        bestScore = score;
+        bestTool = tool;
+      }
+    }
+
+    return bestScore > 0 ? bestTool : null;
+  }
+
+  // ==================== Interactive Feedback Methods ====================
+
+  /**
+   * Check if confirmation should be requested
+   */
+  private shouldRequestConfirmation(confidence: number, options?: ParseIntentOptions): boolean {
+    // Default thresholds
+    const confidenceThreshold = 0.6;
+    const autoProceedThreshold = 0.8;
+
+    // If confidence is very high, auto proceed
+    if (confidence >= autoProceedThreshold && options?.autoProceedOnHighConfidence !== false) {
+      return false;
+    }
+
+    // If confidence is below threshold, request confirmation
+    if (confidence < confidenceThreshold) {
+      return true;
+    }
+
+    // If requireConfirmation is explicitly set to true
+    if (options?.requireConfirmation === true) {
+      return true;
+    }
+
+    return false;
+  }
+
+  /**
+   * Build confirmation request with intelligent options
+   */
+  private buildConfirmationRequest(
+    query: string,
+    parsedIntents: IntentParseResult,
+    confidence: number,
+    preAnalysis: QueryPreAnalysis,
+    options?: ParseIntentOptions
+  ): UserConfirmationRequest {
+    const reason = this.generateConfirmationReason(confidence, preAnalysis, parsedIntents);
+    const confirmationOptions = this.generateConfirmationOptions(query, parsedIntents, preAnalysis, options);
+
+    return {
+      query,
+      parsedIntents: parsedIntents.intents,
+      confidence,
+      reason,
+      options: confirmationOptions,
+      analysis: {
+        isLikelySimpleQuery: preAnalysis.isLikelySimpleQuery,
+        hasMultipleActions: preAnalysis.hasMultipleActions,
+        hasTemporalMarkers: preAnalysis.hasTemporalMarkers,
+        likelySingleToolMatch: preAnalysis.likelySingleToolMatch,
+        complexityScore: preAnalysis.complexityScore
+      },
+      timestamp: new Date()
+    };
+  }
+
+  /**
+   * Generate confirmation reason based on analysis
+   */
+  private generateConfirmationReason(
+    confidence: number,
+    preAnalysis: QueryPreAnalysis,
+    parsedIntents: IntentParseResult
+  ): string {
+    const reasons: string[] = [];
+
+    if (confidence < 0.5) {
+      reasons.push('Low parsing confidence');
+    }
+
+    if (preAnalysis.isLikelySimpleQuery && parsedIntents.intents.length > 1) {
+      reasons.push('Simple query was decomposed into multiple intents');
+    }
+
+    if (preAnalysis.hasTemporalMarkers && parsedIntents.intents.length === 1) {
+      reasons.push('Query contains sequence markers but was kept as single intent');
+    }
+
+    if (parsedIntents.intents.length > 3) {
+      reasons.push('Query was decomposed into many intents');
+    }
+
+    if (reasons.length === 0) {
+      return `Confidence level is ${confidence.toFixed(2)}`;
+    }
+
+    return reasons.join('; ');
+  }
+
+  /**
+   * Generate intelligent confirmation options
+   */
+  private generateConfirmationOptions(
+    query: string,
+    parsedIntents: IntentParseResult,
+    preAnalysis: QueryPreAnalysis,
+    options?: ParseIntentOptions
+  ): ConfirmationOption[] {
+    const optionsList: ConfirmationOption[] = [];
+    const maxOptions = options?.requireConfirmation ? 3 : 2;
+
+    // Option 1: Proceed as-is
+    optionsList.push({
+      id: 'proceed',
+      description: `Proceed with ${parsedIntents.intents.length} intent(s) as parsed`,
+      suggestedAction: 'proceed',
+      confidence: this.assessParsingConfidence(parsedIntents, query),
+      parsedIntents: parsedIntents.intents,
+      reason: 'Trust the AI parsing result'
+    });
+
+    // Option 2: Try to merge to single intent (if applicable)
+    if (preAnalysis.isLikelySimpleQuery && parsedIntents.intents.length > 1) {
+      const singleIntent = this.createSingleIntentFromQuery(query, preAnalysis);
+      optionsList.push({
+        id: 'merge',
+        description: 'Merge to single intent (simpler approach)',
+        suggestedAction: 'modify',
+        confidence: 0.7,
+        parsedIntents: [singleIntent],
+        reason: 'Query appears to be simple and should be single intent'
+      });
+    }
+
+    // Option 3: Reparse with different parameters
+    optionsList.push({
+      id: 'reparse',
+      description: 'Reparse query with different approach',
+      suggestedAction: 'reparse',
+      confidence: 0.5,
+      reason: 'Try parsing again with adjusted parameters'
+    });
+
+    // Option 4: Abort (only if explicitly requested)
+    if (options?.requireConfirmation) {
+      optionsList.push({
+        id: 'abort',
+        description: 'Cancel this operation',
+        suggestedAction: 'abort',
+        reason: 'User decided to cancel'
+      });
+    }
+
+    // Limit options to maxOptions
+    return optionsList.slice(0, maxOptions);
+  }
+
+  /**
+   * Create single intent from query for merging option
+   */
+  private createSingleIntentFromQuery(query: string, preAnalysis: QueryPreAnalysis): AtomicIntent {
+    // Find the most appropriate tool
+    const toolName = preAnalysis.likelySingleToolMatch || 'process';
+    
+    return {
+      id: 'A1',
+      type: toolName,
+      description: `Execute: ${query}`,
+      parameters: { query }
+    };
+  }
+
+  /**
+   * Handle user confirmation response
+   */
+  private handleConfirmationResponse(
+    response: UserConfirmationResponse,
+    originalResult: IntentParseResult,
+    query: string,
+    preAnalysis: QueryPreAnalysis
+  ): IntentParseResult {
+    const selectedOption = response.selectedOptionId;
+
+    switch (selectedOption) {
+      case 'proceed':
+        // Use original result, possibly with user modifications
+        if (response.userModifiedIntents && response.userModifiedIntents.length > 0) {
+          logger.info(`[CloudIntentEngine] User modified intents, using modified version`);
+          return {
+            intents: response.userModifiedIntents,
+            edges: this.generateEdgesForIntents(response.userModifiedIntents)
+          };
+        }
+        logger.info(`[CloudIntentEngine] User confirmed to proceed with original parsing`);
+        return originalResult;
+
+      case 'merge':
+        // Merge to single intent
+        logger.info(`[CloudIntentEngine] User selected to merge to single intent`);
+        const singleIntent = this.createSingleIntentFromQuery(query, preAnalysis);
+        return {
+          intents: [singleIntent],
+          edges: []
+        };
+
+      case 'reparse':
+        // Reparse with adjusted parameters
+        logger.info(`[CloudIntentEngine] User selected to reparse query`);
+        // For now, return original result (in real implementation, would reparse)
+        return originalResult;
+
+      case 'abort':
+        // Return empty result to indicate abortion
+        logger.info(`[CloudIntentEngine] User aborted the operation`);
+        return {
+          intents: [],
+          edges: []
+        };
+
+      default:
+        logger.warn(`[CloudIntentEngine] Unknown option selected: ${selectedOption}, proceeding with original`);
+        return originalResult;
+    }
+  }
+
+  /**
+   * Generate edges for modified intents
+   */
+  private generateEdgesForIntents(intents: AtomicIntent[]): DependencyEdge[] {
+    const edges: DependencyEdge[] = [];
+    
+    // Simple linear dependency for multiple intents
+    for (let i = 0; i < intents.length - 1; i++) {
+      edges.push({
+        from: intents[i].id,
+        to: intents[i + 1].id
+      });
+    }
+    
+    return edges;
+  }
+
+  /**
+   * Record feedback for learning system
+   */
+  private recordFeedbackForLearning(
+    query: string,
+    parsedIntents: IntentParseResult,
+    confidence: number,
+    userResponse: UserConfirmationResponse | null,
+    success: boolean
+  ): void {
+    // In a real implementation, this would store feedback in a database or file
+    // For now, just log it
+    logger.info(`[CloudIntentEngine] Feedback recorded for query: "${query}"`);
+    logger.info(`  - Confidence: ${confidence.toFixed(2)}`);
+    logger.info(`  - Intents: ${parsedIntents.intents.length}`);
+    logger.info(`  - User response: ${userResponse ? userResponse.selectedOptionId : 'auto-proceed'}`);
+    logger.info(`  - Success: ${success}`);
+    
+    // Simple learning: adjust confidence thresholds based on success
+    if (success && confidence < 0.6) {
+      logger.debug(`[CloudIntentEngine] Learning: Successful execution with low confidence, consider lowering threshold`);
+    } else if (!success && confidence > 0.7) {
+      logger.debug(`[CloudIntentEngine] Learning: Failed execution with high confidence, consider raising threshold`);
+    }
+  }
+
+  /**
+   * Get confirmation configuration (for external use)
+   */
+  getConfirmationConfig(): ConfirmationConfig {
+    return {
+      enabled: true,
+      confidenceThreshold: 0.6,
+      autoProceedThreshold: 0.8,
+      maxOptions: 3,
+      learnFromFeedback: true,
+      feedbackHistorySize: 100
+    };
+  }
+
+  /**
+   * Update confirmation configuration
+   */
+  updateConfirmationConfig(config: Partial<ConfirmationConfig>): void {
+    logger.info(`[CloudIntentEngine] Updating confirmation configuration`);
+    // In a real implementation, this would update the configuration
+    // For now, just log it
+    logger.debug(`[CloudIntentEngine] New config: ${JSON.stringify(config, null, 2)}`);
+  }
+}
+
+// ==================== Helper Type Definitions ====================
+
+interface QueryPreAnalysis {
+  query: string;
+  isLikelySimpleQuery: boolean;
+  isLikelyDataRetrievalQuery: boolean;
+  hasMultipleActions: boolean;
+  hasTemporalMarkers: boolean;
+  likelySingleToolMatch: string | null;
+  complexityScore: number;
 }

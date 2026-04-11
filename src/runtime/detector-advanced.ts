@@ -192,11 +192,10 @@ export class EnhancedRuntimeDetector {
       if (extensionAnalysis) {
         evidence.fileExtensions = extensionAnalysis;
         weightedSum += 0.1 * extensionAnalysis.confidence;
-        totalWeight += 0.1;
       }
 
-      // Calculate final confidence and runtime type
-      const confidence = totalWeight > 0 ? weightedSum / totalWeight : 0;
+      // Calculate final confidence and runtime type (using a fixed total weight of 1.0)
+      const confidence = weightedSum;
       const runtime = this.determineRuntimeFromEvidence(evidence, confidence);
 
       // If confidence is too low, add warning

@@ -17,9 +17,12 @@ describe('SimpleAICommand', () => {
     mockAI = {
       configure: jest.fn(),
       ask: jest.fn(),
+      generateText: jest.fn(),
+      parseIntent: jest.fn(),
       getStatus: jest.fn(),
       testConnection: jest.fn(),
       reset: jest.fn(),
+      setAvailableTools: jest.fn(),
     } as any;
 
     mockConfigManager = {
@@ -154,7 +157,7 @@ describe('SimpleAICommand', () => {
       
       await command.handleCommand('ask', question);
       
-      expect(mockAI.ask).toHaveBeenCalledWith(question);
+      expect(mockAI.generateText).toHaveBeenCalledWith(question);
       expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('Test response'));
       consoleSpy.mockRestore();
     });
@@ -169,7 +172,7 @@ describe('SimpleAICommand', () => {
       
       await command.handleCommand('ask', question);
       
-      expect(mockAI.ask).toHaveBeenCalledWith(question);
+      expect(mockAI.generateText).toHaveBeenCalledWith(question);
       expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('AI error'));
       consoleSpy.mockRestore();
     });
@@ -444,7 +447,7 @@ describe('SimpleAICommand', () => {
       // handleCommand joins all arguments after 'ask' with space
       await command.handleCommand('ask', 'What', 'is', 'the', 'weather?');
       
-      expect(mockAI.ask).toHaveBeenCalledWith('What is the weather?');
+      expect(mockAI.generateText).toHaveBeenCalledWith('What is the weather?');
       expect(consoleSpy).toHaveBeenCalled();
       consoleSpy.mockRestore();
     });

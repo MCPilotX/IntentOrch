@@ -220,7 +220,12 @@ export class AICommand {
 
       case 'text_response':
         console.log(chalk.green('🤖 AI Response:'));
-        console.log(chalk.white(result.text || result.message || ''));
+        const responseText = result.text || result.message || '';
+        try {
+          console.log(chalk.white(responseText));
+        } catch (e) {
+          console.log(responseText); // Fallback to unstyled text
+        }
         if (result.reasoning) {
           console.log(chalk.gray('\n💭 Reasoning:'));
           console.log(chalk.gray(result.reasoning));

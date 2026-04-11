@@ -238,10 +238,8 @@ describe('MCPClient', () => {
         jsonrpc: '2.0',
         method: 'tools/call',
         params: {
-          call: {
-            name: toolName,
-            arguments: arguments_
-          }
+          name: toolName,
+          arguments: arguments_
         },
         id: expect.any(String)
       });

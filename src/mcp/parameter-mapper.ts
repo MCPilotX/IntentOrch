@@ -231,7 +231,7 @@ export class ParameterMapper {
           ? mapping.transformation(value)
           : value;
 
-        // Remove original parameter if it's not in schema
+        // Clean up the original parameter if it's not a valid property in schema
         if (!schemaProperties.includes(sourceName)) {
           delete targetParams[sourceName];
         }

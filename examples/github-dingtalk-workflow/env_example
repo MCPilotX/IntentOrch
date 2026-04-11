@@ -1,0 +1,17 @@
+# AI 配置
+AI_PROVIDER=deepseek
+AI_API_KEY=sk-xxx
+AI_MODEL=deepseek-chat
+
+# GitHub 配置
+# 获取 Token: https://github.com/settings/tokens
+GITHUB_TOKEN=ghp_xxx
+REPO_OWNER=facebook
+REPO_NAME=react
+PR_NUMBER=1
+
+### 钉钉配置 ###
+DINGTALK_APP_KEY: dingxxx
+DINGTALK_APP_SECRET: fenxxx_xxx
+DINGTALK_ROBOT_CODE: dingxxx
+DINGTALK_CHAT_ID: Cxxx

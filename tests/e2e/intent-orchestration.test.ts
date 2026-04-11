@@ -14,7 +14,7 @@ class MockAI {
     // No-op
   }
 
-  async ask(query: string): Promise<any> {
+  async generateText(query: string): Promise<any> {
     // Simple intent detection based on keywords
     const lowerQuery = query.toLowerCase();
     

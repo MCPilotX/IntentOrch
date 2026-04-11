@@ -30,7 +30,7 @@ export interface AIConfig {
 
 // Query result
 export interface AskResult {
-  type: 'tool_call' | 'suggestions' | 'text_response' | 'error';
+  type: 'tool_call' | 'suggestions' | 'text' | 'text_response' | 'error';
   tool?: ToolCall;
   suggestions?: string[];
   message?: string;
@@ -1240,6 +1240,7 @@ export class AI {
     }
   }
 
+
   /**
    * Get fallback suggestions (when AI is not available or intent is unknown)
    */
@@ -1252,9 +1253,10 @@ export class AI {
     ];
 
     return {
-      type: 'suggestions',
+      type: 'text',
       message: `I couldn't quite understand "${query}". Here are some things you can try:`,
       suggestions,
+      text: suggestions as any,
       help: 'Common commands:',
     };
   }
