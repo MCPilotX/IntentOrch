@@ -3,6 +3,7 @@
 [![npm version](https://img.shields.io/npm/v/@mcpilotx/intentorch.svg)](https://www.npmjs.com/package/@mcpilotx/intentorch)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![TypeScript](https://img.shields.io/badge/language-TypeScript-blue.svg)](https://www.typescriptlang.org/)
+![Coverage](badges/coverage.svg)
 
 [English](./README.md) | [简体中文]
 
