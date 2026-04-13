@@ -59,7 +59,10 @@ await sdk.connectMCPServer({
   transport: { type: 'stdio', command: 'npx', args: ['-y', '@modelcontextprotocol/server-slack'] }
 });
 
-// 3. Orchestrate complex intent
+// 3. Initialization CloudIntentEngine
+await sdk.initCloudIntentEngine();
+
+// 4. Orchestrate complex intent
 const result = await sdk.executeWorkflowWithTracking(
   "Analyze the latest PR in mcpilotx/intentorch and send a summary report to Slack #dev-channel"
 );
