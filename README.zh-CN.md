@@ -59,7 +59,10 @@ await sdk.connectMCPServer({
   transport: { type: 'stdio', command: 'npx', args: ['-y', 'mcp-server-dingtalk'] }
 });
 
-// 3. 执行复杂意图编排
+// 3. 初始化 CloudIntentEngine
+await sdk.initCloudIntentEngine();
+
+// 4. 执行复杂意图编排
 const result = await sdk.executeWorkflowWithTracking(
   "分析 mcpilotx/intentorch 仓库的最新 PR，并生成一份报告通过钉钉发送给开发群"
 );
