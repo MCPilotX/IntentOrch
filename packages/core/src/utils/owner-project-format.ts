@@ -21,6 +21,53 @@ export interface OwnerProjectFormat {
 }
 
 /**
+ * Build OwnerProjectFormat result from a simple owner/project string
+ */
+function buildResult(input: string): OwnerProjectFormat {
+  let baseName = input;
+  let branch: string | undefined;
+  let path: string | undefined;
+
+  // Extract path first
+  if (baseName.includes(':')) {
+    const [nameWithBranch, pathPart] = baseName.split(':', 2);
+    baseName = nameWithBranch;
+    path = pathPart;
+  }
+
+  // Extract branch next
+  if (baseName.includes('@')) {
+    const [name, branchPart] = baseName.split('@', 2);
+    baseName = name;
+    branch = branchPart;
+  }
+
+  // Validate owner/project format
+  if (!baseName.includes('/')) {
+    baseName = `official/${baseName}`;
+  }
+
+  const [owner, project] = baseName.split('/', 2);
+
+  let qualifiedName = `${owner}/${project}`;
+  if (branch) {
+    qualifiedName += `@${branch}`;
+  }
+  if (path) {
+    qualifiedName += `:${path}`;
+  }
+
+  return {
+    owner,
+    project,
+    branch,
+    path,
+    fullName: `${owner}/${project}`,
+    qualifiedName
+  };
+}
+
+/**
  * Convert various server name formats to unified owner/project format
  */
 export function toOwnerProjectFormat(serverName: string): OwnerProjectFormat {
@@ -35,6 +82,80 @@ export function toOwnerProjectFormat(serverName: string): OwnerProjectFormat {
   
   if (serverName.trim() === '') {
     throw new Error('Server name cannot be empty');
+  }
+  
+  // 0. Handle URL format - extract service name from URL first
+  if (serverName.startsWith('http://') || serverName.startsWith('https://')) {
+    try {
+      const url = new URL(serverName);
+      const pathname = url.pathname;
+      
+      // Remove /mcp.json suffix first, then .json suffix
+      let servicePath = pathname;
+      if (servicePath.endsWith('/mcp.json')) {
+        servicePath = servicePath.substring(0, servicePath.length - 9);
+      } else if (servicePath.endsWith('.json')) {
+        servicePath = servicePath.substring(0, servicePath.length - 5);
+      }
+      
+      // GitHub hub pattern (MCPilotX hub): /MCPilotX/mcp-server-hub/main/github/github-mcp-server
+      const githubHubMatch = servicePath.match(/\/[^\/]+\/mcp-server-hub\/(?:[^\/]+\/)*github\/(.+)/);
+      if (githubHubMatch) {
+        const serviceName = githubHubMatch[1];
+        if (!serviceName.includes('/')) {
+          return buildResult(`github/${serviceName}`);
+        }
+        return buildResult(serviceName);
+      }
+      
+      // Gitee hub pattern (mcpilotx hub): /mcpilotx/mcp-server-hub/raw/master/Joooook/12306-mcp
+      const giteeHubMatch = servicePath.match(/^\/mcpilotx\/mcp-server-hub\/raw\/master\/(.+)$/);
+      if (giteeHubMatch) {
+        return buildResult(giteeHubMatch[1]);
+      }
+      
+      // Generic GitHub hub pattern
+      const githubHubGenericMatch = servicePath.match(/\/[^\/]+\/mcp-server-hub\/(?:[^\/]+\/)*([^\/].+)/);
+      if (githubHubGenericMatch) {
+        const serviceName = githubHubGenericMatch[1];
+        const parts = serviceName.split('/');
+        const commonBranches = ['main', 'master', 'develop', 'dev', 'trunk', 'release'];
+        
+        if (parts.length >= 3 && parts[0] === 'refs' && parts[1] === 'heads' && commonBranches.includes(parts[2])) {
+          return buildResult(parts.slice(3).join('/'));
+        }
+        
+        if (parts.length >= 2 && commonBranches.includes(parts[0])) {
+          return buildResult(parts.slice(1).join('/'));
+        }
+        return buildResult(serviceName);
+      }
+      
+      // Direct GitHub raw URL pattern
+      const rawGithubMatch = servicePath.match(/\/raw\/[^\/]+\/(.+)/);
+      if (rawGithubMatch) {
+        const fullPath = rawGithubMatch[1];
+        const parts = fullPath.split('/');
+        
+        if (parts.length >= 2) {
+          const lastPart = parts[parts.length - 1];
+          const commonBranches = ['main', 'master', 'develop', 'dev', 'trunk', 'release'];
+          
+          if (commonBranches.includes(lastPart)) {
+            return buildResult(parts.slice(0, -1).join('/'));
+          }
+          return buildResult(fullPath);
+        }
+      }
+      
+      // Generic URL: extract owner/repo from path
+      const segments = servicePath.split('/').filter(s => s);
+      if (segments.length >= 2) {
+        return buildResult(`${segments[0]}/${segments[1]}`);
+      }
+    } catch (error) {
+      // URL parsing failed, fall through to normal processing
+    }
   }
   
   // 1. Handle source:owner/project format

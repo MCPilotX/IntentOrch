@@ -19,10 +19,24 @@ export function normalizeServerName(serverName: string): string {
   // Use new unified format processing
   const format = toOwnerProjectFormat(serverName);
   
+  // Validate result - owner and project must not be empty
+  if (!format.owner || !format.project) {
+    throw new Error(`Invalid server name: "${serverName}" - could not extract owner/project (owner="${format.owner}", project="${format.project}")`);
+  }
+  
   // Determine prefix based on source
   let source = 'github'; // default
-  
-  if (serverName.includes(':')) {
+
+  if (serverName.startsWith('http://') || serverName.startsWith('https://')) {
+    // URL format - determine source from URL
+    if (serverName.includes('gitee.com')) {
+      source = 'gitee';
+    } else if (serverName.includes('raw.githubusercontent.com') || serverName.includes('github.com')) {
+      source = 'github';
+    } else {
+      source = 'direct';
+    }
+  } else if (serverName.includes(':')) {
     const parts = serverName.split(':');
     const possibleSource = parts[0];
     if (['github', 'gitee', 'official', 'local'].includes(possibleSource)) {
