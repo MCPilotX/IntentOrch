@@ -514,12 +514,65 @@ class ApiService {
   }
 
   async saveWorkflow(workflow: Workflow): Promise<Workflow> {
-    if (workflow.id) {
-      const response = await this.client.put(`/api/workflows/${workflow.id}`, workflow) as any;
-      return response.workflow;
-    } else {
-      const response = await this.client.post('/api/workflows', workflow) as any;
-      return response.workflow;
+    console.log('Saving workflow:', workflow);
+    
+    // Check if this is a new workflow (empty ID) or an update
+    const isNewWorkflow = !workflow.id || workflow.id.trim() === '';
+    
+    try {
+      if (isNewWorkflow) {
+        // For new workflow, use POST request
+        console.log('Creating new workflow with POST request');
+        const response = await this.client.post('/api/workflows', workflow) as any;
+        console.log('Create workflow response:', response);
+        
+        // Handle different response formats
+        if (response.workflow) {
+          return response.workflow;
+        } else if (response && response.id) {
+          // If response itself is a workflow object
+          return response;
+        } else {
+          console.error('Unexpected response format for create workflow:', response);
+          throw new Error('Unexpected response format from server');
+        }
+      } else {
+        // For existing workflow, always use POST to /api/workflows with ID in the body
+        // This is because the backend may not support PUT requests
+        console.log(`Updating existing workflow with ID: ${workflow.id}`);
+        
+        // Always use POST to /api/workflows, the backend should handle updates based on the ID in the workflow object
+        console.log(`Using POST to /api/workflows for update`);
+        const response = await this.client.post('/api/workflows', workflow) as any;
+        console.log('Update workflow response (POST):', response);
+        
+        // Handle different response formats
+        if (response.workflow) {
+          return response.workflow;
+        } else if (response && response.id) {
+          // If response itself is a workflow object
+          return response;
+        } else {
+          console.error('Unexpected response format for update workflow:', response);
+          throw new Error('Unexpected response format from server');
+        }
+      }
+    } catch (error: any) {
+      console.error('Error saving workflow:', error);
+      
+      // Provide more user-friendly error messages
+      if (error.response?.status === 401) {
+        throw new Error('Authentication failed. Please check your authentication token.');
+      } else if (error.response?.status === 404) {
+        throw new Error(`Workflow not found. The workflow with ID "${workflow.id}" may have been deleted or does not exist.`);
+      } else if (error.response?.status === 500) {
+        throw new Error('Server error while saving workflow. Please check backend logs.');
+      } else if (error.message?.includes('Network Error')) {
+        throw new Error('Network error. Please check if the backend server is running.');
+      }
+      
+      // Re-throw other errors
+      throw error;
     }
   }
 

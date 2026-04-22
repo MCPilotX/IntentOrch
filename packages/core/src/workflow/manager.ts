@@ -23,23 +23,46 @@ export class WorkflowManager {
   async save(workflow: Workflow): Promise<string> {
     await this.ensureDir();
     
-    // Generate UUID for filename
-    const uuid = uuidv4();
-    const filePath = path.join(this.workflowsDir, `${uuid}.json`);
+    let workflowId = workflow.id;
+    let filePath: string;
     
-    // Ensure workflow has an ID
+    if (workflowId) {
+      // Existing workflow: check if it exists
+      const existingFilePath = path.join(this.workflowsDir, `${workflowId}.json`);
+      try {
+        await fs.access(existingFilePath);
+        // File exists, use existing ID and path
+        filePath = existingFilePath;
+      } catch {
+        // File doesn't exist, treat as new workflow
+        workflowId = uuidv4();
+        filePath = path.join(this.workflowsDir, `${workflowId}.json`);
+      }
+    } else {
+      // New workflow: generate UUID
+      workflowId = uuidv4();
+      filePath = path.join(this.workflowsDir, `${workflowId}.json`);
+    }
+    
+    // Ensure workflow has the correct ID
     const workflowToSave = {
       ...workflow,
-      id: uuid, // Use UUID as the workflow ID
+      id: workflowId, // Use the determined ID
       originalName: workflow.name, // Store original name for reference
+      updatedAt: new Date().toISOString(), // Always update timestamp
     };
+    
+    // Ensure createdAt is set for new workflows
+    if (!workflowToSave.createdAt) {
+      workflowToSave.createdAt = new Date().toISOString();
+    }
     
     await fs.writeFile(filePath, JSON.stringify(workflowToSave, null, 2), 'utf-8');
     
     // Update index
-    await this.updateIndex(uuid, workflow.name);
+    await this.updateIndex(workflowId, workflow.name);
     
-    return uuid; // Return UUID instead of file path
+    return workflowId; // Return the workflow ID
   }
 
   async load(id: string): Promise<Workflow> {

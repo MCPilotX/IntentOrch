@@ -35,6 +35,11 @@ export class WorkflowEngine {
           continue;
         }
 
+        // Ensure server for this step is running
+        if (step.serverName) {
+          await this.ensureServerRunning(step.serverName);
+        }
+
         const result = await this.executeStep(step, context);
         context.state[step.id] = result;
       }
@@ -115,6 +120,24 @@ export class WorkflowEngine {
         await this.createMCPClientForServer(server);
       }
     }
+  }
+
+  private async ensureServerRunning(serverName: string): Promise<void> {
+    // Check if client already exists in cache
+    if (this.clients.has(serverName)) {
+      return;
+    }
+    
+    const pm = getProcessManager();
+    const isRunning = await pm.getByServerName(serverName);
+    
+    if (!isRunning) {
+      console.log(`🔌 Auto-starting server for step: ${serverName}`);
+      await pm.start(serverName);
+    }
+    
+    // Create MCP client for the server
+    await this.createMCPClientForServer(serverName);
   }
 
   private async resolveInputs(workflow: Workflow, userInputs: Record<string, any>) {

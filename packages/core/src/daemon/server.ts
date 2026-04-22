@@ -359,22 +359,40 @@ export class DaemonServer {
     
     // GET /api/workflows/{id}
     const workflowIdMatch = path.match(/^\/api\/workflows\/([^\/]+)$/);
-    if (workflowIdMatch && method === 'GET') {
+    if (workflowIdMatch) {
         const id = decodeURIComponent(workflowIdMatch[1]);
-        try {
-            const workflow = await getWorkflowManager().load(id);
-            if (!workflow) {
-                return this.sendJson(res, 404, { 
-                    error: 'Not Found', 
-                    message: `Workflow with ID ${id} not found` 
+        
+        if (method === 'GET') {
+            try {
+                const workflow = await getWorkflowManager().load(id);
+                if (!workflow) {
+                    return this.sendJson(res, 404, { 
+                        error: 'Not Found', 
+                        message: `Workflow with ID ${id} not found` 
+                    });
+                }
+                return this.sendJson(res, 200, { workflow });
+            } catch (error: any) {
+                return this.sendJson(res, 500, { 
+                    error: 'Internal Server Error', 
+                    message: `Failed to load workflow: ${error.message}` 
                 });
             }
-            return this.sendJson(res, 200, { workflow });
-        } catch (error: any) {
-            return this.sendJson(res, 500, { 
-                error: 'Internal Server Error', 
-                message: `Failed to load workflow: ${error.message}` 
-            });
+        }
+        
+        if (method === 'DELETE') {
+            try {
+                await getWorkflowManager().delete(id);
+                return this.sendJson(res, 200, { 
+                    success: true, 
+                    message: `Workflow ${id} deleted successfully` 
+                });
+            } catch (error: any) {
+                return this.sendJson(res, 500, { 
+                    error: 'Internal Server Error', 
+                    message: `Failed to delete workflow: ${error.message}` 
+                });
+            }
         }
     }
     if (path.includes('/execute') && method === 'POST') {
@@ -422,6 +440,20 @@ export class DaemonServer {
                 results.push({ toolName: s.toolName, status: 'error', error: (e as Error).message });
             }
         }
+        
+        // Update workflow's lastExecutedAt timestamp
+        try {
+            const updatedWorkflow = {
+                ...wf,
+                lastExecutedAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString()
+            };
+            await getWorkflowManager().save(updatedWorkflow);
+        } catch (updateError) {
+            console.error('[Daemon] Failed to update workflow lastExecutedAt:', updateError);
+            // Continue execution even if update fails
+        }
+        
         return this.sendJson(res, 200, { success: true, results, totalSteps: results.length });
     }
 

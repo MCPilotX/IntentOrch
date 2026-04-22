@@ -16,12 +16,17 @@ import {
   AlertCircle,
   Calendar,
   Download,
-  Upload
+  Upload,
+  X,
+  Check,
+  XCircle,
+  Loader2
 } from 'lucide-react';
 import { apiService } from '../services/api';
 import { formatRelativeTime } from '../utils/format';
 import { useLanguage } from '../contexts/LanguageContext';
-import type { Workflow } from '../types';
+import type { Workflow, WorkflowStep } from '../types';
+import toast from 'react-hot-toast';
 
 const Workflows: React.FC = () => {
   const { t } = useLanguage();
@@ -35,6 +40,19 @@ const Workflows: React.FC = () => {
     name: '',
     description: '',
   });
+  const [executionResults, setExecutionResults] = useState<{
+    workflowId: string;
+    results: Array<{
+      toolName: string;
+      status: 'success' | 'error';
+      output?: any;
+      error?: string;
+    }>;
+    totalSteps: number;
+    success: boolean;
+    timestamp: string;
+  } | null>(null);
+  const [showResultsModal, setShowResultsModal] = useState(false);
 
   // Get workflow list
   const { data: workflows = [], isLoading, refetch } = useQuery({
@@ -71,6 +89,45 @@ const Workflows: React.FC = () => {
   // Execute workflow mutation
   const executeWorkflowMutation = useMutation({
     mutationFn: (id: string) => apiService.executeWorkflow({ workflowId: id }),
+    onSuccess: (data, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['workflows'] });
+      
+      // Store execution results for display
+      setExecutionResults({
+        workflowId: variables, // variables is the id passed to mutationFn
+        results: data.results || [],
+        totalSteps: data.totalSteps || 0,
+        success: data.success || false,
+        timestamp: new Date().toISOString()
+      });
+      
+      // Show success notification instead of alert
+      toast.success('Workflow executed successfully', {
+        duration: 3000,
+        position: 'top-right'
+      });
+    },
+    onError: (error) => {
+      toast.error(`Failed to execute workflow: ${error}`, {
+        duration: 5000,
+        position: 'top-right'
+      });
+    },
+  });
+
+  // Duplicate workflow mutation
+  const duplicateWorkflowMutation = useMutation({
+    mutationFn: (workflow: Workflow) => {
+      // Create a copy of the workflow with a new name and ID
+      const duplicatedWorkflow = {
+        ...workflow,
+        id: '', // Let backend generate new ID
+        name: `${workflow.name} (Copy)`,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      return apiService.saveWorkflow(duplicatedWorkflow);
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['workflows'] });
     },
@@ -85,7 +142,26 @@ const Workflows: React.FC = () => {
     
     const matchesSearch = name.toLowerCase().includes(searchTermLower) ||
                          description.toLowerCase().includes(searchTermLower);
-    return matchesSearch;
+    
+    // Apply status filter
+    let matchesStatus = true;
+    switch (statusFilter) {
+      case 'hasSteps':
+        matchesStatus = workflow.steps && workflow.steps.length > 0;
+        break;
+      case 'executed':
+        matchesStatus = !!workflow.lastExecutedAt;
+        break;
+      case 'neverExecuted':
+        matchesStatus = !workflow.lastExecutedAt;
+        break;
+      case 'all':
+      default:
+        matchesStatus = true;
+        break;
+    }
+    
+    return matchesSearch && matchesStatus;
   });
 
   // Statistics
@@ -107,7 +183,7 @@ const Workflows: React.FC = () => {
 
   // Handle delete workflow
   const handleDeleteWorkflow = (id: string, name: string) => {
-    if (window.confirm(`Are you sure you want to delete workflow "${name}"?`)) {
+    if (window.confirm(t('workflows.confirmDelete', { name }))) {
       deleteWorkflowMutation.mutate(id);
     }
   };
@@ -115,7 +191,15 @@ const Workflows: React.FC = () => {
   // Handle execute workflow
   const handleExecuteWorkflow = (id: string, name: string) => {
     if (window.confirm(`Are you sure you want to execute workflow "${name}"?`)) {
-      executeWorkflowMutation.mutate(id);
+      executeWorkflowMutation.mutate(id, {
+        onSuccess: () => {
+          // Results are already stored in executionResults state
+          // Auto-show results modal after execution
+          setTimeout(() => {
+            setShowResultsModal(true);
+          }, 500);
+        }
+      });
     }
   };
 
@@ -123,6 +207,107 @@ const Workflows: React.FC = () => {
   const handleEditWorkflow = (workflow: Workflow) => {
     setSelectedWorkflow(workflow);
     setShowEditModal(true);
+  };
+
+  // Handle duplicate workflow
+  const handleDuplicateWorkflow = (workflow: Workflow) => {
+    if (window.confirm(`Are you sure you want to duplicate workflow "${workflow.name}"?`)) {
+      duplicateWorkflowMutation.mutate(workflow);
+    }
+  };
+
+  // Update workflow mutation
+  const updateWorkflowMutation = useMutation({
+    mutationFn: (updatedWorkflow: Workflow) => apiService.saveWorkflow(updatedWorkflow),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['workflows'] });
+      setShowEditModal(false);
+      setSelectedWorkflow(null);
+    },
+  });
+
+  // Handle save workflow changes
+  const handleSaveWorkflowChanges = () => {
+    if (!selectedWorkflow) return;
+    
+    // Create updated workflow object
+    const updatedWorkflow = {
+      ...selectedWorkflow,
+      updatedAt: new Date().toISOString(),
+    };
+    
+    updateWorkflowMutation.mutate(updatedWorkflow);
+  };
+
+  // Handle download workflow
+  const handleDownloadWorkflow = (workflow: Workflow) => {
+    try {
+      // Create a clean workflow object for export
+      const exportWorkflow = {
+        ...workflow,
+        // Remove any internal fields that shouldn't be exported
+      };
+      
+      // Convert to JSON string
+      const workflowJson = JSON.stringify(exportWorkflow, null, 2);
+      
+      // Create blob and download link
+      const blob = new Blob([workflowJson], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${workflow.name.replace(/\s+/g, '_')}_workflow.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      
+      alert(`Workflow "${workflow.name}" downloaded successfully`);
+    } catch (error) {
+      alert(`Failed to download workflow: ${error}`);
+    }
+  };
+
+  // Handle upload workflow
+  const handleUploadWorkflow = () => {
+    // Create file input element
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.json';
+    
+    input.onchange = async (e) => {
+      const file = (e.target as HTMLInputElement).files?.[0];
+      if (!file) return;
+      
+      try {
+        const text = await file.text();
+        const workflowData = JSON.parse(text);
+        
+        // Validate basic workflow structure
+        if (!workflowData.name || typeof workflowData.name !== 'string') {
+          alert('Invalid workflow file: missing or invalid name field');
+          return;
+        }
+        
+        // Create new workflow from uploaded data
+        const newWorkflowFromFile = {
+          ...workflowData,
+          id: '', // Let backend generate new ID
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        };
+        
+        // Save the workflow
+        await apiService.saveWorkflow(newWorkflowFromFile);
+        queryClient.invalidateQueries({ queryKey: ['workflows'] });
+        
+        alert(`Workflow "${workflowData.name}" imported successfully`);
+      } catch (error) {
+        alert(`Failed to import workflow: ${error}`);
+      }
+    };
+    
+    input.click();
   };
 
   if (isLoading) {
@@ -214,7 +399,7 @@ const Workflows: React.FC = () => {
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
               <input
                 type="text"
-                placeholder="Search workflow name or description..."
+                placeholder={t('workflows.searchPlaceholder')}
                 className="w-full pl-10 pr-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
@@ -230,23 +415,49 @@ const Workflows: React.FC = () => {
                 value={statusFilter}
                 onChange={(e) => setStatusFilter(e.target.value)}
               >
-                <option value="all">All workflows</option>
-                <option value="hasSteps">With steps defined</option>
-                <option value="executed">Executed before</option>
-                <option value="neverExecuted">Never executed</option>
+                <option value="all">{t('workflows.filterAll')}</option>
+                <option value="hasSteps">{t('workflows.filterHasSteps')}</option>
+                <option value="executed">{t('workflows.filterExecuted')}</option>
+                <option value="neverExecuted">{t('workflows.filterNeverExecuted')}</option>
               </select>
             </div>
             
             <div className="flex space-x-2">
-              <button className="p-2 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
+              <button 
+                onClick={() => {
+                  // Download all workflows as a JSON file
+                  try {
+                    const workflowsJson = JSON.stringify(workflows, null, 2);
+                    const blob = new Blob([workflowsJson], { type: 'application/json' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `workflows_export_${new Date().toISOString().split('T')[0]}.json`;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                    alert(`Exported ${workflows.length} workflows successfully`);
+                  } catch (error) {
+                    alert(`Failed to export workflows: ${error}`);
+                  }
+                }}
+                className="p-2 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                title="Export all workflows"
+              >
                 <Download className="w-5 h-5" />
               </button>
-              <button className="p-2 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
+              <button 
+                onClick={handleUploadWorkflow}
+                className="p-2 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                title="Import workflow"
+              >
                 <Upload className="w-5 h-5" />
               </button>
               <button
                 onClick={() => refetch()}
                 className="p-2 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                title="Refresh"
               >
                 <Search className="w-5 h-5" />
               </button>
@@ -271,9 +482,57 @@ const Workflows: React.FC = () => {
                   </div>
                 </div>
                 <div className="relative">
-                  <button className="p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg">
+                  <button 
+                    className="p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg"
+                    onClick={(e) => {
+                      // Toggle dropdown for this workflow
+                      const dropdownId = `dropdown-${workflow.id}`;
+                      const dropdown = document.getElementById(dropdownId);
+                      if (dropdown) {
+                        dropdown.classList.toggle('hidden');
+                      }
+                    }}
+                  >
                     <MoreVertical className="w-5 h-5 text-gray-500" />
                   </button>
+                  <div 
+                    id={`dropdown-${workflow.id}`}
+                    className="hidden absolute right-0 mt-1 w-48 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg z-10"
+                  >
+                    <div className="py-1">
+                      <button
+                        onClick={() => {
+                          handleDuplicateWorkflow(workflow);
+                          document.getElementById(`dropdown-${workflow.id}`)?.classList.add('hidden');
+                        }}
+                        className="flex items-center w-full px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700"
+                      >
+                        <Copy className="w-4 h-4 mr-2" />
+                        Duplicate
+                      </button>
+                      <button
+                        onClick={() => {
+                          handleDownloadWorkflow(workflow);
+                          document.getElementById(`dropdown-${workflow.id}`)?.classList.add('hidden');
+                        }}
+                        className="flex items-center w-full px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700"
+                      >
+                        <Download className="w-4 h-4 mr-2" />
+                        Export as JSON
+                      </button>
+                      <div className="border-t border-gray-200 dark:border-gray-700 my-1"></div>
+                      <button
+                        onClick={() => {
+                          handleDeleteWorkflow(workflow.id, workflow.name);
+                          document.getElementById(`dropdown-${workflow.id}`)?.classList.add('hidden');
+                        }}
+                        className="flex items-center w-full px-4 py-2 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20"
+                      >
+                        <Trash2 className="w-4 h-4 mr-2" />
+                        Delete
+                      </button>
+                    </div>
+                  </div>
                 </div>
               </div>
 
@@ -328,7 +587,7 @@ const Workflows: React.FC = () => {
                 </div>
                 <div className="flex space-x-1">
                   <button
-                    onClick={() => {/* Copy function */}}
+                    onClick={() => handleDuplicateWorkflow(workflow)}
                     className="p-1.5 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg"
                     title="Copy"
                   >
@@ -425,14 +684,12 @@ const Workflows: React.FC = () => {
       {/* Edit workflow modal */}
       {showEditModal && selectedWorkflow && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl w-full max-w-4xl max-h-[80vh] flex flex-col">
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl w-full max-w-4xl max-h-[90vh] flex flex-col">
             <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700">
               <div>
-                <h3 className="text-lg font-medium text-gray-900 dark:text-white">
-                  Edit Workflow: {selectedWorkflow.name}
-                </h3>
+                <h3 className="text-lg font-medium text-gray-900 dark:text-white">{t('workflows.editModalTitle')}: {selectedWorkflow.name}</h3>
                 <p className="text-sm text-gray-600 dark:text-gray-400">
-                  Workflow ID: {selectedWorkflow.id}
+                  {t('workflows.workflowId')}: {selectedWorkflow.id} • {t('workflows.steps')}: {selectedWorkflow.steps?.length || 0}
                 </p>
               </div>
               <button
@@ -444,12 +701,276 @@ const Workflows: React.FC = () => {
             </div>
             
             <div className="flex-1 overflow-auto p-6">
-              <div className="text-center py-12">
-                <Edit className="w-16 h-16 text-gray-300 dark:text-gray-600 mx-auto mb-4" />
-                <h4 className="text-lg font-medium text-gray-900 dark:text-white mb-2">Workflow Editor</h4>
-                <p className="text-gray-600 dark:text-gray-400">
-                  Workflow editor functionality is under development, visual orchestration interface coming soon
-                </p>
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                {/* Basic information */}
+                <div className="lg:col-span-1 space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      Workflow Name *
+                    </label>
+                    <input
+                      type="text"
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                      placeholder="Workflow name"
+                      value={selectedWorkflow.name || ''}
+                      onChange={(e) => setSelectedWorkflow({
+                        ...selectedWorkflow,
+                        name: e.target.value
+                      })}
+                    />
+                  </div>
+                  
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      Description (Optional)
+                    </label>
+                    <textarea
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                      placeholder="Describe the purpose and functionality of this workflow"
+                      rows={3}
+                      value={selectedWorkflow.description || ''}
+                      onChange={(e) => setSelectedWorkflow({
+                        ...selectedWorkflow,
+                        description: e.target.value
+                      })}
+                    />
+                  </div>
+
+                  <div className="p-3 bg-gray-50 dark:bg-gray-900 rounded-lg">
+                    <div className="text-sm text-gray-600 dark:text-gray-400 space-y-2">
+                      <div className="flex justify-between">
+                        <span>Created:</span>
+                        <span>{formatRelativeTime(selectedWorkflow.createdAt)}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>Last updated:</span>
+                        <span>{formatRelativeTime(selectedWorkflow.updatedAt)}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>Last executed:</span>
+                        <span>
+                          {selectedWorkflow.lastExecutedAt ? formatRelativeTime(selectedWorkflow.lastExecutedAt) : 'Never executed'}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Steps editor */}
+                <div className="lg:col-span-2">
+                  <div className="flex items-center justify-between mb-4">
+                    <h4 className="text-lg font-medium text-gray-900 dark:text-white">Workflow Steps</h4>
+                    <button
+                      onClick={() => {
+                        // Add a new step
+                        const newStep: WorkflowStep = {
+                          id: `step-${Date.now()}`,
+                          type: 'tool',
+                          toolName: '',
+                          parameters: {},
+                        };
+                        setSelectedWorkflow({
+                          ...selectedWorkflow,
+                          steps: [...(selectedWorkflow.steps || []), newStep]
+                        });
+                      }}
+                      className="flex items-center space-x-1 px-3 py-1.5 bg-primary-500 text-white rounded-lg hover:bg-primary-600 transition-colors text-sm"
+                    >
+                      <Plus className="w-4 h-4" />
+                      <span>Add Step</span>
+                    </button>
+                  </div>
+
+                  {selectedWorkflow.steps && selectedWorkflow.steps.length > 0 ? (
+                    <div className="space-y-4">
+                      {selectedWorkflow.steps.map((step, index) => (
+                        <div key={step.id} className="border border-gray-200 dark:border-gray-700 rounded-lg p-4">
+                          <div className="flex items-center justify-between mb-3">
+                            <div className="flex items-center space-x-2">
+                              <div className="px-2 py-1 bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300 text-xs font-medium rounded">
+                                Step {index + 1}
+                              </div>
+                              <span className="text-sm text-gray-600 dark:text-gray-400">
+                                {step.type === 'server' ? 'Server' : 
+                                 step.type === 'tool' ? 'Tool' : 
+                                 step.type === 'condition' ? 'Condition' : 'Loop'}
+                              </span>
+                            </div>
+                            <div className="flex space-x-1">
+                              <button
+                                onClick={() => {
+                                  // Move step up
+                                  if (index > 0) {
+                                    const newSteps = [...selectedWorkflow.steps];
+                                    [newSteps[index], newSteps[index - 1]] = [newSteps[index - 1], newSteps[index]];
+                                    setSelectedWorkflow({
+                                      ...selectedWorkflow,
+                                      steps: newSteps
+                                    });
+                                  }
+                                }}
+                                disabled={index === 0}
+                                className="p-1 text-gray-500 hover:text-gray-700 disabled:opacity-30"
+                                title="Move up"
+                              >
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
+                                </svg>
+                              </button>
+                              <button
+                                onClick={() => {
+                                  // Move step down
+                                  if (index < selectedWorkflow.steps.length - 1) {
+                                    const newSteps = [...selectedWorkflow.steps];
+                                    [newSteps[index], newSteps[index + 1]] = [newSteps[index + 1], newSteps[index]];
+                                    setSelectedWorkflow({
+                                      ...selectedWorkflow,
+                                      steps: newSteps
+                                    });
+                                  }
+                                }}
+                                disabled={index === selectedWorkflow.steps.length - 1}
+                                className="p-1 text-gray-500 hover:text-gray-700 disabled:opacity-30"
+                                title="Move down"
+                              >
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                                </svg>
+                              </button>
+                              <button
+                                onClick={() => {
+                                  // Delete step
+                                  const newSteps = selectedWorkflow.steps.filter((_, i) => i !== index);
+                                  setSelectedWorkflow({
+                                    ...selectedWorkflow,
+                                    steps: newSteps
+                                  });
+                                }}
+                                className="p-1 text-red-500 hover:text-red-700"
+                                title="Delete step"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
+                          </div>
+
+                          <div className="space-y-3">
+                            <div>
+                              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                                Step Type
+                              </label>
+                              <select
+                                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                                value={step.type}
+                                onChange={(e) => {
+                                  const newSteps = [...selectedWorkflow.steps];
+                                  newSteps[index] = {
+                                    ...newSteps[index],
+                                    type: e.target.value as 'server' | 'tool' | 'condition' | 'loop'
+                                  };
+                                  setSelectedWorkflow({
+                                    ...selectedWorkflow,
+                                    steps: newSteps
+                                  });
+                                }}
+                              >
+                                <option value="tool">Tool</option>
+                                <option value="server">Server</option>
+                                <option value="condition">Condition</option>
+                                <option value="loop">Loop</option>
+                              </select>
+                            </div>
+
+                            {step.type === 'server' && (
+                              <div>
+                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                                  Server Name
+                                </label>
+                                <input
+                                  type="text"
+                                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                                  placeholder="Enter server name"
+                                  value={step.serverName || ''}
+                                  onChange={(e) => {
+                                    const newSteps = [...selectedWorkflow.steps];
+                                    newSteps[index] = {
+                                      ...newSteps[index],
+                                      serverName: e.target.value
+                                    };
+                                    setSelectedWorkflow({
+                                      ...selectedWorkflow,
+                                      steps: newSteps
+                                    });
+                                  }}
+                                />
+                              </div>
+                            )}
+
+                            {step.type === 'tool' && (
+                              <div>
+                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                                  Tool Name
+                                </label>
+                                <input
+                                  type="text"
+                                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                                  placeholder="Enter tool name"
+                                  value={step.toolName || ''}
+                                  onChange={(e) => {
+                                    const newSteps = [...selectedWorkflow.steps];
+                                    newSteps[index] = {
+                                      ...newSteps[index],
+                                      toolName: e.target.value
+                                    };
+                                    setSelectedWorkflow({
+                                      ...selectedWorkflow,
+                                      steps: newSteps
+                                    });
+                                  }}
+                                />
+                              </div>
+                            )}
+
+                            <div>
+                              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                                Parameters (JSON)
+                              </label>
+                              <textarea
+                                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 focus:ring-2 focus:ring-primary-500 focus:border-transparent font-mono text-sm"
+                                placeholder='{"key": "value"}'
+                                rows={3}
+                                value={step.parameters ? JSON.stringify(step.parameters, null, 2) : '{}'}
+                                onChange={(e) => {
+                                  try {
+                                    const params = JSON.parse(e.target.value || '{}');
+                                    const newSteps = [...selectedWorkflow.steps];
+                                    newSteps[index] = {
+                                      ...newSteps[index],
+                                      parameters: params
+                                    };
+                                    setSelectedWorkflow({
+                                      ...selectedWorkflow,
+                                      steps: newSteps
+                                    });
+                                  } catch (error) {
+                                    // Keep invalid JSON for user to fix
+                                  }
+                                }}
+                              />
+                              <p className="text-xs text-gray-500 mt-1">Enter valid JSON object</p>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="text-center py-12 border-2 border-dashed border-gray-300 dark:border-gray-700 rounded-lg">
+                      <Layers className="w-12 h-12 text-gray-300 dark:text-gray-600 mx-auto mb-4" />
+                      <p className="text-gray-600 dark:text-gray-400">No steps defined for this workflow</p>
+                      <p className="text-sm text-gray-500 dark:text-gray-500 mt-1">Add steps to create an automation workflow</p>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
             
@@ -462,11 +983,141 @@ const Workflows: React.FC = () => {
                   onClick={() => setShowEditModal(false)}
                   className="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
                 >
-                  Close
+                  Cancel
                 </button>
-                <button className="px-4 py-2 bg-primary-500 text-white rounded-lg hover:bg-primary-600 transition-colors">
-                  Save Changes
+                <button
+                  onClick={handleSaveWorkflowChanges}
+                  disabled={updateWorkflowMutation.isPending || !selectedWorkflow.name?.trim()}
+                  className="px-4 py-2 bg-primary-500 text-white rounded-lg hover:bg-primary-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {updateWorkflowMutation.isPending ? 'Saving...' : 'Save Changes'}
                 </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Execution results modal */}
+      {showResultsModal && executionResults && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl w-full max-w-4xl max-h-[90vh] flex flex-col">
+            <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700">
+              <div>
+                <h3 className="text-lg font-medium text-gray-900 dark:text-white">Workflow Execution Results</h3>
+                <p className="text-sm text-gray-600 dark:text-gray-400">
+                  Executed at: {formatRelativeTime(executionResults.timestamp)} • 
+                  Steps: {executionResults.totalSteps} • 
+                  Status: {executionResults.success ? 'Success' : 'Failed'}
+                </p>
+              </div>
+              <button
+                onClick={() => setShowResultsModal(false)}
+                className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg"
+              >
+                <X className="w-5 h-5 text-gray-500" />
+              </button>
+            </div>
+            
+            <div className="flex-1 overflow-auto p-6">
+              <div className="space-y-4">
+                {/* Summary */}
+                <div className="bg-gray-50 dark:bg-gray-900 rounded-lg p-4">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="text-center">
+                      <div className="text-2xl font-bold text-gray-900 dark:text-white">
+                        {executionResults.totalSteps}
+                      </div>
+                      <div className="text-sm text-gray-600 dark:text-gray-400">Total Steps</div>
+                    </div>
+                    <div className="text-center">
+                      <div className="text-2xl font-bold text-green-600 dark:text-green-400">
+                        {executionResults.results.filter(r => r.status === 'success').length}
+                      </div>
+                      <div className="text-sm text-gray-600 dark:text-gray-400">Successful</div>
+                    </div>
+                    <div className="text-center">
+                      <div className="text-2xl font-bold text-red-600 dark:text-red-400">
+                        {executionResults.results.filter(r => r.status === 'error').length}
+                      </div>
+                      <div className="text-sm text-gray-600 dark:text-gray-400">Failed</div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Detailed results */}
+                <div className="space-y-3">
+                  <h4 className="font-medium text-gray-900 dark:text-white">Step-by-Step Results</h4>
+                  {executionResults.results.map((result, index) => (
+                    <div key={index} className="border border-gray-200 dark:border-gray-700 rounded-lg p-4">
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="flex items-center space-x-2">
+                          <div className={`p-1 rounded-full ${result.status === 'success' ? 'bg-green-100 dark:bg-green-900/30' : 'bg-red-100 dark:bg-red-900/30'}`}>
+                            {result.status === 'success' ? (
+                              <Check className="w-4 h-4 text-green-600 dark:text-green-400" />
+                            ) : (
+                              <XCircle className="w-4 h-4 text-red-600 dark:text-red-400" />
+                            )}
+                          </div>
+                          <span className="font-medium text-gray-900 dark:text-white">
+                            Step {index + 1}: {result.toolName}
+                          </span>
+                        </div>
+                        <span className={`px-2 py-1 text-xs font-medium rounded ${result.status === 'success' ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400' : 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400'}`}>
+                          {result.status === 'success' ? 'Success' : 'Failed'}
+                        </span>
+                      </div>
+                      
+                      {result.status === 'success' ? (
+                        <div className="mt-2">
+                          <div className="text-sm text-gray-600 dark:text-gray-400 mb-1">Output:</div>
+                          <div className="bg-gray-50 dark:bg-gray-900 p-3 rounded text-sm overflow-auto max-h-40">
+                            <pre className="whitespace-pre-wrap break-words font-mono">
+                              {typeof result.output === 'object' 
+                                ? JSON.stringify(result.output, null, 2)
+                                : String(result.output || 'No output')
+                              }
+                            </pre>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="mt-2">
+                          <div className="text-sm text-gray-600 dark:text-gray-400 mb-1">Error:</div>
+                          <div className="bg-red-50 dark:bg-red-900/20 p-3 rounded text-sm text-red-700 dark:text-red-400 whitespace-pre-wrap break-words">
+                            {result.error || 'Unknown error'}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+
+                {/* Export results */}
+                <div className="flex justify-end pt-4 border-t border-gray-200 dark:border-gray-700">
+                  <button
+                    onClick={() => {
+                      try {
+                        const resultsJson = JSON.stringify(executionResults, null, 2);
+                        const blob = new Blob([resultsJson], { type: 'application/json' });
+                        const url = URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = `workflow_results_${new Date().toISOString().split('T')[0]}.json`;
+                        document.body.appendChild(a);
+                        a.click();
+                        document.body.removeChild(a);
+                        URL.revokeObjectURL(url);
+                        toast.success('Results exported successfully');
+                      } catch (error) {
+                        toast.error('Failed to export results');
+                      }
+                    }}
+                    className="flex items-center space-x-2 px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                  >
+                    <Download className="w-4 h-4" />
+                    <span>Export Results as JSON</span>
+                  </button>
+                </div>
               </div>
             </div>
           </div>

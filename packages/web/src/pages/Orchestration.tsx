@@ -55,6 +55,8 @@ const Orchestration: React.FC = () => {
   const saveWorkflowMutation = useMutation({
     mutationFn: (workflowData: any) => apiService.saveWorkflow(workflowData),
     onSuccess: (savedWorkflow: Workflow) => {
+      console.log('Workflow saved successfully:', savedWorkflow);
+      console.log('Workflow ID:', savedWorkflow.id);
       queryClient.invalidateQueries({ queryKey: ['workflows'] });
       showToast(`Workflow "${savedWorkflow.name}" saved successfully!`, 'success');
       return savedWorkflow;

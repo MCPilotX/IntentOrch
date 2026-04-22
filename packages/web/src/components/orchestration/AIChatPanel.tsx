@@ -110,10 +110,10 @@ const AIChatPanel: React.FC<AIChatPanelProps> = ({ onSendMessage, messages, isAn
 
       {/* Input */}
       <div className="p-4 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/30">
-        <form onSubmit={handleSubmit} className="relative">
+        <form onSubmit={handleSubmit} className="relative group">
           <textarea
-            className="w-full pl-4 pr-12 py-3 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-xl focus:ring-2 focus:ring-primary-500 focus:border-transparent resize-none text-sm min-h-[50px] max-h-32"
-            placeholder="Type your intent..."
+            className="w-full pl-4 pr-14 py-3.5 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-2xl focus:ring-2 focus:ring-primary-500 focus:border-transparent transition-all duration-200 shadow-sm hover:border-gray-300 dark:hover:border-gray-500 resize-none text-sm min-h-[56px] max-h-48"
+            placeholder={t('orchestration.inputPlaceholder')}
             rows={1}
             value={input}
             onChange={(e) => setInput(e.target.value)}
@@ -127,14 +127,18 @@ const AIChatPanel: React.FC<AIChatPanelProps> = ({ onSendMessage, messages, isAn
           <button
             type="submit"
             disabled={!input.trim() || isAnalyzing}
-            className="absolute right-2 bottom-2 p-2 bg-primary-500 text-white rounded-lg hover:bg-primary-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            className="absolute right-2.5 bottom-2.5 p-2.5 bg-primary-600 text-white rounded-xl hover:bg-primary-700 active:scale-95 transition-all disabled:bg-gray-300 dark:disabled:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed shadow-md shadow-primary-500/20"
+            title={t('orchestration.sendButton')}
           >
-            <Send className="w-4 h-4" />
+            <Send className="w-4.5 h-4.5" />
           </button>
         </form>
-        <p className="mt-2 text-[10px] text-center text-gray-400">
-          {t('orchestration.poweredBy')}
-        </p>
+        <div className="mt-2 flex items-center justify-center space-x-2 opacity-40">
+          <Sparkles className="w-2.5 h-2.5 text-primary-500" />
+          <p className="text-[10px] font-medium tracking-wider uppercase text-gray-500 dark:text-gray-400">
+            Powered by Intentorch Reasoning Engine
+          </p>
+        </div>
       </div>
     </div>
   );

@@ -246,7 +246,7 @@ const Layout: React.FC = () => {
                 <div className="flex justify-between text-sm">
                   <span className="text-gray-500 dark:text-gray-400">{t('layout.running')}</span>
                   <span className="font-medium text-green-600 dark:text-green-400">
-                    {stats.runningServers}/{stats.totalServers}
+                    {stats.totalServers > 0 ? `${stats.runningServers}/${stats.totalServers}` : t('dashboard.noRunningServers')}
                   </span>
                 </div>
               </div>
