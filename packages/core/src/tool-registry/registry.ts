@@ -52,6 +52,16 @@ export class ToolRegistry {
       
       this.tools.clear();
       for (const tool of registry.tools || []) {
+        // Skip tools with invalid serverName (e.g., "github:/" from old buggy URL parsing)
+        if (tool.serverName && (tool.serverName.endsWith(':/') || tool.serverName.endsWith('://'))) {
+          console.warn(`[ToolRegistry] Skipping tool "${tool.name}" with invalid serverName: "${tool.serverName}"`);
+          continue;
+        }
+        // Skip tools where owner or project is empty (e.g., serverName is just "/")
+        if (tool.serverName && tool.serverName.split(':').pop() === '/') {
+          console.warn(`[ToolRegistry] Skipping tool "${tool.name}" with empty owner/project: "${tool.serverName}"`);
+          continue;
+        }
         this.tools.set(this.getToolKey(tool.serverName, tool.name), tool);
       }
     } catch (error) {
