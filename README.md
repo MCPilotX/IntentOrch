@@ -28,7 +28,7 @@
 
 <!-- Dashboard 全景截图 -->
 <p align="center">
-  <img src="./docs/screenshots/1.png" width="800" alt="IntentOrch Dashboard - 系统状态总览" />
+  <img src="./docs/screenshots/dashboard.png" width="800" alt="IntentOrch Dashboard - 系统状态总览" />
 </p>
 
 ---
@@ -85,7 +85,7 @@ IntentOrch 自动完成：
 
 <!-- 意图编排页面截图 -->
 <p align="center">
-  <img src="./docs/screenshots/2.png" width="800" alt="IntentOrch 意图编排界面 - 自然语言生成工作流" />
+  <img src="./docs/screenshots/orchestration.png" width="800" alt="IntentOrch 意图编排界面 - 自然语言生成工作流" />
 </p>
 
 ### 🐳 MCP Server 全生命周期管理
@@ -117,8 +117,8 @@ IntentOrch 自动完成：
 
 <!-- 功能截图拼图 -->
 <p align="center">
-  <img src="./docs/screenshots/3.png" width="45%" alt="工作流管理" />
-  <img src="./docs/screenshots/4.png" width="45%" alt="MCP服务管理" />
+  <img src="./docs/screenshots/workflows.png" width="45%" alt="工作流管理" />
+  <img src="./docs/screenshots/servers.png" width="45%" alt="MCP服务管理" />
 </p>
 <p align="center">
   <em>左：工作流管理 ｜ 右：MCP服务管理</em>
@@ -128,8 +128,8 @@ IntentOrch 自动完成：
 
 ```bash
 # 命令行快速操作
-intorch pull Joooook/12306-mcp
-intorch start Joooook/12306-mcp
+intorch pull github:Joooook/12306-mcp
+intorch start 12306-mcp
 intorch ps
 
 # 启动 Web 控制台
@@ -158,9 +158,9 @@ intorch workflow run <id>
 │                     核心引擎层                            │
 │                                                          │
 │  ┌────────────────────────────────────────────────────┐  │
-│  │          意图驱动编排引擎 (Intent Engine)             │  │
+│  │          意图驱动编排引擎 (Intent Engine)           │  │
 │  │                                                    │  │
-│  │  自然语言 → 意图解析 → 工具匹配 → 工作流编排 → 执行      │  │
+│  │  自然语言 → 意图解析 → 工具匹配 → 工作流编排 → 执行 │  │
 │  └────────────────────────────────────────────────────┘  │
 │                                                          │
 │  ┌──────────────┐  ┌──────────────┐  ┌───────────────┐  │
@@ -228,10 +228,10 @@ intorch dashboard
 ### 完整使用流程
 ```bash
 # 1. 从 GitHub 拉取 12306 查票 MCP Server
-intorch pull Joooook/12306-mcp
+intorch pull github:Joooook/12306-mcp
 
 # 2. 启动 Server
-intorch start Joooook/12306-mcp
+intorch start 12306-mcp
 
 # 3. 查看运行状态
 intorch ps
@@ -300,7 +300,19 @@ IntentOrch 兼容所有遵循 [Model Context Protocol](https://modelcontextproto
 
 ## 🤝 贡献指南
 
-我们欢迎所有形式的贡献！
+我们欢迎所有形式的贡献！请参阅 [CONTRIBUTING.md](CONTRIBUTING.md) 了解详情。
+
+### 开发
+```bash
+# 启动开发模式
+pnpm dev
+
+# 运行测试
+pnpm test
+
+# 代码检查
+pnpm lint
+```
 
 ---
 
