@@ -127,3 +127,6 @@ package-lock.json
 yarn.lock
 
 bin
+
+# One-time utility scripts
+remove-sensitive-files.sh
