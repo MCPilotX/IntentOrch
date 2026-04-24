@@ -124,18 +124,28 @@ export class IntentorchAdapter {
 
   /**
    * Get all tools from connected servers
+   * Uses timeout to prevent one slow server from blocking all others
    */
   private async getAvailableTools(): Promise<any[]> {
     const tools: any[] = [];
+    const TOOL_LIST_TIMEOUT = 15000; // 15 seconds timeout per server
+    
     for (const [name, server] of this.connectedServers) {
       try {
-        const serverTools = await server.client.listTools();
+        // Add timeout to prevent one slow server from blocking all others
+        const serverTools = await Promise.race([
+          server.client.listTools(),
+          new Promise<never>((_, reject) => 
+            setTimeout(() => reject(new Error('Request timeout after 15000ms')), TOOL_LIST_TIMEOUT)
+          )
+        ]);
         tools.push(...serverTools.map((tool: any) => ({
           ...tool,
           serverName: name
         })));
       } catch (error: any) {
-        logger.error(`[IntentorchAdapter] Failed to list tools for server ${name}:`, error.message);
+        logger.warn(`[IntentorchAdapter] Failed to list tools for server ${name}: ${error.message}`);
+        // Continue with other servers - don't let one slow server block everything
       }
     }
     return tools;

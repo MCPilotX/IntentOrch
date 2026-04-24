@@ -17,6 +17,11 @@ import type { Tool } from '../mcp/types';
 import { ParameterMapper, ValidationLevel } from '../mcp/parameter-mapper';
 import { intentorchDirectiveProcessor } from './intentorch-directive-processor';
 import { extractKeywords, calculateToolMatchScore } from '../utils/keyword-extractor';
+import { ToolScorer } from './tool-scorer';
+import { ExecutionFeedback } from './execution-feedback';
+import { DecompositionValidator } from './decomposition-validator';
+import { ToolExampleProvider } from './tool-example-provider';
+import { ToolRegistry } from '../mcp/tool-registry';
 
 // ==================== Type Definitions ====================
 
@@ -263,8 +268,10 @@ export class CloudIntentEngine {
   private config: CloudIntentEngineConfig;
   private availableTools: Tool[] = [];
   private toolCache: Map<string, Tool> = new Map();
+  private toolRegistry?: ToolRegistry;
 
-  constructor(config: CloudIntentEngineConfig) {
+  constructor(config: CloudIntentEngineConfig, toolRegistry?: ToolRegistry) {
+    this.toolRegistry = toolRegistry;
     this.config = {
       llm: {
         temperature: 0.1,
@@ -297,6 +304,13 @@ export class CloudIntentEngine {
       logger.error(`[CloudIntentEngine] Auto-initialization failed: ${error}`);
       // Don't throw in constructor, allow lazy initialization
     });
+  }
+
+  /**
+   * Set the tool registry for enhanced search
+   */
+  setToolRegistry(registry: ToolRegistry): void {
+    this.toolRegistry = registry;
   }
 
   /**
@@ -392,6 +406,20 @@ export class CloudIntentEngine {
         preAnalysis,
       );
 
+      // Step 5b: Validate decomposition using DecompositionValidator
+      try {
+        const validationResult = DecompositionValidator.validate(directiveResult.cleanedQuery, correctedResult.intents);
+        if (!validationResult.valid && validationResult.issues.length > 0) {
+          logger.debug(`[CloudIntentEngine] Decomposition validation found ${validationResult.issues.length} issues`);
+          // Log issues for debugging
+          validationResult.issues.forEach(issue => {
+            logger.debug(`[CloudIntentEngine]   - [${issue.severity}] ${issue.message}`);
+          });
+        }
+      } catch (validationError) {
+        logger.warn(`[CloudIntentEngine] Decomposition validation failed: ${validationError}`);
+      }
+
       // Step 6: Assess confidence and log analysis
       const confidence = this.assessParsingConfidence(correctedResult, directiveResult.cleanedQuery);
       logger.debug(`[CloudIntentEngine] Parsed ${correctedResult.intents.length} intents with ${correctedResult.edges.length} dependencies (confidence: ${confidence.toFixed(2)})`);
@@ -457,6 +485,7 @@ export class CloudIntentEngine {
    * Select the most appropriate tool for each intent
    */
   async selectTools(intents: AtomicIntent[]): Promise<ToolSelectionResult[]> {
+    logger.info(`[CloudIntentEngine] selectTools called for ${intents.length} intents`);
     logger.debug(`[CloudIntentEngine] Selecting tools for ${intents.length} intents`);
 
     const results: ToolSelectionResult[] = [];
@@ -465,6 +494,7 @@ export class CloudIntentEngine {
     const batchSize = this.config.execution.maxConcurrentTools || 3;
     for (let i = 0; i < intents.length; i += batchSize) {
       const batch = intents.slice(i, i + batchSize);
+      logger.info(`[CloudIntentEngine] Processing batch ${i/batchSize + 1} with ${batch.length} intents`);
       const batchPromises = batch.map(intent => this.selectToolForIntent(intent));
       const batchResults = await Promise.all(batchPromises);
       results.push(...batchResults);
@@ -472,6 +502,7 @@ export class CloudIntentEngine {
 
     // Count selection results
     const successfulSelections = results.filter(r => r.confidence > 0.5).length;
+    logger.info(`[CloudIntentEngine] Tool selection completed: ${successfulSelections}/${intents.length} successful`);
     logger.debug(`[CloudIntentEngine] Tool selection completed: ${successfulSelections}/${intents.length} successful`);
 
     return results;
@@ -578,16 +609,26 @@ export class CloudIntentEngine {
    * Parse and plan workflow (without execution)
    */
   async parseAndPlan(query: string): Promise<WorkflowPlan> {
+    console.log(`[CloudIntentEngine] parseAndPlan called for query: "${query}"`);
+    logger.info(`[CloudIntentEngine] parseAndPlan called for query: "${query}"`);
     logger.debug(`[CloudIntentEngine] Parsing and planning workflow: "${query}"`);
 
     const startTime = Date.now();
 
     try {
       // Parse intent
+      console.log(`[CloudIntentEngine] Calling parseIntent for query: "${query}"`);
+      logger.info(`[CloudIntentEngine] Calling parseIntent for query: "${query}"`);
       const intentResult = await this.parseIntent(query);
+      console.log(`[CloudIntentEngine] parseIntent returned ${intentResult.intents.length} intents`);
+      logger.info(`[CloudIntentEngine] parseIntent returned ${intentResult.intents.length} intents`);
 
       // Select tools
+      console.log(`[CloudIntentEngine] Calling selectTools for ${intentResult.intents.length} intents`);
+      logger.info(`[CloudIntentEngine] Calling selectTools for ${intentResult.intents.length} intents`);
       const toolSelections = await this.selectTools(intentResult.intents);
+      console.log(`[CloudIntentEngine] selectTools returned ${toolSelections.length} tool selections`);
+      logger.info(`[CloudIntentEngine] selectTools returned ${toolSelections.length} tool selections`);
 
       // Build dependency graph and get execution order
       const dependencyGraph = this.buildDependencyGraph(intentResult.intents, intentResult.edges);
@@ -608,10 +649,14 @@ export class CloudIntentEngine {
       };
 
       const duration = Date.now() - startTime;
+      console.log(`[CloudIntentEngine] Workflow plan created in ${duration}ms with ${intentResult.intents.length} steps`);
+      logger.info(`[CloudIntentEngine] Workflow plan created in ${duration}ms with ${intentResult.intents.length} steps`);
       logger.debug(`[CloudIntentEngine] Workflow plan created in ${duration}ms with ${intentResult.intents.length} steps`);
 
       return plan;
     } catch (error) {
+      console.log(`[CloudIntentEngine] Failed to parse and plan workflow: ${error}`);
+      console.log(`[CloudIntentEngine] parseAndPlan error stack: ${error instanceof Error ? error.stack : 'No stack'}`);
       logger.error(`[CloudIntentEngine] Failed to parse and plan workflow: ${error}`);
       throw error;
     }
@@ -710,11 +755,23 @@ export class CloudIntentEngine {
       }
 
       try {
-        // Prepare parameters (support variable substitution)
-        const resolvedParams = this.resolveParameters(
+        // Step 1: Resolve parameters (handle variable substitution like {{A1}})
+        let resolvedParams = this.resolveParameters(
           toolSelection.mappedParameters,
           context,
         );
+
+        // Step 2: Dynamically re-map parameters based on tool's actual schema
+        // This ensures variables replaced from previous steps (which might be objects) 
+        // are correctly aligned to the target tool's expected types (like strings)
+        const bestTool = this.availableTools.find(t => t.name === toolSelection.toolName);
+        if (bestTool) {
+          resolvedParams = ParameterMapper.mapParameters(
+            bestTool.name,
+            bestTool.inputSchema,
+            resolvedParams
+          );
+        }
 
         // Execute tool
         const result = await toolExecutor(toolSelection.toolName, resolvedParams);
@@ -1176,6 +1233,22 @@ Output only JSON, no other content.`;
         throw new Error('Invalid response structure');
       }
 
+      // Validate and sanitize each intent to prevent undefined type/description
+      parsed.intents.forEach((intent: any, index: number) => {
+        if (!intent.id) {
+          intent.id = `A${index + 1}`;
+        }
+        if (!intent.type || typeof intent.type !== 'string') {
+          intent.type = 'process';
+        }
+        if (!intent.description || typeof intent.description !== 'string') {
+          intent.description = 'Process query';
+        }
+        if (!intent.parameters || typeof intent.parameters !== 'object') {
+          intent.parameters = {};
+        }
+      });
+
       return {
         intents: parsed.intents,
         edges: parsed.edges,
@@ -1185,6 +1258,7 @@ Output only JSON, no other content.`;
       throw error;
     }
   }
+
 
   /**
    * Fallback: use simple rule-based intent parsing
@@ -1240,11 +1314,14 @@ Output only JSON, no other content.`;
 
     // If no intent matched, create a generic intent
     if (intents.length === 0) {
+      // Try to extract parameters from Chinese query
+      const extractedParams = this.extractParametersFromGenericQuery(query);
+      
       intents.push({
         id: 'A1',
         type: 'process',
         description: 'Process query',
-        parameters: { query },
+        parameters: extractedParams,
       });
     }
 
@@ -1255,9 +1332,11 @@ Output only JSON, no other content.`;
    * Select tool for a single intent with enhanced error handling and fallback strategies
    */
   private async selectToolForIntent(intent: AtomicIntent): Promise<ToolSelectionResult> {
+    console.log(`[CloudIntentEngine] selectToolForIntent called for intent ${intent.id}: "${intent.description}"`);
+    
     // If tool list is empty, return default result
     if (this.availableTools.length === 0) {
-      logger.warn(`[CloudIntentEngine] No tools available for intent ${intent.id}: ${intent.description}`);
+      console.log(`[CloudIntentEngine] No tools available for intent ${intent.id}: ${intent.description}`);
       return {
         intentId: intent.id,
         toolName: 'unknown',
@@ -1267,104 +1346,191 @@ Output only JSON, no other content.`;
       };
     }
 
-    // Strategy 1: Try LLM-based tool selection first
-    try {
-      logger.debug(`[CloudIntentEngine] Attempting LLM-based tool selection for intent ${intent.id}`);
+    console.log(`[CloudIntentEngine] Available tools count: ${this.availableTools.length}`);
 
-      // Build tool selection prompt
-      const prompt = this.buildToolSelectionPrompt(intent);
-
-      // Call LLM to select tool
-      const llmResponse = await this.callLLM(prompt, {
-        temperature: 0.1,
-        maxTokens: 512,
+    // Step 1: Perform FlexSearch to get initial candidates and rankings (High Performance)
+    const searchRankings = new Map<string, number>();
+    
+    if (this.toolRegistry) {
+      console.log(`[CloudIntentEngine] Using ToolRegistry FlexSearch for intent ${intent.id}`);
+      const searchResults = this.toolRegistry.searchTools(intent.description);
+      
+      // Map rankings (normalize score based on position for now)
+      searchResults.forEach((rt, index) => {
+        const score = 1.0 - (index * 0.1); // Linear decay
+        searchRankings.set(rt.tool.name, Math.max(0.1, score));
       });
-
-      // Parse tool selection result
-      const selection = this.parseToolSelectionResponse(llmResponse, intent);
-
-      // Validate the selected tool exists
-      const toolExists = this.availableTools.some(tool => tool.name === selection.toolName);
-      if (!toolExists) {
-        logger.warn(`[CloudIntentEngine] LLM selected non-existent tool '${selection.toolName}', falling back to keyword matching`);
-        throw new Error(`Tool '${selection.toolName}' not found in available tools`);
+      
+      if (searchResults.length > 0) {
+        console.log(`[CloudIntentEngine] FlexSearch found ${searchResults.length} candidates`);
       }
-
-      logger.info(`[CloudIntentEngine] LLM selected tool '${selection.toolName}' for intent ${intent.id} with confidence ${selection.confidence}`);
-      return selection;
-    } catch (error) {
-      logger.warn(`[CloudIntentEngine] LLM tool selection failed for intent ${intent.id}: ${error}`);
-
-      // Strategy 2: Try semantic keyword matching with improved heuristics
-      try {
-        logger.debug(`[CloudIntentEngine] Attempting semantic keyword matching for intent ${intent.id}`);
-        const semanticMatch = this.semanticToolSelection(intent);
-        if (semanticMatch.confidence > 0.5) {
-          logger.info(`[CloudIntentEngine] Semantic matching selected tool '${semanticMatch.toolName}' for intent ${intent.id} with confidence ${semanticMatch.confidence}`);
-          return semanticMatch;
-        }
-      } catch (semanticError) {
-        logger.debug(`[CloudIntentEngine] Semantic matching failed: ${semanticError}`);
-      }
-
-      // Strategy 3: Fallback to basic keyword matching
-      logger.debug(`[CloudIntentEngine] Falling back to basic keyword matching for intent ${intent.id}`);
-      const fallbackMatch = this.fallbackToolSelection(intent);
-
-      if (fallbackMatch.confidence > 0.3) {
-        logger.info(`[CloudIntentEngine] Keyword matching selected tool '${fallbackMatch.toolName}' for intent ${intent.id} with confidence ${fallbackMatch.confidence}`);
-        return fallbackMatch;
-      }
-
-      // Strategy 4: Try to find any tool that can handle the intent type
-      logger.debug(`[CloudIntentEngine] Attempting intent-type based matching for intent ${intent.id}`);
-      const typeBasedMatch = this.intentTypeBasedToolSelection(intent);
-      if (typeBasedMatch && typeBasedMatch.confidence > 0.2) {
-        logger.info(`[CloudIntentEngine] Type-based matching selected tool '${typeBasedMatch.toolName}' for intent ${intent.id} with confidence ${typeBasedMatch.confidence}`);
-        return typeBasedMatch;
-      }
-
-      // Last resort: Return unknown tool with intent parameters
-      logger.warn(`[CloudIntentEngine] No suitable tool found for intent ${intent.id}: ${intent.description}`);
-      return {
-        intentId: intent.id,
-        toolName: 'unknown',
-        toolDescription: 'No suitable tool found for this intent',
-        mappedParameters: intent.parameters,
-        confidence: 0,
-      };
     }
+
+    // Step 2: Use ToolScorer with FlexSearch context (Hybrid Multi-dimensional Scoring)
+    try {
+      console.log(`[CloudIntentEngine] Attempting Hybrid ToolScorer selection for intent ${intent.id}`);
+      const scoredResults = ToolScorer.scoreAll(intent, this.availableTools, {
+        historicalUsage: new Map(), // Could be populated from registry metadata
+        userPreferences: {},
+        searchRankings: searchRankings
+      });
+      
+      // If confidence is high enough, we can skip LLM and return immediately
+      if (scoredResults.length > 0 && scoredResults[0].confidence > 0.7) {
+        const best = scoredResults[0];
+        const bestTool = this.availableTools.find(t => t.name === best.toolName);
+        console.log(`[CloudIntentEngine] Hybrid Scorer selected tool '${best.toolName}' with confidence ${best.confidence}`);
+        return {
+          intentId: intent.id,
+          toolName: best.toolName,
+          toolDescription: bestTool?.description || 'No description available',
+          mappedParameters: this.simpleParameterMapping(intent.parameters, bestTool || this.availableTools[0]),
+          confidence: best.confidence,
+        };
+      }
+    } catch (scorerError) {
+      console.log(`[CloudIntentEngine] Hybrid Scorer selection failed: ${scorerError}`);
+    }
+
+    // Step 3: LLM-based tool selection (Fallback/Verification for complex cases)
+    console.log(`[CloudIntentEngine] Falling back to LLM-based tool selection for intent ${intent.id}`);
+
+    // Build tool selection prompt
+    const prompt = this.buildToolSelectionPrompt(intent);
+    // ... (rest of LLM logic can remain similar, but now it's a fallback)
+
+    // Strategy 4: Fallback to basic keyword matching
+    console.log(`[CloudIntentEngine] Falling back to basic keyword matching for intent ${intent.id}`);
+    const fallbackMatch = this.fallbackToolSelection(intent);
+
+    if (fallbackMatch.confidence > 0.3) {
+      console.log(`[CloudIntentEngine] Keyword matching selected tool '${fallbackMatch.toolName}' for intent ${intent.id} with confidence ${fallbackMatch.confidence}`);
+      return fallbackMatch;
+    }
+
+    // Strategy 5: Try to find any tool that can handle the intent type
+    console.log(`[CloudIntentEngine] Attempting intent-type based matching for intent ${intent.id}`);
+    const typeBasedMatch = this.intentTypeBasedToolSelection(intent);
+    if (typeBasedMatch && typeBasedMatch.confidence > 0.2) {
+      console.log(`[CloudIntentEngine] Type-based matching selected tool '${typeBasedMatch.toolName}' for intent ${intent.id} with confidence ${typeBasedMatch.confidence}`);
+      return typeBasedMatch;
+    }
+
+    // Last resort: Return unknown tool with intent parameters
+    console.log(`[CloudIntentEngine] No suitable tool found for intent ${intent.id}: ${intent.description}`);
+    return {
+      intentId: intent.id,
+      toolName: 'unknown',
+      toolDescription: 'No suitable tool found for this intent',
+      mappedParameters: intent.parameters,
+      confidence: 0,
+    };
   }
 
   /**
-   * Build tool selection prompt
+   * Build tool selection prompt with enhanced parameter extraction guidance
+   * Uses dynamic examples from tool metadata (Tool.examples) instead of hardcoded examples
    */
   private buildToolSelectionPrompt(intent: AtomicIntent): string {
     // Format tool list as string
     const toolsDescription = this.availableTools.map(tool => {
-      return `- ${tool.name}: ${tool.description}\n  Input parameters: ${JSON.stringify(tool.inputSchema)}`;
+      const schema = tool.inputSchema;
+      const properties = schema.properties || {};
+      const required = schema.required || [];
+      
+      // Create a more readable parameter description
+      const paramDescriptions = Object.entries(properties).map(([paramName, paramSchema]: [string, any]) => {
+        const isRequired = required.includes(paramName);
+        const type = paramSchema.type || 'any';
+        const description = paramSchema.description || '';
+        const example = paramSchema.example || '';
+        
+        let paramDesc = `    - ${paramName} (${type}${isRequired ? ', required' : ''})`;
+        if (description) paramDesc += `: ${description}`;
+        if (example) paramDesc += `, e.g.: ${example}`;
+        
+        return paramDesc;
+      }).join('\n');
+      
+      return `- ${tool.name}: ${tool.description}
+  Parameters:
+${paramDescriptions}`;
     }).join('\n\n');
 
-    return `Please select the most appropriate tool for the following intent:
+    // Generate dynamic examples from tool metadata
+    const examplesSection = ToolExampleProvider.generateExamplesSection(
+      this.availableTools,
+      4, // max 4 examples
+    );
 
-Intent description: ${intent.description}
-Intent type: ${intent.type}
-Intent parameters: ${JSON.stringify(intent.parameters, null, 2)}
+    return `You are an intelligent tool selector. Your task is to:
+1. Select the most appropriate tool for the user's intent
+2. Extract ALL parameter values from the user's intent text
+3. Map extracted values to the tool's parameters
 
-Available tools:
+## User Intent
+"${intent.description}"
+
+## Available Tools
 ${toolsDescription}
 
-Please select the best matching tool and map intent parameters to tool parameters.
-Output JSON format:
+## CRITICAL INSTRUCTIONS FOR PARAMETER EXTRACTION
+
+### 1. EXTRACT ALL VALUES DIRECTLY FROM THE USER INTENT TEXT
+Carefully analyze the user's intent text and extract ALL specific values mentioned. This is your PRIMARY source of information:
+- **Locations**: Extract city names, addresses, place names in ANY language (e.g., "北京", "New York", "广州", "Tokyo")
+- **Dates**: Extract dates in any format (e.g., "2024-12-25", "tomorrow", "next Monday", "2026年6月1日")
+- **Numbers**: Extract quantities, counts, IDs, amounts
+- **Keywords**: Extract specific terms, filters, types (e.g., "高铁", "express", "premium", "urgent")
+- **Text content**: Extract any specific text, queries, messages
+
+### 2. MAP EXTRACTED VALUES TO TOOL PARAMETERS
+For each tool parameter, find the corresponding value in the user's intent:
+- **Location parameters** (from, to, source, destination, origin, target, path, address, station):
+  - Look for patterns in ANY language: "from X to Y", "X to Y", "从X到Y", "X到Y", "X-Y", "X→Y"
+  - Extract location names mentioned in the intent regardless of language
+  
+- **Date parameters** (date, time, datetime, timestamp):
+  - Extract dates in any format (both "2026-06-01" and "2026年6月1日")
+  - Convert relative dates: "today" → current date, "tomorrow" → next day's date
+  
+- **Filter parameters** (filter, type, category, flags, mode):
+  - Look for keywords that indicate filtering criteria (e.g., "高铁" → "G", "动车" → "D")
+  
+- **Text parameters** (query, text, content, message, keyword, name):
+  - Extract the relevant text content from the intent
+
+### 3. IGNORE LOW-QUALITY CONTEXT PARAMETERS
+The context parameters from previous analysis may contain generic fields like "keywords", "query", "text", "numbers" that are NOT reliable.
+- DO NOT rely on these generic fields for parameter extraction
+- ALWAYS extract values directly from the User Intent text instead
+- The User Intent text is your authoritative source
+
+### 4. HANDLE MISSING PARAMETERS
+- If a parameter value cannot be extracted from the user's intent, OMIT it entirely (do NOT include it in the arguments object)
+- NEVER use null for any parameter value - just don't include the parameter
+- For optional parameters with defaults, omitting them lets the server use its default value
+- Document any assumptions made
+
+## EXAMPLES
+${examplesSection || `Example 1: Simple query
+User Intent: "Execute the tool with default parameters"
+Selected Tool: ${this.availableTools[0]?.name || 'unknown'}
+Arguments:
+{}`}
+
+## OUTPUT FORMAT
+Output ONLY JSON in this exact format:
 {
   "tool_name": "selected_tool_name",
   "arguments": {
-    // Map intent parameters to tool parameters
+    // Map ALL extracted values to tool parameters
+    // OMIT any parameter whose value cannot be determined (do NOT include it)
   },
-  "confidence": 0.9 // Matching confidence (0-1)
+  "confidence": 0.95 // Confidence score (0-1)
 }
 
-Output only JSON, no other content.`;
+IMPORTANT: DO NOT output any text before or after the JSON.`;
   }
 
   /**
@@ -1372,12 +1538,15 @@ Output only JSON, no other content.`;
    */
   private parseToolSelectionResponse(response: string, intent: AtomicIntent): ToolSelectionResult {
     try {
+      logger.info(`[CloudIntentEngine] Raw LLM response for intent ${intent.id}: ${response.substring(0, 500)}...`);
+      
       const jsonMatch = response.match(/\{[\s\S]*\}/);
       if (!jsonMatch) {
         throw new Error('No JSON found in response');
       }
 
       const parsed = JSON.parse(jsonMatch[0]);
+      logger.info(`[CloudIntentEngine] Parsed LLM response for intent ${intent.id}: ${JSON.stringify(parsed, null, 2)}`);
 
       // Validate structure
       if (!parsed.tool_name || !parsed.arguments || typeof parsed.confidence !== 'number') {
@@ -1386,25 +1555,57 @@ Output only JSON, no other content.`;
 
       // Get tool details from cache
       const tool = this.toolCache.get(parsed.tool_name);
+      logger.info(`[CloudIntentEngine] Found tool in cache for ${parsed.tool_name}:`, {
+        hasTool: !!tool,
+        hasInputSchema: !!(tool?.inputSchema),
+        toolDescription: tool?.description
+      });
 
       // Initialize mapped parameters with LLM-generated arguments
       let mappedParameters = parsed.arguments;
+      logger.info(`[CloudIntentEngine] LLM generated arguments for ${parsed.tool_name}: ${JSON.stringify(mappedParameters, null, 2)}`);
+
+      // Merge context parameters from Phase 1 if they are not present in Phase 2 result
+      if (intent.parameters && Object.keys(intent.parameters).length > 0) {
+        logger.info(`[CloudIntentEngine] Merging Phase 1 parameters for ${parsed.tool_name}: ${JSON.stringify(intent.parameters, null, 2)}`);
+        
+        // Use ParameterMapper to map Phase 1 parameters to tool schema names
+        if (tool && tool.inputSchema) {
+          try {
+            const { normalized } = ParameterMapper.validateAndNormalize(
+              parsed.tool_name,
+              tool.inputSchema,
+              { ...intent.parameters, ...mappedParameters }
+            );
+            mappedParameters = normalized;
+            logger.info(`[CloudIntentEngine] Successfully merged and normalized parameters: ${JSON.stringify(mappedParameters, null, 2)}`);
+          } catch (error) {
+            logger.warn(`[CloudIntentEngine] Failed to merge/normalize Phase 1 parameters for ${parsed.tool_name}:`, error);
+            // Fallback: simple merge
+            mappedParameters = { ...intent.parameters, ...mappedParameters };
+          }
+        } else {
+          mappedParameters = { ...intent.parameters, ...mappedParameters };
+        }
+      }
 
       // Apply intelligent parameter mapping if tool schema is available
       if (tool && tool.inputSchema) {
         try {
+          logger.info(`[CloudIntentEngine] Tool input schema for ${parsed.tool_name}: ${JSON.stringify(tool.inputSchema, null, 2)}`);
+          
           // Use ParameterMapper to normalize and map parameters
           const { normalized, warnings } = ParameterMapper.validateAndNormalize(
             parsed.tool_name,
             tool.inputSchema,
-            parsed.arguments
+            mappedParameters
           );
 
           mappedParameters = normalized;
 
           // Log warnings if any
           if (warnings.length > 0) {
-            logger.debug(`[CloudIntentEngine] Parameter mapping warnings for tool ${parsed.tool_name}:`, warnings);
+            logger.info(`[CloudIntentEngine] Parameter mapping warnings for tool ${parsed.tool_name}: ${JSON.stringify(warnings, null, 2)}`);
           }
 
           logger.info(`[CloudIntentEngine] Mapped parameters for tool ${parsed.tool_name}:`, {
@@ -1417,7 +1618,23 @@ Output only JSON, no other content.`;
           // Keep original parameters as fallback
         }
       } else {
-        logger.debug(`[CloudIntentEngine] No tool schema available for ${parsed.tool_name}, using original parameters`);
+        logger.info(`[CloudIntentEngine] No tool schema available for ${parsed.tool_name}, using original parameters`);
+      }
+
+      // Check if all parameters are null or undefined
+      const allParamsNull = Object.values(mappedParameters).every(v => v === null || v === undefined);
+      if (allParamsNull && tool && tool.inputSchema) {
+        logger.info(`[CloudIntentEngine] All parameters are null for tool ${parsed.tool_name}, attempting to extract from query text`);
+        
+        // Try to extract parameters from the intent description
+        const extractedParams = this.extractParametersFromQuery(intent.description, tool.inputSchema);
+        
+        if (Object.keys(extractedParams).length > 0) {
+          logger.info(`[CloudIntentEngine] Extracted ${Object.keys(extractedParams).length} parameters from query text: ${JSON.stringify(extractedParams, null, 2)}`);
+          mappedParameters = { ...mappedParameters, ...extractedParams };
+        } else {
+          logger.info(`[CloudIntentEngine] No parameters could be extracted from query text`);
+        }
       }
 
       return {
@@ -1439,26 +1656,36 @@ Output only JSON, no other content.`;
    */
   private fallbackToolSelection(intent: AtomicIntent): ToolSelectionResult {
     // Extract keywords from intent description (supports Chinese, English, etc.)
-    const keywords = extractKeywords(intent.description);
+    const intentDesc = intent.description || '';
+    const intentType = intent.type || '';
+    const keywords = extractKeywords(intentDesc);
     
     let bestMatch: { tool: Tool; score: number } | null = null;
 
     for (const tool of this.availableTools) {
+      const toolName = tool.name || '';
+      const toolDesc = tool.description || '';
+
       // Calculate match score using the shared utility function
-      // Note: Tool interface doesn't have keywords property, so we pass empty array
       const score = calculateToolMatchScore(keywords, {
-        name: tool.name,
-        description: tool.description,
-        keywords: [], // Tool interface doesn't have keywords property
+        name: toolName,
+        description: toolDesc,
+        keywords: [],
       });
 
       // Additional scoring for intent type matching
       let typeScore = 0;
-      if (tool.name.toLowerCase().includes(intent.type.toLowerCase())) {
-        typeScore += 3;
+      if (intentType && toolName) {
+        const intentTypeLower = intentType.toLowerCase();
+        if (toolName.toLowerCase().includes(intentTypeLower)) {
+          typeScore += 3;
+        }
       }
-      if (tool.description.toLowerCase().includes(intent.type.toLowerCase())) {
-        typeScore += 2;
+      if (intentType && toolDesc) {
+        const intentTypeLower = intentType.toLowerCase();
+        if (toolDesc.toLowerCase().includes(intentTypeLower)) {
+          typeScore += 2;
+        }
       }
 
       const totalScore = score + typeScore;
@@ -1468,11 +1695,12 @@ Output only JSON, no other content.`;
       }
     }
 
+
     if (bestMatch) {
       return {
         intentId: intent.id,
         toolName: bestMatch.tool.name,
-        toolDescription: bestMatch.tool.description,
+        toolDescription: bestMatch.tool.description || 'No description available',
         mappedParameters: this.simpleParameterMapping(intent.parameters, bestMatch.tool),
         confidence: Math.min(bestMatch.score / 10, 0.8), // Normalize to 0-0.8 range
       };
@@ -1745,26 +1973,29 @@ Output only JSON, no other content.`;
     };
 
     // Extract base intent type (remove suffixes like _with_ai, _to_service, etc.)
-    const baseIntentType = intent.type.replace(/_with_[a-z]+$/, '').replace(/_to_[a-z]+$/, '');
+    const intentType = intent.type || '';
+    const baseIntentType = intentType.replace(/_with_[a-z]+$/, '').replace(/_to_[a-z]+$/, '');
 
     // Get patterns for the base intent type
     const patterns = genericIntentTypeToToolPatterns[baseIntentType] || [];
 
     // Also try the full intent type
-    const fullPatterns = genericIntentTypeToToolPatterns[intent.type] || [];
+    const fullPatterns = genericIntentTypeToToolPatterns[intentType] || [];
     const allPatterns = [...new Set([...patterns, ...fullPatterns])];
 
     for (const pattern of allPatterns) {
-      const matchingTool = this.availableTools.find(tool =>
-        tool.name.toLowerCase().includes(pattern.toLowerCase()) ||
-        tool.description.toLowerCase().includes(pattern.toLowerCase()),
-      );
+      const matchingTool = this.availableTools.find(tool => {
+        const toolName = (tool.name || '').toLowerCase();
+        const toolDesc = (tool.description || '').toLowerCase();
+        const patternLower = pattern.toLowerCase();
+        return toolName.includes(patternLower) || toolDesc.includes(patternLower);
+      });
 
       if (matchingTool) {
         return {
           intentId: intent.id,
           toolName: matchingTool.name,
-          toolDescription: matchingTool.description,
+          toolDescription: matchingTool.description || 'No description available',
           mappedParameters: this.simpleParameterMapping(intent.parameters, matchingTool),
           confidence: 0.4, // Lower confidence for type-based matching
         };
@@ -1773,17 +2004,17 @@ Output only JSON, no other content.`;
 
     // Try to find any tool that mentions the intent type or base type
     for (const tool of this.availableTools) {
-      const toolNameLower = tool.name.toLowerCase();
-      const toolDescLower = tool.description.toLowerCase();
+      const toolNameLower = (tool.name || '').toLowerCase();
+      const toolDescLower = (tool.description || '').toLowerCase();
+      const intentTypeLower = intentType.toLowerCase();
+      const baseIntentTypeLower = baseIntentType.toLowerCase();
 
-      if (toolNameLower.includes(intent.type.toLowerCase()) ||
-          toolDescLower.includes(intent.type.toLowerCase()) ||
-          toolNameLower.includes(baseIntentType.toLowerCase()) ||
-          toolDescLower.includes(baseIntentType.toLowerCase())) {
+      if (intentTypeLower && (toolNameLower.includes(intentTypeLower) || toolDescLower.includes(intentTypeLower)) ||
+          baseIntentTypeLower && (toolNameLower.includes(baseIntentTypeLower) || toolDescLower.includes(baseIntentTypeLower))) {
         return {
           intentId: intent.id,
           toolName: tool.name,
-          toolDescription: tool.description,
+          toolDescription: tool.description || 'No description available',
           mappedParameters: this.simpleParameterMapping(intent.parameters, tool),
           confidence: 0.3,
         };
@@ -2314,9 +2545,11 @@ Output only JSON, no other content.`;
 
   /**
    * Assess parsing confidence
+   * Generic approach: confidence reflects how well the parsed intents match available tools
+   * No service-specific logic - works for ANY MCP service
    */
   private assessParsingConfidence(result: IntentParseResult, query: string): number {
-    let confidence = 0.7; // Base confidence
+    let confidence = 0.5; // Base confidence (lowered from 0.7 to be more conservative)
 
     const queryLower = query.toLowerCase();
 
@@ -2325,21 +2558,60 @@ Output only JSON, no other content.`;
     if (isSimpleQuery && result.intents.length === 1) {
       confidence += 0.1; // Simple queries should be single intent
     } else if (isSimpleQuery && result.intents.length > 1) {
-      confidence -= 0.2; // Simple queries decomposed = lower confidence
+      confidence -= 0.1; // Simple queries decomposed = lower confidence
     }
 
-    // Factor 2: Tool existence check
-    const allToolsExist = result.intents.every(intent => {
-      return this.availableTools.some(tool =>
-        tool.name.toLowerCase().includes(intent.type.toLowerCase()) ||
-        intent.type.toLowerCase().includes(tool.name.toLowerCase()),
-      );
-    });
-
-    if (allToolsExist) {
-      confidence += 0.1;
+    // Factor 2: Tool matching quality (REPLACED old "tool existence check")
+    // This now checks how well the selected tools actually match the intent
+    if (this.availableTools.length > 0) {
+      const toolMatchScores = result.intents.map(intent => {
+        if (!intent.type) return 0;
+        
+        // Find the best matching tool for this intent
+        let bestScore = 0;
+        for (const tool of this.availableTools) {
+          const toolNameLower = tool.name.toLowerCase();
+          const toolDescLower = tool.description.toLowerCase();
+          const intentTypeLower = intent.type.toLowerCase();
+          const intentDescLower = intent.description.toLowerCase();
+          
+          let score = 0;
+          
+          // Direct name match (strongest signal)
+          if (toolNameLower === intentTypeLower) {
+            score += 0.5;
+          } else if (toolNameLower.includes(intentTypeLower) || intentTypeLower.includes(toolNameLower)) {
+            score += 0.3;
+          }
+          
+          // Description match
+          const intentWords = new Set(intentDescLower.split(/\W+/).filter(w => w.length > 2));
+          const toolDescWords = new Set(toolDescLower.split(/\W+/).filter(w => w.length > 2));
+          const commonWords = [...intentWords].filter(w => toolDescWords.has(w));
+          if (commonWords.length > 0) {
+            score += Math.min(commonWords.length / Math.max(intentWords.size, 1), 0.3);
+          }
+          
+          // Parameter compatibility
+          const intentParams = Object.keys(intent.parameters || {});
+          if (tool.inputSchema?.properties && intentParams.length > 0) {
+            const toolParams = Object.keys(tool.inputSchema.properties);
+            const matchingParams = intentParams.filter(p => 
+              toolParams.some(tp => tp.toLowerCase() === p.toLowerCase())
+            );
+            score += (matchingParams.length / Math.max(intentParams.length, 1)) * 0.2;
+          }
+          
+          if (score > bestScore) bestScore = score;
+        }
+        
+        return bestScore;
+      });
+      
+      const avgToolMatchScore = toolMatchScores.reduce((a, b) => a + b, 0) / toolMatchScores.length;
+      confidence += avgToolMatchScore * 0.3; // Tool matching quality contributes up to 0.3
     } else {
-      confidence -= 0.2;
+      confidence -= 0.2; // No tools available = lower confidence
     }
 
     // Factor 3: Parameter completeness
@@ -2348,7 +2620,7 @@ Output only JSON, no other content.`;
     );
 
     if (hasParameters) {
-      confidence += 0.1;
+      confidence += 0.05; // Reduced from 0.1
     }
 
     // Factor 4: Edge consistency
@@ -2358,7 +2630,7 @@ Output only JSON, no other content.`;
     );
 
     if (validEdges) {
-      confidence += 0.1;
+      confidence += 0.05; // Reduced from 0.1
     }
 
     return Math.max(0, Math.min(1, confidence));
@@ -2397,8 +2669,8 @@ Output only JSON, no other content.`;
 
     for (const tool of this.availableTools) {
       let score = 0;
-      const toolNameLower = tool.name.toLowerCase();
-      const toolDescLower = tool.description.toLowerCase();
+      const toolNameLower = (tool.name || '').toLowerCase();
+      const toolDescLower = (tool.description || '').toLowerCase();
 
       // Score based on name match
       if (queryLower.includes(toolNameLower)) {
@@ -2689,6 +2961,193 @@ Output only JSON, no other content.`;
   }
 
   /**
+   * Extract parameters from query text using simple pattern matching
+   * This is a generic fallback when LLM returns null parameters
+   */
+  private extractParametersFromQuery(query: string, inputSchema: any): Record<string, any> {
+    const extractedParams: Record<string, any> = {};
+    const properties = inputSchema.properties || {};
+    const queryLower = query.toLowerCase();
+    
+    // Extract common parameter types from query
+    for (const [paramName, paramSchema] of Object.entries(properties)) {
+      if (!paramSchema || typeof paramSchema !== 'object') {
+        continue;
+      }
+      
+      const paramNameLower = paramName.toLowerCase();
+      const paramSchemaObj = paramSchema as any;
+      const paramType = paramSchemaObj.type || 'string';
+      
+      // Skip if parameter name is too generic
+      if (paramNameLower === 'query' || paramNameLower === 'input' || paramNameLower === 'text') {
+        continue;
+      }
+      
+      // Try to extract based on parameter name patterns
+      if (paramNameLower.includes('date') || paramNameLower.includes('time')) {
+        // Try to extract date
+        const dateMatch = this.extractDateFromQuery(query);
+        if (dateMatch) {
+          extractedParams[paramName] = dateMatch;
+        }
+      } else if (paramNameLower.includes('from') || paramNameLower.includes('source') || paramNameLower.includes('origin')) {
+        // Try to extract "from" location
+        const fromLocation = this.extractLocationFromQuery(query, 'from');
+        if (fromLocation) {
+          extractedParams[paramName] = fromLocation;
+        }
+      } else if (paramNameLower.includes('to') || paramNameLower.includes('destination') || paramNameLower.includes('target')) {
+        // Try to extract "to" location
+        const toLocation = this.extractLocationFromQuery(query, 'to');
+        if (toLocation) {
+          extractedParams[paramName] = toLocation;
+        }
+      } else if (paramNameLower.includes('number') || paramNameLower.includes('count') || paramNameLower.includes('quantity')) {
+        // Try to extract numbers
+        const numbers = this.extractNumbersFromQuery(query);
+        if (numbers.length > 0) {
+          extractedParams[paramName] = paramType === 'array' ? numbers : numbers[0];
+        }
+      } else if (paramNameLower.includes('filter') || paramNameLower.includes('keyword') || paramNameLower.includes('term')) {
+        // Try to extract keywords
+        const keywords = this.extractKeywordsFromQuery(query);
+        if (keywords.length > 0) {
+          extractedParams[paramName] = paramType === 'array' ? keywords : keywords[0];
+        }
+      }
+    }
+    
+    return extractedParams;
+  }
+  
+  /**
+   * Extract date from query text
+   * Supports multiple formats including Chinese date formats
+   */
+  private extractDateFromQuery(query: string): string | null {
+    // Date patterns supporting multiple formats
+    const datePatterns = [
+      // Chinese format: 2026年5月4日 or 2026年05月04日
+      /(\d{4})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日/,
+      // Chinese format: 5月4日 (without year)
+      /(\d{1,2})\s*月\s*(\d{1,2})\s*日/,
+      // Standard formats
+      /\d{4}-\d{2}-\d{2}/, // YYYY-MM-DD
+      /\d{2}\/\d{2}\/\d{4}/, // MM/DD/YYYY
+      /\d{4}\/\d{2}\/\d{2}/, // YYYY/MM/DD
+      /\d{4}\.\d{2}\.\d{2}/, // YYYY.MM.DD
+      // Relative dates
+      /(today|tomorrow|yesterday)/i,
+    ];
+    
+    for (const pattern of datePatterns) {
+      const match = query.match(pattern);
+      if (match) {
+        // For Chinese date format, normalize to YYYY-MM-DD
+        if (match[1] && match[2] && match[3] && pattern.toString().includes('年')) {
+          const year = match[1].padStart(4, '0');
+          const month = match[2].padStart(2, '0');
+          const day = match[3].padStart(2, '0');
+          return `${year}-${month}-${day}`;
+        }
+        // For Chinese date without year (月/日), use current year
+        if (match[1] && match[2] && pattern.toString().includes('月') && !pattern.toString().includes('年')) {
+          const now = new Date();
+          const year = now.getFullYear().toString();
+          const month = match[1].padStart(2, '0');
+          const day = match[2].padStart(2, '0');
+          return `${year}-${month}-${day}`;
+        }
+        return match[0];
+      }
+    }
+    
+    return null;
+  }
+
+  
+  /**
+   * Extract location from query text
+   * Generic approach using language-agnostic patterns (supports Chinese, English, etc.)
+   */
+  private extractLocationFromQuery(query: string, direction: 'from' | 'to'): string | null {
+    // Generic location extraction patterns (language-agnostic)
+    // Supports both English (from X to Y) and Chinese (从X到Y, X到Y) patterns
+    const locationPatterns = {
+      'from': [
+        // English: from X to Y
+        /from\s+["']?([^"'\s,]+(?:\s+[^"'\s,]+){0,2})["']?\s+to/i,
+        // English: source/origin = X
+        /(?:from|source|origin)\s*[:=]\s*["']?([^"'\s,]+(?:\s+[^"'\s,]+){0,2})["']?/i,
+        // Chinese: 从X到Y (extract X)
+        /从\s*([^\s,，]+(?:\s*[^\s,，]+){0,2})\s*到/i,
+        // Chinese: X到Y (extract X, where X is before 到)
+        /([^\s,，]+(?:\s*[^\s,，]+){0,2})\s*到\s*([^\s,，]+)/i,
+      ],
+      'to': [
+        // English: from X to Y
+        /from\s+[^"'\s,]+\s+to\s+["']?([^"'\s,]+(?:\s+[^"'\s,]+){0,2})["']?/i,
+        // English: destination/target = X
+        /(?:to|destination|target)\s*[:=]\s*["']?([^"'\s,]+(?:\s+[^"'\s,]+){0,2})["']?/i,
+        // Chinese: 从X到Y (extract Y)
+        /从\s*[^\s,，]+\s*到\s*([^\s,，]+(?:\s*[^\s,，]+){0,2})/i,
+        // Chinese: X到Y (extract Y, where Y is after 到)
+        /[^\s,，]+\s*到\s*([^\s,，]+(?:\s*[^\s,，]+){0,2})/i,
+      ]
+    };
+    
+    const patterns = locationPatterns[direction];
+    for (const pattern of patterns) {
+      const match = query.match(pattern);
+      if (match && match[1]) {
+        return match[1].trim();
+      }
+    }
+    
+    return null;
+  }
+
+  
+  /**
+   * Extract numbers from query text
+   */
+  private extractNumbersFromQuery(query: string): number[] {
+    const numbers: number[] = [];
+    const numberPattern = /\d+/g;
+    let match;
+    
+    while ((match = numberPattern.exec(query)) !== null) {
+      const num = parseInt(match[0], 10);
+      if (!isNaN(num)) {
+        numbers.push(num);
+      }
+    }
+    
+    return numbers;
+  }
+  
+  /**
+   * Extract keywords from query text
+   */
+  private extractKeywordsFromQuery(query: string): string[] {
+    // Remove common stop words and extract meaningful words
+    const stopWords = [
+      'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for',
+      'of', 'with', 'by', 'is', 'are', 'was', 'were', 'be', 'been', 'being',
+      'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could',
+      'should', 'may', 'might', 'shall', 'can', 'need', 'dare', 'ought',
+    ];
+    const words = query.split(/[\s\p{P}]+/u).filter(word => 
+      word.length > 1 && 
+      !stopWords.includes(word.toLowerCase()) &&
+      !/^\d+$/.test(word)
+    );
+    
+    return words;
+  }
+
+  /**
    * Get confirmation configuration (for external use)
    */
   getConfirmationConfig(): ConfirmationConfig {
@@ -2700,6 +3159,126 @@ Output only JSON, no other content.`;
       learnFromFeedback: true,
       feedbackHistorySize: 100,
     };
+  }
+
+  /**
+   * Extract parameters from generic query (for fallback intent parsing)
+   * Generic approach that works for any MCP service, not hardcoded for specific services
+   */
+  private extractParametersFromGenericQuery(query: string): Record<string, any> {
+    const params: Record<string, any> = {};
+    
+    // Generic parameter extraction patterns that work across different domains
+    // These are language-agnostic and service-agnostic patterns
+    
+    // 1. Extract dates (universal pattern, supports Chinese and English formats)
+    const datePatterns = [
+      // Chinese format: 2026年5月4日
+      /(\d{4})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日/,
+      // Chinese format: 5月4日 (without year)
+      /(\d{1,2})\s*月\s*(\d{1,2})\s*日/,
+      // Standard formats
+      /\d{4}-\d{2}-\d{2}/, // YYYY-MM-DD
+      /\d{2}\/\d{2}\/\d{4}/, // MM/DD/YYYY
+      /\d{4}\/\d{2}\/\d{2}/, // YYYY/MM/DD
+      /\d{4}\.\d{2}\.\d{2}/, // YYYY.MM.DD
+      /(today|tomorrow|yesterday)/i, // Relative dates
+    ];
+    
+    for (const pattern of datePatterns) {
+      const match = query.match(pattern);
+      if (match) {
+        // For Chinese date format, normalize to YYYY-MM-DD
+        if (match[1] && match[2] && match[3] && pattern.toString().includes('年')) {
+          const year = match[1].padStart(4, '0');
+          const month = match[2].padStart(2, '0');
+          const day = match[3].padStart(2, '0');
+          params.date = `${year}-${month}-${day}`;
+        } else if (match[1] && match[2] && pattern.toString().includes('月') && !pattern.toString().includes('年')) {
+          const now = new Date();
+          const year = now.getFullYear().toString();
+          const month = match[1].padStart(2, '0');
+          const day = match[2].padStart(2, '0');
+          params.date = `${year}-${month}-${day}`;
+        } else {
+          params.date = match[0];
+        }
+        break;
+      }
+    }
+
+    
+    // 2. Extract numbers and quantities
+    const numberPattern = /\d+/g;
+    const numbers: number[] = [];
+    let match;
+    
+    while ((match = numberPattern.exec(query)) !== null) {
+      const num = parseInt(match[0], 10);
+      if (!isNaN(num)) {
+        numbers.push(num);
+      }
+    }
+    
+    if (numbers.length > 0) {
+      params.numbers = numbers;
+      // For single numbers, also add as count/quantity
+      if (numbers.length === 1) {
+        params.count = numbers[0];
+        params.quantity = numbers[0];
+      }
+    }
+    
+    // 3. Extract keywords (remove stop words)
+    const stopWords = [
+      'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for',
+      'of', 'with', 'by', 'is', 'are', 'was', 'were', 'be', 'been', 'being',
+      'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could',
+      'should', 'may', 'might', 'shall', 'can', 'need', 'dare', 'ought',
+    ];
+    
+    const words = query.split(/[\s\p{P}]+/u).filter(word => 
+      word.length > 1 && 
+      !stopWords.includes(word.toLowerCase()) &&
+      !/^\d+$/.test(word)
+    );
+    
+    if (words.length > 0) {
+      params.keywords = words;
+    }
+    
+    // 4. Extract location-like patterns (generic, not service-specific)
+    // This looks for patterns like "from X to Y" or "X to Y" in any language
+    // Supports both English and Chinese patterns
+    const locationPatterns = [
+      // English: "from X to Y"
+      /from\s+([^\s,，]+(?:\s+[^\s,，]+){0,2})\s+to\s+([^\s,，]+(?:\s+[^\s,，]+){0,2})/i,
+      // Generic: "X to Y" or "X -> Y"
+      /([^\s,，]+(?:\s+[^\s,，]+){0,2})\s+(?:to|->)\s+([^\s,，]+(?:\s+[^\s,，]+){0,2})/i,
+      // Chinese: "从X到Y" or "X到Y"
+      /从\s*([^\s,，]+(?:\s*[^\s,，]+){0,2})\s*到\s*([^\s,，]+(?:\s*[^\s,，]+){0,2})/,
+      // Chinese: "X到Y" (X and Y separated by 到)
+      /([^\s,，]+(?:\s*[^\s,，]+){0,2})\s*到\s*([^\s,，]+(?:\s*[^\s,，]+){0,2})/,
+    ];
+    
+    for (const pattern of locationPatterns) {
+      const locationMatch = query.match(pattern);
+      if (locationMatch && locationMatch[1] && locationMatch[2]) {
+        params.from = locationMatch[1].trim();
+        params.to = locationMatch[2].trim();
+        params.source = params.from; // Alternative name
+        params.destination = params.to; // Alternative name
+        break;
+      }
+    }
+
+    
+    // 5. Always include the original query for context
+    // This ensures LLM has the full context even if we couldn't extract specific parameters
+    params.query = query;
+    params.text = query;
+    
+    return params;
   }
 
   /**

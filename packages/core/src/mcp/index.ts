@@ -132,45 +132,70 @@ export const TOOL_PATTERNS = {
 
 /**
  * Discover local MCP servers
- * Returns predefined common MCP server configurations
+ * Generic approach: discovers servers from configuration and environment
+ * No hardcoded service names - works for ANY MCP service
  */
 export async function discoverLocalMCPServers(): Promise<Array<{
   name: string;
   transport: any;
 }>> {
-  const servers = [];
+  const servers: Array<{ name: string; transport: any }> = [];
 
-  // Predefined common MCP servers
-  const commonServers = [
-    // Filesystem server
-    {
-      name: 'filesystem',
-      command: 'npx',
-      args: ['@modelcontextprotocol/server-filesystem'],
-    },
-    // Clock server
-    {
-      name: 'clock',
-      command: 'npx',
-      args: ['@modelcontextprotocol/server-clock'],
-    },
-    // GitHub server
-    {
-      name: 'github',
-      command: 'npx',
-      args: ['@modelcontextprotocol/server-github'],
-    },
-  ];
+  // 1. Discover from MCP configuration file
+  try {
+    const configPaths = [
+      process.env.MCP_CONFIG_PATH,
+      './mcp-config.json',
+      './.mcp/config.json',
+      './mcp.json',
+      process.env.HOME + '/.mcp/config.json',
+    ];
 
-  for (const server of commonServers) {
-    servers.push({
-      name: server.name,
-      transport: {
-        type: 'stdio' as const,
-        command: server.command,
-        args: server.args,
-      },
-    });
+    for (const configPath of configPaths) {
+      if (!configPath) continue;
+      
+      try {
+        const fs = require('fs');
+        if (fs.existsSync(configPath)) {
+          const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+          
+          if (config.servers && Array.isArray(config.servers)) {
+            for (const server of config.servers) {
+              servers.push({
+                name: server.name || server.id,
+                transport: server.transport || {
+                  type: 'stdio',
+                  command: server.command || 'npx',
+                  args: server.args || [],
+                },
+              });
+            }
+          }
+        }
+      } catch (e) {
+        // Ignore individual config file errors
+      }
+    }
+  } catch (error) {
+    console.warn('Failed to discover servers from config:', error);
+  }
+
+  // 2. Discover from environment variables
+  for (const [key, value] of Object.entries(process.env)) {
+    if (key.startsWith('MCP_SERVER_') && key.endsWith('_COMMAND')) {
+      const name = key.replace('MCP_SERVER_', '').replace('_COMMAND', '').toLowerCase();
+      const argsKey = `MCP_SERVER_${name.toUpperCase()}_ARGS`;
+      const argsStr = process.env[argsKey] || '';
+      
+      servers.push({
+        name,
+        transport: {
+          type: 'stdio',
+          command: value,
+          args: argsStr ? argsStr.split(' ').filter(Boolean) : [],
+        },
+      });
+    }
   }
 
   return servers;

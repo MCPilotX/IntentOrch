@@ -132,6 +132,35 @@ export class MCPClient extends EventEmitter {
       }
     }
 
+    // Clean up null values that have defaults in the schema
+    // This prevents MCP servers from rejecting parameters like sortFlag: null
+    // when the schema expects a string type
+    if (tool && tool.inputSchema && tool.inputSchema.properties) {
+      for (const [paramName, paramValue] of Object.entries(mappedArguments)) {
+        if (paramValue === null || paramValue === undefined) {
+          const paramSchema = tool.inputSchema.properties[paramName];
+          if (paramSchema) {
+            // If the parameter has a default value in schema, use it
+            if (paramSchema.default !== undefined) {
+              console.debug(`[MCPClient] Replacing null/undefined parameter "${paramName}" with default value:`, paramSchema.default);
+              mappedArguments[paramName] = paramSchema.default;
+            } else {
+              // Otherwise, remove the null/undefined parameter
+              // to let the server use its own default
+              console.debug(`[MCPClient] Removing null/undefined parameter "${paramName}" (no default in schema)`);
+              delete mappedArguments[paramName];
+            }
+          } else {
+            // Parameter not in schema, remove it
+            console.debug(`[MCPClient] Removing null/undefined parameter "${paramName}" (not in schema)`);
+            delete mappedArguments[paramName];
+          }
+        }
+      }
+    }
+    
+    console.debug(`[MCPClient] Final arguments for tool "${toolName}":`, JSON.stringify(mappedArguments));
+
     // Try with retry mechanism
     let lastError: Error | null = null;
     const maxRetries = this.config.maxRetries || 3;

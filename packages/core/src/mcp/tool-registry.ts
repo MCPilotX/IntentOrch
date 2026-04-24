@@ -7,6 +7,7 @@ import { Tool, ToolCall, ToolResult } from './types';
 import { ParameterMapper } from './parameter-mapper';
 import { PreExecutionValidator } from './pre-execution-validator';
 import { defaultFallbackManager } from './fallback-manager';
+import { Index } from 'flexsearch';
 
 export interface ToolExecutor {
   (args: Record<string, any>): Promise<ToolResult>;
@@ -31,6 +32,15 @@ export interface RegisteredTool {
 export class ToolRegistry {
   private tools: Map<string, RegisteredTool> = new Map();
   private serverTools: Map<string, Set<string>> = new Map(); // Server ID -> Tool name set
+  private searchIndex: Index;
+
+  constructor() {
+    // Initialize FlexSearch Index for fast full-text search
+    this.searchIndex = new Index({
+      tokenize: 'full', // Support full text search including CJK characters
+      cache: true,
+    } as any);
+  }
 
   // ==================== Tool Registration ====================
 
@@ -62,6 +72,21 @@ export class ToolRegistry {
       this.serverTools.set(serverId, new Set());
     }
     this.serverTools.get(serverId)!.add(tool.name);
+
+    // Universal Indexing: Extract ALL descriptive text from the tool and its schema
+    const schemaDescriptions = Object.values(tool.inputSchema.properties || {})
+      .map((prop: any) => prop.description || '')
+      .join(' ');
+
+    const indexContent = [
+      tool.name,
+      tool.description || '',
+      schemaDescriptions,
+      ...(tool.examples?.map(ex => ex.description) || []),
+      ...(tool.examples?.map(ex => JSON.stringify(ex.input)) || []),
+    ].join(' ');
+    
+    this.searchIndex.add(tool.name, indexContent);
 
     this.emitToolUpdate();
   }
@@ -98,6 +123,9 @@ export class ToolRegistry {
         this.serverTools.delete(serverId);
       }
     }
+
+    // Remove from search index
+    this.searchIndex.remove(toolName);
 
     // Remove from tool mapping
     const removed = this.tools.delete(toolName);
@@ -177,10 +205,8 @@ export class ToolRegistry {
       } else {
         errorMessage += '\n\nNo MCP servers are currently connected.';
         errorMessage += '\nConnect a server first using connectMCPServer() or connectAllFromConfig().';
-        errorMessage += '\n\nPopular MCP servers you can connect:';
-        errorMessage += '\n  - @modelcontextprotocol/server-filesystem (file operations)';
-        errorMessage += '\n  - @modelcontextprotocol/server-weather (weather data)';
-        errorMessage += '\n  - @modelcontextprotocol/server-github (GitHub operations)';
+        errorMessage += '\n\nYou can connect any MCP server that provides tools.';
+        errorMessage += '\nUse listTools() or searchTools() to find the right tool.';
       }
 
       return {
@@ -320,15 +346,91 @@ export class ToolRegistry {
   }
 
   searchTools(query: string): RegisteredTool[] {
-    const lowerQuery = query.toLowerCase();
+    // For better Chinese text search, split query into individual terms
+    // FlexSearch's 'full' tokenize mode works on character level for CJK,
+    // but whole sentence search may not match well. We split the query
+    // into terms and search each one, then merge results.
+    const terms = this.splitQueryTerms(query);
+    
+    // Try full query first
+    let results = this.searchIndex.search(query, {
+      limit: 20,
+      suggest: true,
+    }) as string[];
 
-    return this.getAllTools().filter(registeredTool => {
-      const tool = registeredTool.tool;
-      return (
-        tool.name.toLowerCase().includes(lowerQuery) ||
-        tool.description.toLowerCase().includes(lowerQuery)
-      );
-    });
+    // If no results, try individual terms
+    if (results.length === 0 && terms.length > 1) {
+      const resultSet = new Set<string>();
+      for (const term of terms) {
+        if (term.length < 2) continue;
+        const termResults = this.searchIndex.search(term, {
+          limit: 10,
+          suggest: true,
+        }) as string[];
+        termResults.forEach(id => resultSet.add(id));
+      }
+      results = Array.from(resultSet);
+    }
+
+    // Map search result IDs (tool names) back to RegisteredTool objects
+    return results
+      .map(name => this.tools.get(name))
+      .filter((tool): tool is RegisteredTool => tool !== undefined);
+  }
+
+  /**
+   * Split query into search terms, handling both English and Chinese text
+   * For Chinese text, uses a sliding window approach to extract meaningful segments
+   */
+  private splitQueryTerms(query: string): string[] {
+    const terms: string[] = [];
+    const seen = new Set<string>();
+    
+    const addTerm = (term: string) => {
+      const t = term.trim().toLowerCase();
+      if (t.length >= 2 && !seen.has(t)) {
+        seen.add(t);
+        terms.push(t);
+      }
+    };
+    
+    // Split by whitespace and punctuation
+    const parts = query.split(/[\s,，。！？、；：""''（）()【】《》\/\-_]+/);
+    
+    for (const part of parts) {
+      if (!part) continue;
+      
+      if (/[\u4e00-\u9fff]/.test(part)) {
+        // For Chinese text, use sliding window of 2-4 characters
+        const chars = part.split('');
+        const chineseChars = chars.filter(c => /[\u4e00-\u9fff]/.test(c));
+        
+        if (chineseChars.length <= 4) {
+          // Short text: use as-is
+          addTerm(chineseChars.join(''));
+        } else {
+          // Long text: extract 2-char and 3-char sliding windows
+          for (let winSize of [2, 3]) {
+            for (let i = 0; i <= chineseChars.length - winSize; i++) {
+              addTerm(chineseChars.slice(i, i + winSize).join(''));
+            }
+          }
+        }
+        
+        // Also add any non-Chinese tokens (English, numbers)
+        const nonChinese = part.replace(/[\u4e00-\u9fff]/g, ' ').trim();
+        if (nonChinese) {
+          nonChinese.split(/\s+/).forEach(t => {
+            if (t.length >= 2) addTerm(t);
+          });
+        }
+      } else {
+        // English text - add as-is if meaningful
+        if (part.length >= 2) addTerm(part);
+      }
+    }
+    
+    return terms;
   }
 
   // ==================== Tool Validation ====================
@@ -445,6 +547,13 @@ export class ToolRegistry {
   clear(): void {
     this.tools.clear();
     this.serverTools.clear();
+    
+    // Re-initialize index to clear all data
+    this.searchIndex = new Index({
+      tokenize: 'full',
+      cache: true,
+    } as any);
+    
     this.emitToolUpdate();
   }
 }

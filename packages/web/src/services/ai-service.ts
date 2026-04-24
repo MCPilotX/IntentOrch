@@ -65,11 +65,15 @@ async function callBackendAPI<T>(
       body: body ? JSON.stringify(body) : undefined
     });
     
+    const responseData = await response.json();
+    
     if (!response.ok) {
-      throw new Error(`Backend API error: ${response.status} ${response.statusText}`);
+      // Try to extract error message from response body
+      const errorMessage = responseData?.error || responseData?.message || `Backend API error: ${response.status} ${response.statusText}`;
+      throw new Error(errorMessage);
     }
     
-    return await response.json();
+    return responseData;
   } catch (error) {
     console.error(`[AI Enhanced Service] Error calling backend API ${endpoint}:`, error);
     throw error;
@@ -255,6 +259,67 @@ export const aiEnhancedService = {
       };
     }
   },
+
+  /**
+   * Execute pre-parsed workflow steps directly (no re-parsing)
+   * 
+   * This is the key method that ensures Web UI execution matches CLI:
+   * - Takes already-parsed steps from parseIntent
+   * - Executes them without calling parseAndPlan again
+   * - Returns the same UnifiedExecutionResult format as executeNaturalLanguage
+   */
+  async executeSteps(
+    steps: any[],
+    options?: {
+      autoStart?: boolean;
+      keepAlive?: boolean;
+      silent?: boolean;
+      simulate?: boolean;
+    }
+  ): Promise<{
+    success: boolean;
+    result?: any;
+    executionSteps?: any[];
+    error?: string;
+    statistics?: {
+      totalSteps: number;
+      successfulSteps: number;
+      failedSteps: number;
+      totalDuration: number;
+      averageStepDuration: number;
+    };
+  }> {
+    console.log(`[AI Enhanced Service] Executing ${steps.length} pre-parsed steps...`);
+    
+    try {
+      const result = await callBackendAPI<{
+        success: boolean;
+        result?: any;
+        executionSteps?: any[];
+        error?: string;
+        statistics?: {
+          totalSteps: number;
+          successfulSteps: number;
+          failedSteps: number;
+          totalDuration: number;
+          averageStepDuration: number;
+        };
+      }>('/api/execute/executeSteps', 'POST', {
+        steps,
+        options
+      });
+      
+      console.log('[AI Enhanced Service] Steps execution result:', result);
+      return result;
+    } catch (error: any) {
+      console.error('[AI Enhanced Service] Steps execution failed:', error);
+      return {
+        success: false,
+        error: error.message || 'Steps execution failed'
+      };
+    }
+  },
+
   
   /**
    * Check if unified execution service is available
@@ -326,6 +391,186 @@ export const aiEnhancedService = {
         legacyService: false,
         message: 'Unable to check service availability'
       };
+    }
+  },
+
+  /**
+   * Interactive intent parsing service
+   */
+  interactive: {
+    /**
+     * Start an interactive session for intent parsing
+     */
+    async startSession(query: string, userId?: string) {
+      console.log('[AI Interactive Service] Starting interactive session for query:', query.substring(0, 100));
+      
+      try {
+        const result = await callBackendAPI<{
+          success: boolean;
+          sessionId: string;
+          guidance?: any;
+          session: any;
+        }>('/api/execute/interactive/start', 'POST', { query, userId });
+        
+        if (!result.success) {
+          throw new Error('Failed to start interactive session');
+        }
+        
+        console.log('[AI Interactive Service] Interactive session started:', result.sessionId);
+        return result;
+      } catch (error: any) {
+        console.error('[AI Interactive Service] Failed to start interactive session:', error);
+        throw error;
+      }
+    },
+
+    /**
+     * Process user feedback in interactive session
+     */
+    async processFeedback(sessionId: string, response: any) {
+      console.log('[AI Interactive Service] Processing feedback for session:', sessionId);
+      
+      try {
+        const result = await callBackendAPI<{
+          success: boolean;
+          guidance?: any;
+          session?: any;
+          readyForExecution?: boolean;
+        }>('/api/execute/interactive/respond', 'POST', { sessionId, response });
+        
+        if (!result.success) {
+          throw new Error('Failed to process feedback');
+        }
+        
+        console.log('[AI Interactive Service] Feedback processed successfully');
+        return result;
+      } catch (error: any) {
+        console.error('[AI Interactive Service] Failed to process feedback:', error);
+        throw error;
+      }
+    },
+
+    /**
+     * Execute interactive session workflow
+     */
+    async executeSession(sessionId: string, options: any = {}) {
+      console.log('[AI Interactive Service] Executing session:', sessionId);
+      
+      try {
+        const result = await callBackendAPI<{
+          success: boolean;
+          result?: any;
+          executionSteps?: any[];
+          statistics?: any;
+          error?: string;
+        }>('/api/execute/interactive/execute', 'POST', { sessionId, options });
+        
+        console.log('[AI Interactive Service] Session execution result:', result.success ? 'success' : 'failed');
+        return result;
+      } catch (error: any) {
+        console.error('[AI Interactive Service] Failed to execute session:', error);
+        throw error;
+      }
+    },
+
+    /**
+     * Get interactive session by ID
+     */
+    async getSession(sessionId: string) {
+      console.log('[AI Interactive Service] Getting session:', sessionId);
+      
+      try {
+        const result = await callBackendAPI<{
+          success: boolean;
+          session?: any;
+        }>(`/api/execute/interactive/${sessionId}`, 'GET');
+        
+        if (!result.success) {
+          throw new Error('Failed to get session');
+        }
+        
+        return result;
+      } catch (error: any) {
+        console.error('[AI Interactive Service] Failed to get session:', error);
+        throw error;
+      }
+    },
+
+    /**
+     * Get all active interactive sessions
+     */
+    async getActiveSessions() {
+      console.log('[AI Interactive Service] Getting active sessions');
+      
+      try {
+        const result = await callBackendAPI<{
+          success: boolean;
+          sessions: any[];
+        }>('/api/execute/interactive/', 'GET');
+        
+        if (!result.success) {
+          throw new Error('Failed to get active sessions');
+        }
+        
+        console.log(`[AI Interactive Service] Found ${result.sessions.length} active sessions`);
+        return result;
+      } catch (error: any) {
+        console.error('[AI Interactive Service] Failed to get active sessions:', error);
+        throw error;
+      }
+    },
+
+    /**
+     * Clean up old interactive sessions
+     */
+    async cleanupSessions(maxAgeMs: number = 3600000) {
+      console.log('[AI Interactive Service] Cleaning up old sessions');
+      
+      try {
+        const result = await callBackendAPI<{
+          success: boolean;
+          cleanedCount: number;
+          message: string;
+        }>('/api/execute/interactive/cleanup', 'POST', { maxAgeMs });
+        
+        if (!result.success) {
+          throw new Error('Failed to cleanup sessions');
+        }
+        
+        console.log(`[AI Interactive Service] Cleaned up ${result.cleanedCount} sessions`);
+        return result;
+      } catch (error: any) {
+        console.error('[AI Interactive Service] Failed to cleanup sessions:', error);
+        throw error;
+      }
+    },
+
+    /**
+     * Check if interactive service is available
+     */
+    async checkAvailability() {
+      console.log('[AI Interactive Service] Checking availability');
+      
+      try {
+        // Try to start a test session
+        const testResult = await callBackendAPI<{
+          success: boolean;
+          sessionId: string;
+        }>('/api/execute/interactive/start', 'POST', { query: 'test' });
+        
+        return {
+          available: testResult.success,
+          message: testResult.success 
+            ? 'Interactive intent parsing service available' 
+            : 'Interactive intent parsing service not available'
+        };
+      } catch (error: any) {
+        console.log('[AI Interactive Service] Interactive service not available:', error.message);
+        return {
+          available: false,
+          message: 'Interactive intent parsing service not available'
+        };
+      }
     }
   }
 };

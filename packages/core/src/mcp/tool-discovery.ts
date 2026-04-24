@@ -177,7 +177,9 @@ export class MCPToolDiscovery extends EventEmitter {
             type: 'object',
             properties: {},
             required: []
-          }
+          },
+          // Preserve examples from tool metadata (provided in mcp.json by tool authors)
+          examples: tool.examples || undefined,
         }));
         
       } catch (error: any) {

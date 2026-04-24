@@ -31,7 +31,6 @@ export {
 export {
   IntentService,
   getIntentService,
-  createIntentService,
   type IntentParseRequest,
   type IntentParseResponse,
 } from './intent-service';

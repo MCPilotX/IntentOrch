@@ -27,6 +27,19 @@ export interface JSONRPCResponse {
 
 // ==================== Tool Related Types ====================
 
+/**
+ * Tool usage example, typically provided in mcp.json by tool authors
+ * These examples help LLMs understand how to use the tool correctly
+ */
+export interface ToolExample {
+  /** Natural language description of what this example does */
+  description: string;
+  /** Example input parameters */
+  input: Record<string, any>;
+  /** Example output (optional, for reference) */
+  output?: any;
+}
+
 export interface Tool {
   name: string;
   description: string;
@@ -36,6 +49,8 @@ export interface Tool {
     required?: string[];
     additionalProperties?: boolean;
   };
+  /** Usage examples provided by tool author in mcp.json */
+  examples?: ToolExample[];
 }
 
 export interface ToolList {

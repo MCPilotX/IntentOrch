@@ -21,25 +21,25 @@ const Dashboard: React.FC = () => {
   const { data: stats, isLoading: statsLoading } = useQuery({
     queryKey: ['systemStats'],
     queryFn: () => apiService.getSystemStats(),
-    refetchInterval: 30000, // 从10秒增加到30秒
+    refetchInterval: 5000, // 每5秒刷新一次，实现实时更新
   });
 
   const { data: servers, isLoading: serversLoading } = useQuery({
     queryKey: ['servers'],
     queryFn: () => apiService.getServers(),
-    refetchInterval: 30000, // 添加30秒刷新间隔
+    refetchInterval: 5000, // 每5秒刷新一次，实现实时更新
   });
 
   const { data: processes, isLoading: processesLoading } = useQuery({
     queryKey: ['processes'],
     queryFn: () => apiService.getProcesses(),
-    refetchInterval: 30000, // 从5秒增加到30秒
+    refetchInterval: 5000, // 每5秒刷新一次，实现实时更新
   });
 
   const { data: systemLogs = [] } = useQuery({
     queryKey: ['systemLogs'],
     queryFn: () => apiService.getSystemLogs(),
-    refetchInterval: 30000,
+    refetchInterval: 10000, // 每10秒刷新一次
   });
 
   // 停止进程的mutation

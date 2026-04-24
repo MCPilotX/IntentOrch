@@ -347,11 +347,16 @@ export class ToolMetadataManager {
       tags.push(...toolName.split('_').filter(part => part.length > 2));
     }
 
-    // Add provider-specific tags
-    if (toolName.includes('github')) {tags.push('github');}
-    if (toolName.includes('slack')) {tags.push('slack');}
+    // Add generic tags based on tool name patterns
+    // No service-specific logic - works for ANY MCP service
     if (toolName.includes('file')) {tags.push('file');}
     if (toolName.includes('http')) {tags.push('http');}
+    if (toolName.includes('search')) {tags.push('search');}
+    if (toolName.includes('list')) {tags.push('list');}
+    if (toolName.includes('get')) {tags.push('get');}
+    if (toolName.includes('create')) {tags.push('create');}
+    if (toolName.includes('update')) {tags.push('update');}
+    if (toolName.includes('delete')) {tags.push('delete');}
 
     // Remove duplicates
     return Array.from(new Set(tags));

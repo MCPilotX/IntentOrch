@@ -260,7 +260,54 @@ export class ParameterMapper {
     // This is a generic solution for servers that have schema/validation mismatches
     targetParams = this.applyCommonParameterAliases(toolName, toolSchema, targetParams);
 
+    // New: Universal Value Extraction for Data Flow
+    // If a required parameter is a string but we have an object (from a previous step),
+    // try to extract the core identifier automatically.
+    for (const propName of schemaProperties) {
+      const propSchema = toolSchema.properties[propName] as any;
+      if (propSchema.type === 'string' && typeof targetParams[propName] === 'object' && targetParams[propName] !== null) {
+        const extracted = this.extractCoreValue(targetParams[propName]);
+        if (extracted) {
+          targetParams[propName] = extracted;
+        }
+      }
+    }
+
     return targetParams;
+  }
+
+  /**
+   * Extract a core identifier from an object (Universal logic)
+   */
+  private static extractCoreValue(obj: any): string | null {
+    if (!obj || typeof obj !== 'object') return null;
+
+    const coreKeys = [
+      'station_code', 'stationCode', 'code', 'id', 'identifier', 
+      'uuid', 'uid', 'value', 'key', 'name'
+    ];
+
+    // 1. Direct hit
+    for (const key of coreKeys) {
+      if (typeof obj[key] === 'string' && obj[key].length > 0) {
+        return obj[key];
+      }
+    }
+
+    // 2. Nested hit (like {"广州": {"station_code": "GZQ"}})
+    const values = Object.values(obj);
+    if (values.length === 1 && typeof values[0] === 'object' && values[0] !== null) {
+      return this.extractCoreValue(values[0]);
+    }
+
+    // 3. Fallback: Any string field that looks like a code
+    for (const key of Object.keys(obj)) {
+      if (key.toLowerCase().endsWith('code') && typeof obj[key] === 'string') {
+        return obj[key];
+      }
+    }
+
+    return null;
   }
 
   /**
@@ -286,6 +333,15 @@ export class ParameterMapper {
       };
     }
 
+    // Check for plural/singular variations (e.g., city -> citys, cities)
+    const singularToPluralMatch = this.findPluralSingularMatch(sourceLower, targetSchemaProperties);
+    if (singularToPluralMatch) {
+      return {
+        sourceName,
+        targetName: singularToPluralMatch,
+      };
+    }
+
     // Check for naming convention match (snake_case <-> camelCase <-> kebab-case)
     const namingConventionMatch = this.findNamingConventionMatch(sourceName, targetSchemaProperties);
     if (namingConventionMatch) {
@@ -306,7 +362,6 @@ export class ParameterMapper {
     }
 
     // If no domain-specific mapping found, try the universal rule
-    // The universal rule has pattern /.*/ and priority 5
     const universalRule = this.DEFAULT_MAPPINGS.find(r => r.priority === 5);
     if (universalRule) {
       const mapping = universalRule.mappings.find(m => m.sourceName === sourceName);
@@ -314,7 +369,68 @@ export class ParameterMapper {
         return mapping;
       }
     }
+    
+    // Last resort: Fuzzy substring match for required parameters
+    const fuzzyMatch = this.findFuzzyMatch(sourceLower, targetSchemaProperties);
+    if (fuzzyMatch) {
+      return {
+        sourceName,
+        targetName: fuzzyMatch
+      };
+    }
 
+    return null;
+  }
+
+  /**
+   * Find match based on plural/singular variations
+   */
+  private static findPluralSingularMatch(sourceLower: string, targetProperties: string[]): string | null {
+    const targetPropertiesLower = targetProperties.map(p => p.toLowerCase());
+    
+    // Common plural/singular patterns
+    const variations = [
+      sourceLower + 's',
+      sourceLower + 'es',
+      sourceLower.endsWith('y') ? sourceLower.slice(0, -1) + 'ies' : sourceLower + 'ies',
+    ];
+
+    for (let i = 0; i < variations.length; i++) {
+      const idx = targetPropertiesLower.indexOf(variations[i]);
+      if (idx !== -1) return targetProperties[idx];
+    }
+    
+    // Also try reverse: if source is plural and target is singular
+    if (sourceLower.endsWith('s')) {
+      const singulars = [
+        sourceLower.slice(0, -1),
+        sourceLower.slice(0, -2), // es
+        sourceLower.endsWith('ies') ? sourceLower.slice(0, -3) + 'y' : null
+      ].filter(Boolean) as string[];
+
+      for (const singular of singulars) {
+        const idx = targetPropertiesLower.indexOf(singular);
+        if (idx !== -1) return targetProperties[idx];
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Find match based on fuzzy substring/similarity
+   */
+  private static findFuzzyMatch(sourceLower: string, targetProperties: string[]): string | null {
+    if (sourceLower.length < 3) return null;
+    
+    for (const prop of targetProperties) {
+      const propLower = prop.toLowerCase();
+      // If one is a substring of another and they are long enough
+      if ((propLower.includes(sourceLower) || sourceLower.includes(propLower)) && 
+          Math.abs(propLower.length - sourceLower.length) <= 3) {
+        return prop;
+      }
+    }
     return null;
   }
 

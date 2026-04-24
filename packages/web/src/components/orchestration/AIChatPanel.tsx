@@ -2,11 +2,18 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Send, User, Bot, Sparkles, Loader2 } from 'lucide-react';
 import { useLanguage } from '../../contexts/LanguageContext';
 import MessageContentRenderer from '../common/MessageContentRenderer';
+import InteractiveMessageRenderer from './InteractiveMessageRenderer';
 
 interface Message {
   id: string;
   role: 'user' | 'assistant';
   content: string;
+  metadata?: {
+    isInteractive?: boolean;
+    guidance?: any;
+    requiresResponse?: boolean;
+    parameterName?: string;
+  };
 }
 
 interface AIChatPanelProps {
@@ -14,6 +21,7 @@ interface AIChatPanelProps {
   messages: Message[];
   isAnalyzing: boolean;
   statusMessage?: string;
+  onInteractiveResponse?: (response: any) => void;
 }
 
 const AIChatPanel: React.FC<AIChatPanelProps> = ({ onSendMessage, messages, isAnalyzing, statusMessage }) => {
@@ -66,29 +74,50 @@ const AIChatPanel: React.FC<AIChatPanelProps> = ({ onSendMessage, messages, isAn
           </div>
         )}
 
-        {messages.map((message) => (
-          <div 
-            key={message.id}
-            className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
-          >
-            <div className={`flex max-w-[85%] ${message.role === 'user' ? 'flex-row-reverse' : 'flex-row'} items-start gap-2`}>
-              <div className={`p-2 rounded-lg flex-shrink-0 ${
-                message.role === 'user' 
-                  ? 'bg-primary-100 text-primary-600 dark:bg-primary-900/30 dark:text-primary-400' 
-                  : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300'
-              }`}>
-                {message.role === 'user' ? <User className="w-4 h-4" /> : <Bot className="w-4 h-4" />}
-              </div>
-              <div className={`p-3 rounded-2xl text-sm ${
-                message.role === 'user'
-                  ? 'bg-primary-500 text-white rounded-tr-none'
-                  : 'bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-tl-none'
-              }`}>
-                <MessageContentRenderer content={message.content} role={message.role} />
-              </div>
+        {messages.map((message) => {
+          // Check if this is an interactive message
+          const isInteractive = message.metadata?.isInteractive && message.metadata?.guidance;
+          
+          return (
+            <div 
+              key={message.id}
+              className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
+            >
+              {isInteractive ? (
+                // Interactive message
+                <div className="w-full max-w-[90%]">
+                  <InteractiveMessageRenderer 
+                    guidance={message.metadata.guidance}
+                    onResponse={(response) => {
+                      // Handle interactive response
+                      console.log('Interactive response:', response);
+                      // For now, just send as regular message
+                      onSendMessage(JSON.stringify(response));
+                    }}
+                  />
+                </div>
+              ) : (
+                // Regular message
+                <div className={`flex max-w-[85%] ${message.role === 'user' ? 'flex-row-reverse' : 'flex-row'} items-start gap-2`}>
+                  <div className={`p-2 rounded-lg flex-shrink-0 ${
+                    message.role === 'user' 
+                      ? 'bg-primary-100 text-primary-600 dark:bg-primary-900/30 dark:text-primary-400' 
+                      : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300'
+                  }`}>
+                    {message.role === 'user' ? <User className="w-4 h-4" /> : <Bot className="w-4 h-4" />}
+                  </div>
+                  <div className={`p-3 rounded-2xl text-sm ${
+                    message.role === 'user'
+                      ? 'bg-primary-500 text-white rounded-tr-none'
+                      : 'bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-tl-none'
+                  }`}>
+                    <MessageContentRenderer content={message.content} role={message.role} />
+                  </div>
+                </div>
+              )}
             </div>
-          </div>
-        ))}
+          );
+        })}
 
         {isAnalyzing && (
           <div className="flex justify-start">

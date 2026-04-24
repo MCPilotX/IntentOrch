@@ -18,6 +18,8 @@ export interface MCPServiceInfo {
     healthStatus: 'healthy' | 'unhealthy' | 'unknown';
     capabilities: string[];
     tags: string[];
+    source?: string; // Discovery source: 'config', 'environment', 'npm', etc.
+    version?: string; // Service version
   };
 }
 
@@ -149,56 +151,171 @@ export class ServiceDiscoveryManager extends EventEmitter {
 
   /**
    * Scan for local MCP services
+   * Generic approach: discovers services from configuration and environment
+   * No hardcoded service names - works for ANY MCP service
    */
   private async scanLocalServices(): Promise<MCPServiceInfo[]> {
     const services: MCPServiceInfo[] = [];
 
-    // Check for common MCP servers in PATH
-    const commonServers = [
-      {
-        name: 'filesystem',
-        command: 'npx',
-        args: ['@modelcontextprotocol/server-filesystem'],
-        description: 'MCP Filesystem Server',
-        capabilities: ['filesystem', 'read', 'write'],
-        tags: ['storage', 'local'],
-      },
-      {
-        name: 'github',
-        command: 'npx',
-        args: ['@modelcontextprotocol/server-github'],
-        description: 'MCP GitHub Server',
-        capabilities: ['github', 'api', 'version-control'],
-        tags: ['development', 'cloud'],
-      },
-      {
-        name: 'clock',
-        command: 'npx',
-        args: ['@modelcontextprotocol/server-clock'],
-        description: 'MCP Clock Server',
-        capabilities: ['time', 'scheduling'],
-        tags: ['utility'],
-      },
-    ];
+    // Discover services from configuration
+    const configServices = await this.discoverFromConfig();
+    services.push(...configServices);
 
-    for (const server of commonServers) {
-      services.push({
-        id: `local:${server.name}`,
-        name: server.name,
-        description: server.description,
-        transport: {
-          type: 'stdio',
-          command: server.command,
-          args: server.args,
-        },
-        metadata: {
-          discoveredAt: Date.now(),
-          lastSeen: Date.now(),
-          healthStatus: 'unknown',
-          capabilities: server.capabilities,
-          tags: server.tags,
-        },
-      });
+    // Discover services from environment variables
+    const envServices = await this.discoverFromEnvironment();
+    services.push(...envServices);
+
+    // Discover services from common package managers
+    const pkgServices = await this.discoverFromPackageManagers();
+    services.push(...pkgServices);
+
+    return services;
+  }
+
+  /**
+   * Discover MCP services from configuration
+   */
+  private async discoverFromConfig(): Promise<MCPServiceInfo[]> {
+    const services: MCPServiceInfo[] = [];
+
+    try {
+      // Try to read MCP configuration from standard locations
+      const configPaths = [
+        process.env.MCP_CONFIG_PATH,
+        './mcp-config.json',
+        './.mcp/config.json',
+        './mcp.json',
+        process.env.HOME + '/.mcp/config.json',
+      ];
+
+      for (const configPath of configPaths) {
+        if (!configPath) continue;
+        
+        try {
+          const fs = require('fs');
+          if (fs.existsSync(configPath)) {
+            const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+            
+            if (config.servers && Array.isArray(config.servers)) {
+              for (const server of config.servers) {
+                services.push({
+                  id: `config:${server.name || server.id}`,
+                  name: server.name || server.id,
+                  description: server.description || `MCP Server: ${server.name || server.id}`,
+                  transport: server.transport || {
+                    type: 'stdio',
+                    command: server.command || 'npx',
+                    args: server.args || [],
+                  },
+                  metadata: {
+                    discoveredAt: Date.now(),
+                    lastSeen: Date.now(),
+                    healthStatus: 'unknown',
+                    capabilities: server.capabilities || [],
+                    tags: server.tags || [],
+                    source: 'config',
+                  },
+                });
+              }
+            }
+          }
+        } catch (e) {
+          // Ignore individual config file errors
+        }
+      }
+    } catch (error) {
+      console.warn('Failed to discover services from config:', error);
+    }
+
+    return services;
+  }
+
+  /**
+   * Discover MCP services from environment variables
+   */
+  private async discoverFromEnvironment(): Promise<MCPServiceInfo[]> {
+    const services: MCPServiceInfo[] = [];
+
+    // Check for MCP server environment variables
+    // Format: MCP_SERVER_<NAME>_COMMAND, MCP_SERVER_<NAME>_ARGS
+    for (const [key, value] of Object.entries(process.env)) {
+      if (key.startsWith('MCP_SERVER_') && key.endsWith('_COMMAND')) {
+        const name = key.replace('MCP_SERVER_', '').replace('_COMMAND', '').toLowerCase();
+        const argsKey = `MCP_SERVER_${name.toUpperCase()}_ARGS`;
+        const argsStr = process.env[argsKey] || '';
+        
+        services.push({
+          id: `env:${name}`,
+          name,
+          description: `MCP Server from environment: ${name}`,
+          transport: {
+            type: 'stdio',
+            command: value,
+            args: argsStr ? argsStr.split(' ').filter(Boolean) : [],
+          },
+          metadata: {
+            discoveredAt: Date.now(),
+            lastSeen: Date.now(),
+            healthStatus: 'unknown',
+            capabilities: [],
+            tags: ['env'],
+            source: 'environment',
+          },
+        });
+      }
+    }
+
+    return services;
+  }
+
+  /**
+   * Discover MCP services from package managers
+   */
+  private async discoverFromPackageManagers(): Promise<MCPServiceInfo[]> {
+    const services: MCPServiceInfo[] = [];
+
+    try {
+      // Check if npx is available and look for @modelcontextprotocol packages
+      const { execSync } = require('child_process');
+      
+      // Try to find globally installed MCP packages
+      try {
+        const npmList = execSync('npm list -g --depth=0 --json 2>/dev/null', { 
+          encoding: 'utf-8',
+          timeout: 5000,
+        });
+        const parsed = JSON.parse(npmList);
+        const dependencies = parsed.dependencies || {};
+        
+        for (const [pkgName, pkgInfo] of Object.entries(dependencies)) {
+          if (pkgName.includes('mcp') || pkgName.includes('modelcontextprotocol')) {
+            const serverName = pkgName.replace('@modelcontextprotocol/server-', '');
+            services.push({
+              id: `npm:${serverName}`,
+              name: serverName,
+              description: `MCP Server from npm: ${pkgName}`,
+              transport: {
+                type: 'stdio',
+                command: 'npx',
+                args: [pkgName],
+              },
+              metadata: {
+                discoveredAt: Date.now(),
+                lastSeen: Date.now(),
+                healthStatus: 'unknown',
+                capabilities: [],
+                tags: ['npm', 'discovered'],
+                source: 'npm',
+                version: (pkgInfo as any).version,
+              },
+            });
+          }
+        }
+      } catch (e) {
+        // npm list may fail if no global packages
+      }
+    } catch (error) {
+      console.warn('Failed to discover services from package managers:', error);
     }
 
     return services;

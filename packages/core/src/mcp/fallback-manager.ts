@@ -411,15 +411,8 @@ export class FallbackManager {
       }
     }
 
-    // Pattern-based degradation for common tool types
-    if (toolName.includes('ticket') || toolName.includes('train') || toolName.includes('flight')) {
-      // Degrade ticket search to date/time query
-      return {
-        name: 'get-current-date',
-        arguments: {},
-      };
-    }
-
+    // Generic degradation based on tool name patterns
+    // No service-specific logic - works for ANY MCP service
     if (toolName.includes('search') || toolName.includes('filter')) {
       // Generic search degradation
       return {

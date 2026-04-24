@@ -48,6 +48,81 @@ export interface Secret {
   description?: string;
 }
 
+// Interactive session types
+export type SessionState = 
+  | 'initializing'
+  | 'parsing'
+  | 'validating'
+  | 'awaiting_feedback'
+  | 'executing'
+  | 'completed'
+  | 'failed'
+  | 'cancelled';
+
+export interface MissingParameter {
+  toolName: string;
+  parameterName: string;
+  description: string;
+  required: boolean;
+  currentValue: any;
+  suggestions?: string[];
+  validationError?: string;
+}
+
+export interface UserFeedbackResponse {
+  type: 'parameter_value' | 'clarification' | 'confirmation' | 'cancellation';
+  parameterName?: string;
+  value?: any;
+  clarification?: string;
+  confirmed?: boolean;
+  timestamp: Date;
+}
+
+export interface UserGuidanceMessage {
+  type: 'parameter_request' | 'clarification_request' | 'confirmation_request' | 'suggestion';
+  message: string;
+  parameters?: MissingParameter[];
+  options?: Array<{
+    id: string;
+    label: string;
+    description?: string;
+    value?: any;
+  }>;
+  requiresResponse: boolean;
+  timestamp: Date;
+}
+
+export interface InteractiveSession {
+  sessionId: string;
+  userId?: string;
+  state: SessionState;
+  originalQuery: string;
+  currentQuery?: string;
+  missingParameters: MissingParameter[];
+  validationResults: Array<{
+    toolName: string;
+    parameterName: string;
+    isValid: boolean;
+    message?: string;
+    suggestedValue?: any;
+  }>;
+  conversationHistory: Array<{
+    role: 'user' | 'system' | 'assistant';
+    content: string;
+    timestamp: Date;
+    metadata?: Record<string, any>;
+  }>;
+  executionResult?: any;
+  error?: string;
+  confidence: number;
+  turnCount: number;
+  createdAt: Date;
+  updatedAt: Date;
+  completedAt?: Date;
+  parsedIntents?: any[];
+  toolSelections?: any[];
+}
+
 export interface Workflow {
   id: string;
   name: string;

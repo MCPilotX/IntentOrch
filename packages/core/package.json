@@ -41,6 +41,7 @@
     "@modelcontextprotocol/sdk": "^1.0.0",
     "axios": "^1.7.9",
     "chalk": "^4.1.2",
+    "flexsearch": "^0.8.212",
     "jexl": "^2.3.0",
     "lodash": "^4.18.1",
     "uuid": "^14.0.0"

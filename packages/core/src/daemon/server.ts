@@ -85,20 +85,34 @@ export class DaemonServer {
     return this.sendJson(res, 200, status);
   }
   
-  // Handle /api/system/stats - same as /api/status for backward compatibility
+  // Handle /api/system/stats - return system statistics
   if ((path === '/api/system/stats' || path === '/api/system/stats/') && method === 'GET') {
-    const status = {
-      running: true,
-      pid: process.pid,
-      config: this.config,
-      uptime: Date.now() - this.startTime,
-      version: '0.8.0',
-      stats: {
-        activeConnections: 0,
-        totalRequests: this.requestCount
-      }
-    };
-    return this.sendJson(res, 200, status);
+    try {
+      const processManager = getProcessManager();
+      const allProcesses = await processManager.list();
+      const runningProcesses = allProcesses.filter(p => p.status === 'running');
+      
+      // Get all servers from registry (cached manifests)
+      const registryClient = getRegistryClient();
+      const cachedManifests = await registryClient.listCachedManifests();
+      
+      const stats = {
+        totalServers: cachedManifests.length,
+        runningServers: runningProcesses.length,
+        totalProcesses: allProcesses.length,
+        diskUsage: 0, // TODO: Implement disk usage calculation
+        uptime: Date.now() - this.startTime,
+        requestCount: this.requestCount
+      };
+      
+      return this.sendJson(res, 200, { stats });
+    } catch (error: any) {
+      console.error('[Daemon] Error getting system stats:', error);
+      return this.sendJson(res, 500, { 
+        error: 'Failed to get system statistics',
+        message: error.message 
+      });
+    }
   }
   
   // Handle /api/system/logs - return daemon logs
@@ -546,6 +560,282 @@ export class DaemonServer {
             return this.sendJson(res, 500, { 
                 success: false, 
                 error: `Failed to parse intent: ${error.message}` 
+            });
+        }
+    }
+
+    // Execute pre-parsed steps (for Web UI - no re-parsing)
+    if ((path === '/api/execute/execute-steps' || path === '/api/execute/executeSteps') && method === 'POST') {
+        try {
+            const { steps, options } = JSON.parse(body);
+            
+            if (!steps || !Array.isArray(steps) || steps.length === 0) {
+                return this.sendJson(res, 400, { 
+                    success: false, 
+                    error: 'Steps are required and must be a non-empty array' 
+                });
+            }
+            
+            console.log(`[Daemon] Executing ${steps.length} pre-parsed steps`);
+            
+            // Get unified execution service
+            const executionService = getExecuteService();
+            
+            if (!executionService) {
+                console.error('[Daemon] Unified execution service is not available');
+                return this.sendJson(res, 503, { 
+                    success: false, 
+                    error: 'Unified execution service is not available. Please check service configuration.' 
+                });
+            }
+            
+            // Execute steps directly without re-parsing
+            const executionOptions: UnifiedExecutionOptions = options || {};
+            const result = await executionService.executeSteps(steps, executionOptions);
+            
+            return this.sendJson(res, result.success ? 200 : 400, result);
+        } catch (error: any) {
+            console.error('[Daemon] Error executing pre-parsed steps:', error);
+            console.error('[Daemon] Error stack:', error.stack);
+            return this.sendJson(res, 500, { 
+                success: false, 
+                error: `Failed to execute steps: ${error.message}` 
+            });
+        }
+    }
+
+    // Interactive intent parsing endpoints
+    if (path === '/api/execute/interactive/start' && method === 'POST') {
+
+        try {
+            const { query, userId } = JSON.parse(body);
+            
+            if (!query || typeof query !== 'string') {
+                return this.sendJson(res, 400, { 
+                    success: false, 
+                    error: 'Query is required and must be a string' 
+                });
+            }
+            
+            console.log(`[Daemon] Starting interactive session for query: "${query.substring(0, 100)}..."`);
+            
+            // Get unified execution service
+            const executionService = getExecuteService();
+            
+            if (!executionService) {
+                console.error('[Daemon] Unified execution service is not available');
+                return this.sendJson(res, 503, { 
+                    success: false, 
+                    error: 'Unified execution service is not available. Please check service configuration.' 
+                });
+            }
+            
+            // Start interactive session
+            const result = await executionService.startInteractiveSession(query, userId);
+            
+            console.log(`[Daemon] Interactive session started: ${result.sessionId}`);
+            
+            return this.sendJson(res, 200, {
+                success: true,
+                sessionId: result.sessionId,
+                guidance: result.guidance,
+                session: result.session,
+            });
+        } catch (error: any) {
+            console.error('[Daemon] Error starting interactive session:', error);
+            return this.sendJson(res, 500, { 
+                success: false, 
+                error: `Failed to start interactive session: ${error.message}` 
+            });
+        }
+    }
+
+    if (path === '/api/execute/interactive/respond' && method === 'POST') {
+        try {
+            const { sessionId, response } = JSON.parse(body);
+            
+            if (!sessionId || typeof sessionId !== 'string') {
+                return this.sendJson(res, 400, { 
+                    success: false, 
+                    error: 'Session ID is required and must be a string' 
+                });
+            }
+            
+            if (!response || typeof response !== 'object') {
+                return this.sendJson(res, 400, { 
+                    success: false, 
+                    error: 'Response is required and must be an object' 
+                });
+            }
+            
+            console.log(`[Daemon] Processing feedback for session: ${sessionId}`);
+            
+            // Get unified execution service
+            const executionService = getExecuteService();
+            
+            if (!executionService) {
+                console.error('[Daemon] Unified execution service is not available');
+                return this.sendJson(res, 503, { 
+                    success: false, 
+                    error: 'Unified execution service is not available. Please check service configuration.' 
+                });
+            }
+            
+            // Process user feedback
+            const result = await executionService.processInteractiveFeedback(sessionId, response);
+            
+            if (!result.success) {
+                return this.sendJson(res, 404, { 
+                    success: false, 
+                    error: 'Session not found or invalid' 
+                });
+            }
+            
+            return this.sendJson(res, 200, {
+                success: true,
+                guidance: result.guidance,
+                session: result.session,
+                readyForExecution: result.readyForExecution,
+            });
+        } catch (error: any) {
+            console.error('[Daemon] Error processing interactive feedback:', error);
+            return this.sendJson(res, 500, { 
+                success: false, 
+                error: `Failed to process interactive feedback: ${error.message}` 
+            });
+        }
+    }
+
+    if (path === '/api/execute/interactive/execute' && method === 'POST') {
+        try {
+            const { sessionId, options = {} } = JSON.parse(body);
+            
+            if (!sessionId || typeof sessionId !== 'string') {
+                return this.sendJson(res, 400, { 
+                    success: false, 
+                    error: 'Session ID is required and must be a string' 
+                });
+            }
+            
+            console.log(`[Daemon] Executing interactive session: ${sessionId}`);
+            
+            // Get unified execution service
+            const executionService = getExecuteService();
+            
+            if (!executionService) {
+                console.error('[Daemon] Unified execution service is not available');
+                return this.sendJson(res, 503, { 
+                    success: false, 
+                    error: 'Unified execution service is not available. Please check service configuration.' 
+                });
+            }
+            
+            // Execute session
+            const result = await executionService.executeInteractiveSession(sessionId, options);
+            
+            return this.sendJson(res, result.success ? 200 : 500, {
+                success: result.success,
+                result: result.result,
+                executionSteps: result.executionSteps,
+                statistics: result.statistics,
+                error: result.error,
+            });
+        } catch (error: any) {
+            console.error('[Daemon] Error executing interactive session:', error);
+            return this.sendJson(res, 500, { 
+                success: false, 
+                error: `Failed to execute interactive session: ${error.message}` 
+            });
+        }
+    }
+
+    if (path.startsWith('/api/execute/interactive/') && method === 'GET') {
+        try {
+            const sessionId = path.substring('/api/execute/interactive/'.length);
+            
+            if (!sessionId) {
+                // Return all active sessions
+                const executionService = getExecuteService();
+                if (!executionService) {
+                    return this.sendJson(res, 503, { 
+                        success: false, 
+                        error: 'Unified execution service is not available' 
+                    });
+                }
+                
+                const sessions = executionService.getActiveInteractiveSessions();
+                return this.sendJson(res, 200, {
+                    success: true,
+                    sessions,
+                });
+            }
+            
+            console.log(`[Daemon] Getting interactive session: ${sessionId}`);
+            
+            // Get unified execution service
+            const executionService = getExecuteService();
+            
+            if (!executionService) {
+                console.error('[Daemon] Unified execution service is not available');
+                return this.sendJson(res, 503, { 
+                    success: false, 
+                    error: 'Unified execution service is not available. Please check service configuration.' 
+                });
+            }
+            
+            // Get session
+            const session = executionService.getInteractiveSession(sessionId);
+            
+            if (!session) {
+                return this.sendJson(res, 404, { 
+                    success: false, 
+                    error: 'Session not found' 
+                });
+            }
+            
+            return this.sendJson(res, 200, {
+                success: true,
+                session,
+            });
+        } catch (error: any) {
+            console.error('[Daemon] Error getting interactive session:', error);
+            return this.sendJson(res, 500, { 
+                success: false, 
+                error: `Failed to get interactive session: ${error.message}` 
+            });
+        }
+    }
+
+    if (path === '/api/execute/interactive/cleanup' && method === 'POST') {
+        try {
+            const { maxAgeMs = 3600000 } = JSON.parse(body);
+            
+            console.log(`[Daemon] Cleaning up old interactive sessions (max age: ${maxAgeMs}ms)`);
+            
+            // Get unified execution service
+            const executionService = getExecuteService();
+            
+            if (!executionService) {
+                console.error('[Daemon] Unified execution service is not available');
+                return this.sendJson(res, 503, { 
+                    success: false, 
+                    error: 'Unified execution service is not available. Please check service configuration.' 
+                });
+            }
+            
+            // Cleanup old sessions
+            const cleanedCount = executionService.cleanupInteractiveSessions(maxAgeMs);
+            
+            return this.sendJson(res, 200, {
+                success: true,
+                cleanedCount,
+                message: `Cleaned up ${cleanedCount} old sessions`,
+            });
+        } catch (error: any) {
+            console.error('[Daemon] Error cleaning up interactive sessions:', error);
+            return this.sendJson(res, 500, { 
+                success: false, 
+                error: `Failed to cleanup interactive sessions: ${error.message}` 
             });
         }
     }
