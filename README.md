@@ -28,7 +28,7 @@
 
 <!-- Dashboard 全景截图 -->
 <p align="center">
-  <img src="./docs/screenshots/dashboard.png" width="800" alt="IntentOrch Dashboard - 系统状态总览" />
+  <img src="./docs/screenshots/1.png" width="800" alt="IntentOrch Dashboard - 系统状态总览" />
 </p>
 
 ---
@@ -85,7 +85,7 @@ IntentOrch 自动完成：
 
 <!-- 意图编排页面截图 -->
 <p align="center">
-  <img src="./docs/screenshots/orchestration.png" width="800" alt="IntentOrch 意图编排界面 - 自然语言生成工作流" />
+  <img src="./docs/screenshots/2.png" width="800" alt="IntentOrch 意图编排界面 - 自然语言生成工作流" />
 </p>
 
 ### 🐳 MCP Server 全生命周期管理
@@ -117,8 +117,8 @@ IntentOrch 自动完成：
 
 <!-- 功能截图拼图 -->
 <p align="center">
-  <img src="./docs/screenshots/workflows.png" width="45%" alt="工作流管理" />
-  <img src="./docs/screenshots/servers.png" width="45%" alt="MCP服务管理" />
+  <img src="./docs/screenshots/3.png" width="45%" alt="工作流管理" />
+  <img src="./docs/screenshots/4.png" width="45%" alt="MCP服务管理" />
 </p>
 <p align="center">
   <em>左：工作流管理 ｜ 右：MCP服务管理</em>
