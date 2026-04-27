@@ -16,7 +16,7 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { 
-  MCPILOT_HOME, 
+  INTORCH_HOME, 
   CONFIG_PATH, 
   LOGS_DIR, 
   VENVS_DIR,
@@ -82,7 +82,7 @@ export class ConfigService {
   private isLocked = false;
 
   private constructor() {
-    this.configDir = MCPILOT_HOME;
+    this.configDir = INTORCH_HOME;
     this.servicesDir = path.join(this.configDir, 'services');
     this.dockerHostsDir = path.join(this.configDir, 'config', 'docker-hosts');
     this.runtimeProfilesDir = path.join(this.configDir, 'config', 'runtime-profiles');

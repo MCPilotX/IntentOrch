@@ -3,229 +3,91 @@
  * Cloud LLM-based intent parsing and MCP capability auto-mapping engine
  *
  * Core capabilities:
- * 1. Decompose natural language instructions into atomic intents (with parameters)
- * 2. Infer dependencies between atomic intents (generate DAG)
- * 3. Select the most appropriate tool from MCP tools for each atomic intent
- * 4. Map intent parameters to tool input parameters
- * 5. Execute tool calls in dependency order
+ * 1. Plan: Generate a tool execution plan (DAG) from a user query using LLM function calling
+ * 2. Confirm: Validate and confirm the plan with user interaction
+ * 3. Execute: Execute steps in dependency order with variable substitution
+ *
+ * This replaces the old parseIntent + selectTools + executeWorkflowWithTracking pipeline.
+ * - Old: 2 LLM calls (text prompt parseIntent + text prompt selectTools) + 5-layer fallback
+ * - New: 1 LLM call (function calling) directly generates the plan with tool + params
  */
 
 import { logger } from '../core/logger';
-import { AI } from './ai';
+import { LLMClient, getLLMClient } from './llm-client';
 import type { AIConfig } from '../core/types';
 import type { Tool } from '../mcp/types';
 import { ParameterMapper, ValidationLevel } from '../mcp/parameter-mapper';
-import { intentorchDirectiveProcessor } from './intentorch-directive-processor';
-import { extractKeywords, calculateToolMatchScore } from '../utils/keyword-extractor';
-import { ToolScorer } from './tool-scorer';
-import { DecompositionValidator } from './decomposition-validator';
-import { ToolExampleProvider } from './tool-example-provider';
-import { ToolRegistry } from '../mcp/tool-registry';
 
-// ==================== Type Definitions ====================
+// ==================== Plan-then-Execute Types ====================
 
 /**
- * Atomic intent
+ * A single step in a tool execution plan
  */
-export interface AtomicIntent {
-  id: string;           // Unique identifier, e.g., A1, A2
-  type: string;         // Short action name, e.g., open_web, search, screenshot
-  description: string;  // Human-readable step description
-  parameters: Record<string, any>;  // Parameters extracted from instruction
-}
-
-/**
- * Dependency edge
- */
-export interface DependencyEdge {
-  from: string;  // Source intent ID
-  to: string;    // Target intent ID
-}
-
-/**
- * Intent parsing result
- */
-export interface IntentParseResult {
-  intents: AtomicIntent[];
-  edges: DependencyEdge[];
-}
-
-/**
- * Tool selection result
- */
-export interface ToolSelectionResult {
-  intentId: string;
+export interface PlanStep {
+  /** Unique step ID (e.g., "step_1", "step_2") */
+  id: string;
+  /** Tool name to execute */
   toolName: string;
-  toolDescription: string;
-  mappedParameters: Record<string, any>;
-  confidence: number;
-  serverId?: string;
-  serverName?: string;
+  /** Human-readable description of what this step does */
+  description: string;
+  /** Parameters for the tool call */
+  arguments: Record<string, any>;
+  /** IDs of steps that this step depends on */
+  dependsOn: string[];
 }
 
 /**
- * Execution context
+ * A complete tool execution plan (DAG)
  */
-export interface ExecutionContext {
-  results: Map<string, any>;  // Intent ID -> execution result
-  variables: Map<string, any>; // Variable storage
-}
-
-/**
- * Enhanced execution step result
- */
-export interface EnhancedExecutionStep {
-  intentId: string;
-  intentDescription: string;
-  intentType: string;
-  intentParameters: Record<string, any>;
-  toolName: string;
-  toolDescription: string;
-  mappedParameters: Record<string, any>;
-  confidence: number;
-  success: boolean;
-  result?: any;
-  error?: string;
-  duration?: number;
-  startedAt?: Date;
-  completedAt?: Date;
-}
-
-/**
- * Workflow plan (pre-execution)
- */
-export interface WorkflowPlan {
+export interface ToolExecutionPlan {
+  /** Unique plan ID */
+  id: string;
+  /** Original user query */
   query: string;
-  parsedIntents: AtomicIntent[];
-  dependencies: DependencyEdge[];
-  toolSelections: ToolSelectionResult[];
-  executionOrder: string[];
-  estimatedSteps: number;
+  /** Steps to execute in order */
+  steps: PlanStep[];
+  /** Whether the plan was confirmed by the user */
+  confirmed: boolean;
+  /** Timestamp when the plan was created */
   createdAt: Date;
+  /** Timestamp when the plan was confirmed (if confirmed) */
+  confirmedAt?: Date;
+  /** Human-readable summary of the plan */
+  summary: string;
 }
 
 /**
- * Enhanced execution result
+ * Plan execution result
  */
-export interface EnhancedExecutionResult {
+export interface PlanExecutionResult {
+  /** Whether all steps executed successfully */
   success: boolean;
-  finalResult?: any;
-
-  // Parsing phase information
-  parsedIntents: AtomicIntent[];
-  dependencies: DependencyEdge[];
-
-  // Tool selection information
-  toolSelections: ToolSelectionResult[];
-
-  // Execution results
-  executionSteps: EnhancedExecutionStep[];
-
-  // Statistics
-  statistics: {
-    totalSteps: number;
-    successfulSteps: number;
-    failedSteps: number;
-    totalDuration: number;
-    averageStepDuration: number;
-    llmCalls: number;
-    parsingTime?: number;
-    toolSelectionTime?: number;
-    executionTime?: number;
-  };
-}
-
-/**
- * Execution result (legacy)
- */
-export interface ExecutionResult {
-  success: boolean;
-  finalResult?: any;
+  /** Plan that was executed */
+  plan: ToolExecutionPlan;
+  /** Results for each step */
   stepResults: Array<{
-    intentId: string;
+    stepId: string;
     toolName: string;
     success: boolean;
     result?: any;
     error?: string;
+    duration: number;
   }>;
-}
-
-// ==================== Interactive Feedback Types ====================
-
-/**
- * User confirmation option
- */
-export interface ConfirmationOption {
-  id: string;
-  description: string;
-  suggestedAction: 'proceed' | 'reparse' | 'abort' | 'modify';
-  confidence?: number;
-  parsedIntents?: AtomicIntent[];
-  reason?: string;
+  /** Final result (output of the last step) */
+  finalResult?: any;
+  /** Total execution duration */
+  totalDuration: number;
 }
 
 /**
- * User confirmation request
+ * Plan confirmation callback
  */
-export interface UserConfirmationRequest {
-  query: string;
-  parsedIntents: AtomicIntent[];
-  confidence: number;
-  reason: string;
-  options: ConfirmationOption[];
-  analysis?: {
-    isLikelySimpleQuery: boolean;
-    hasMultipleActions: boolean;
-    hasTemporalMarkers: boolean;
-    likelySingleToolMatch: string | null;
-    complexityScore: number;
-  };
-  timestamp: Date;
-}
-
-/**
- * User confirmation response
- */
-export interface UserConfirmationResponse {
-  selectedOptionId: string;
-  feedback?: string;
-  timestamp: Date;
-  userModifiedIntents?: AtomicIntent[]; // Optional: user can modify intents
-}
-
-/**
- * Feedback learning record
- */
-export interface FeedbackLearningRecord {
-  query: string;
-  originalIntents: AtomicIntent[];
-  userResponse: UserConfirmationResponse;
-  confidence: number;
-  success: boolean;
-  timestamp: Date;
-  learnedPattern?: string;
-}
-
-/**
- * Confirmation configuration
- */
-export interface ConfirmationConfig {
-  enabled: boolean;
-  confidenceThreshold: number; // Below this threshold, confirmation is required
-  autoProceedThreshold: number; // Above this threshold, auto proceed
-  maxOptions: number;
-  learnFromFeedback: boolean;
-  feedbackHistorySize: number;
-}
-
-/**
- * Parse intent options with confirmation support
- */
-export interface ParseIntentOptions {
-  requireConfirmation?: boolean;
-  confirmationCallback?: (request: UserConfirmationRequest) => Promise<UserConfirmationResponse>;
-  autoProceedOnHighConfidence?: boolean;
-  learningEnabled?: boolean;
+export interface PlanConfirmationCallback {
+  (plan: ToolExecutionPlan): Promise<{
+    confirmed: boolean;
+    modifiedPlan?: ToolExecutionPlan;
+    feedback?: string;
+  }>;
 }
 
 // ==================== Configuration Interface ====================
@@ -250,7 +112,7 @@ export interface CloudIntentEngineConfig {
   fallback: {
     enableKeywordMatching?: boolean;
     askUserOnFailure?: boolean;
-    defaultTools?: Record<string, string>;  // Intent type -> default tool name
+    defaultTools?: Record<string, string>;
   };
   parameterMapping?: {
     validationLevel?: ValidationLevel;
@@ -260,17 +122,40 @@ export interface CloudIntentEngineConfig {
   };
 }
 
+// ==================== Execution Context ====================
+
+interface ExecutionContext {
+  results: Map<string, any>;
+  variables: Map<string, any>;
+}
+
+// ==================== Function Calling Result Type ====================
+
+/**
+ * Result of a function calling query
+ */
+export interface FunctionCallingResult {
+  hasToolCall: boolean;
+  toolCalls: Array<{
+    toolName: string;
+    arguments: Record<string, any>;
+  }>;
+  raw: any;
+  provider: string;
+  model: string;
+}
+
 // ==================== Main Engine Class ====================
 
 export class CloudIntentEngine {
-  private ai: AI;
+  private llmClient: LLMClient;
   private config: CloudIntentEngineConfig;
   private availableTools: Tool[] = [];
   private toolCache: Map<string, Tool> = new Map();
-  private toolRegistry?: ToolRegistry;
+  private initialized: boolean = false;
 
-  constructor(config: CloudIntentEngineConfig, toolRegistry?: ToolRegistry) {
-    this.toolRegistry = toolRegistry;
+  constructor(config: CloudIntentEngineConfig) {
+    this.llmClient = getLLMClient();
     this.config = {
       llm: {
         temperature: 0.1,
@@ -281,7 +166,7 @@ export class CloudIntentEngine {
         provider: config.llm.provider || 'openai',
       },
       execution: {
-        maxConcurrentTools: 10, // Increased from 3 to allow more concurrent tools
+        maxConcurrentTools: 10,
         timeout: 60000,
         retryAttempts: 2,
         retryDelay: 1000,
@@ -296,20 +181,10 @@ export class CloudIntentEngine {
       parameterMapping: config.parameterMapping,
     };
 
-    this.ai = new AI();
-    
-    // Auto-initialize AI configuration
+    // Auto-initialize LLM configuration
     this.initialize().catch(error => {
       logger.error(`[CloudIntentEngine] Auto-initialization failed: ${error}`);
-      // Don't throw in constructor, allow lazy initialization
     });
-  }
-
-  /**
-   * Set the tool registry for enhanced search
-   */
-  setToolRegistry(registry: ToolRegistry): void {
-    this.toolRegistry = registry;
   }
 
   /**
@@ -317,8 +192,8 @@ export class CloudIntentEngine {
    */
   async initialize(): Promise<void> {
     try {
-      // Configure AI service
-      await this.ai.configure({
+      // Configure LLM client
+      this.llmClient.configure({
         provider: this.config.llm.provider,
         apiKey: this.config.llm.apiKey,
         apiEndpoint: this.config.llm.endpoint,
@@ -342,10 +217,11 @@ export class CloudIntentEngine {
         }
 
         ParameterMapper.configure(config);
-      logger.debug('[CloudIntentEngine] ParameterMapper configured successfully');
-    }
+        logger.debug('[CloudIntentEngine] ParameterMapper configured successfully');
+      }
 
-    logger.debug('[CloudIntentEngine] Engine initialized successfully');
+      this.initialized = true;
+      logger.debug('[CloudIntentEngine] Engine initialized successfully');
     } catch (error) {
       logger.error(`[CloudIntentEngine] Failed to initialize: ${error}`);
       throw error;
@@ -367,1820 +243,731 @@ export class CloudIntentEngine {
     logger.debug(`[CloudIntentEngine] Set ${tools.length} available tools`);
   }
 
-  /**
-   * Parse natural language instruction into atomic intents and dependencies
-   * Enhanced with minimal decomposition principle and confidence assessment
-   */
-  async parseIntent(query: string): Promise<IntentParseResult>;
+  // ==================== Helper: Convert MCP Tools to LLM Tools Format ====================
 
   /**
-   * Parse natural language instruction with interactive feedback confirmation
+   * Convert MCP Tool[] to LLM tools format
    */
-  async parseIntent(query: string, options?: ParseIntentOptions): Promise<IntentParseResult>;
+  private toLLMTools(): Array<{
+    type: 'function';
+    function: {
+      name: string;
+      description: string;
+      parameters: Record<string, any>;
+    };
+  }> {
+    return this.availableTools.map(tool => ({
+      type: 'function' as const,
+      function: {
+        name: tool.name,
+        description: tool.description || '',
+        parameters: tool.inputSchema || { type: 'object', properties: {} },
+      },
+    }));
+  }
 
-  async parseIntent(query: string, options?: ParseIntentOptions): Promise<IntentParseResult> {
-    logger.info(`[CloudIntentEngine] Parsing intent: "${query}"`);
+  /**
+   * Parse LLM response tool calls into our format
+   */
+  private parseToolCalls(response: any): Array<{
+    toolName: string;
+    arguments: Record<string, any>;
+  }> {
+    const toolCalls: Array<{
+      toolName: string;
+      arguments: Record<string, any>;
+    }> = [];
+
+    if (!response?.toolCalls || !Array.isArray(response.toolCalls)) {
+      return toolCalls;
+    }
+
+    for (const tc of response.toolCalls) {
+      try {
+        const args = typeof tc.function.arguments === 'string'
+          ? JSON.parse(tc.function.arguments)
+          : tc.function.arguments;
+        toolCalls.push({
+          toolName: tc.function.name,
+          arguments: args || {},
+        });
+      } catch (e) {
+        logger.warn(`[CloudIntentEngine] Failed to parse tool call arguments: ${e}`);
+      }
+    }
+
+    return toolCalls;
+  }
+
+  // ==================== LLM Function Calling (Single Query) ====================
+
+  /**
+   * Process a user query using LLM function calling.
+   *
+   * This is the simplest entry point. It uses LLM's native function calling API
+   * to directly select the appropriate tool and extract parameters in a single call.
+   *
+   * Example:
+   *   const result = await engine.processQuery('search for files containing "test"');
+   *   // result.toolCalls[0] = { toolName: 'search_files', arguments: { pattern: 'test' } }
+   */
+  async processQuery(
+    query: string,
+    options?: {
+      systemPrompt?: string;
+      model?: string;
+      temperature?: number;
+      maxTokens?: number;
+      toolChoice?: 'auto' | 'none' | 'required';
+    },
+  ): Promise<FunctionCallingResult> {
+    logger.debug(`[CloudIntentEngine] processQuery called: "${query}"`);
+
+    if (this.availableTools.length === 0) {
+      logger.warn('[CloudIntentEngine] No tools available for processQuery');
+      return {
+        hasToolCall: false,
+        toolCalls: [],
+        raw: null,
+        provider: this.config.llm.provider,
+        model: this.config.llm.model || 'unknown',
+      };
+    }
 
     try {
-      // Step 1: Process @intentorch directives
-      const directiveResult = intentorchDirectiveProcessor.processQuery(query);
-
-      // Step 2: Pre-analyze query for minimal decomposition
-      const preAnalysis = this.preAnalyzeQuery(directiveResult.cleanedQuery);
-
-      // Step 3: Parse cleaned query with LLM (using enhanced prompt)
-      const prompt = this.buildIntentParsePrompt(directiveResult.cleanedQuery);
-      const llmResponse = await this.callLLM(prompt, {
-        temperature: 0.1,
-        maxTokens: 1024,
+      const response = await this.llmClient.chat({
+        messages: [
+          {
+            role: 'system',
+            content: options?.systemPrompt || 'You are a helpful assistant. Use the available tools to fulfill the user\'s request. Select the most appropriate tool and extract all parameters from the query.',
+          },
+          { role: 'user', content: query },
+        ],
+        tools: this.toLLMTools(),
+        toolChoice: options?.toolChoice || 'auto',
+        temperature: options?.temperature ?? 0.1,
+        maxTokens: options?.maxTokens ?? 2048,
       });
 
-      // Step 4: Parse LLM response
-      const baseResult = this.parseIntentResponse(llmResponse);
+      const toolCalls = this.parseToolCalls(response);
 
-      // Step 5: Apply minimal decomposition correction if needed
-      const correctedResult = this.applyMinimalDecompositionCorrection(
-        baseResult,
-        directiveResult.cleanedQuery,
-        preAnalysis,
-      );
+      logger.debug(`[CloudIntentEngine] processQuery result: ${toolCalls.length > 0 ? toolCalls.length + ' tool call(s)' : 'no tool call'}`);
 
-      // Step 5b: Validate decomposition using DecompositionValidator
-      try {
-        const validationResult = DecompositionValidator.validate(directiveResult.cleanedQuery, correctedResult.intents);
-        if (!validationResult.valid && validationResult.issues.length > 0) {
-          logger.debug(`[CloudIntentEngine] Decomposition validation found ${validationResult.issues.length} issues`);
-          // Log issues for debugging
-          validationResult.issues.forEach(issue => {
-            logger.debug(`[CloudIntentEngine]   - [${issue.severity}] ${issue.message}`);
-          });
-        }
-      } catch (validationError) {
-        logger.warn(`[CloudIntentEngine] Decomposition validation failed: ${validationError}`);
-      }
-
-      // Step 6: Assess confidence and log analysis
-      const confidence = this.assessParsingConfidence(correctedResult, directiveResult.cleanedQuery);
-      logger.debug(`[CloudIntentEngine] Parsed ${correctedResult.intents.length} intents with ${correctedResult.edges.length} dependencies (confidence: ${confidence.toFixed(2)})`);
-
-      // Step 7: Enhance workflow with @intentorch directives if present
-      let finalResult: IntentParseResult;
-      if (directiveResult.hasDirectives) {
-        logger.debug(`[CloudIntentEngine] Enhancing workflow with ${directiveResult.directives.length} @intentorch directives`);
-        finalResult = intentorchDirectiveProcessor.enhanceWorkflowWithDirectives(
-          correctedResult,
-          directiveResult.directives,
-        );
-      } else {
-        finalResult = correctedResult;
-      }
-
-      // Step 8: Check if interactive feedback confirmation is needed
-      if (options?.confirmationCallback && this.shouldRequestConfirmation(confidence, options)) {
-        logger.debug(`[CloudIntentEngine] Low confidence (${confidence.toFixed(2)}), requesting user confirmation`);
-
-        const confirmationRequest = this.buildConfirmationRequest(
-          query,
-          finalResult,
-          confidence,
-          preAnalysis,
-          options,
-        );
-
-        const userResponse = await options.confirmationCallback(confirmationRequest);
-
-        // Handle user response
-        return this.handleConfirmationResponse(userResponse, finalResult, query, preAnalysis);
-      }
-
-      // Step 9: Log final result with confidence
-      if (directiveResult.hasDirectives) {
-        logger.debug(`[CloudIntentEngine] Includes ${directiveResult.directives.length} AI summary steps from @intentorch directives`);
-      }
-
-      // Step 10: Log decomposition decision for debugging
-      this.logDecompositionDecision(
-        directiveResult.cleanedQuery,
-        baseResult.intents.length,
-        correctedResult.intents.length,
-        confidence,
-      );
-
-      // Step 11: Record feedback for learning if enabled
-      if (options?.learningEnabled !== false) {
-        this.recordFeedbackForLearning(query, finalResult, confidence, null, true);
-      }
-
-      return finalResult;
-    } catch (error) {
-      logger.error(`[CloudIntentEngine] Intent parsing failed: ${error}`);
-
-      // Fallback: use simple rule-based parsing
-      return this.fallbackIntentParse(query);
-    }
-  }
-
-  /**
-   * Select the most appropriate tool for each intent
-   */
-  async selectTools(intents: AtomicIntent[]): Promise<ToolSelectionResult[]> {
-    logger.info(`[CloudIntentEngine] selectTools called for ${intents.length} intents`);
-    logger.debug(`[CloudIntentEngine] Selecting tools for ${intents.length} intents`);
-
-    const results: ToolSelectionResult[] = [];
-
-    // Process intents in parallel (limited by concurrency)
-    const batchSize = this.config.execution.maxConcurrentTools || 3;
-    for (let i = 0; i < intents.length; i += batchSize) {
-      const batch = intents.slice(i, i + batchSize);
-      logger.info(`[CloudIntentEngine] Processing batch ${i/batchSize + 1} with ${batch.length} intents`);
-      const batchPromises = batch.map(intent => this.selectToolForIntent(intent));
-      const batchResults = await Promise.all(batchPromises);
-      results.push(...batchResults);
-    }
-
-    // Count selection results
-    const successfulSelections = results.filter(r => r.confidence > 0.5).length;
-    logger.info(`[CloudIntentEngine] Tool selection completed: ${successfulSelections}/${intents.length} successful`);
-    logger.debug(`[CloudIntentEngine] Tool selection completed: ${successfulSelections}/${intents.length} successful`);
-
-    return results;
-  }
-
-  /**
-   * Execute workflow
-   */
-  async executeWorkflow(
-    intents: AtomicIntent[],
-    toolSelections: ToolSelectionResult[],
-    edges: DependencyEdge[],
-    toolExecutor: (toolName: string, params: Record<string, any>) => Promise<any>,
-  ): Promise<ExecutionResult> {
-    logger.info(`[CloudIntentEngine] Executing workflow with ${intents.length} steps`);
-
-    const context: ExecutionContext = {
-      results: new Map(),
-      variables: new Map(),
-    };
-
-    const stepResults: ExecutionResult['stepResults'] = [];
-
-    // Build dependency graph
-    const dependencyGraph = this.buildDependencyGraph(intents, edges);
-
-    // Topological sort
-    const executionOrder = this.topologicalSort(dependencyGraph);
-
-    if (!executionOrder) {
       return {
-        success: false,
-        stepResults: [],
-        finalResult: 'Circular dependency detected in workflow',
+        hasToolCall: toolCalls.length > 0,
+        toolCalls,
+        raw: response.raw,
+        provider: response.provider,
+        model: response.model,
+      };
+    } catch (error: any) {
+      logger.error(`[CloudIntentEngine] processQuery failed: ${error.message}`);
+      return {
+        hasToolCall: false,
+        toolCalls: [],
+        raw: null,
+        provider: this.config.llm.provider,
+        model: this.config.llm.model || 'unknown',
       };
     }
-
-    // Execute in order
-    for (const intentId of executionOrder) {
-      const intent = intents.find(i => i.id === intentId);
-      const toolSelection = toolSelections.find(s => s.intentId === intentId);
-
-      if (!intent || !toolSelection) {
-        stepResults.push({
-          intentId,
-          toolName: 'unknown',
-          success: false,
-          error: 'Intent or tool selection not found',
-        });
-        continue;
-      }
-
-      try {
-        // Prepare parameters (support variable substitution)
-        const resolvedParams = this.resolveParameters(
-          toolSelection.mappedParameters,
-          context,
-        );
-
-        // Execute tool
-        const result = await toolExecutor(toolSelection.toolName, resolvedParams);
-
-        // Save result to context
-        context.results.set(intentId, result);
-
-        stepResults.push({
-          intentId,
-          toolName: toolSelection.toolName,
-          success: true,
-          result,
-        });
-
-        logger.info(`[CloudIntentEngine] Step ${intentId} (${toolSelection.toolName}) completed successfully`);
-      } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : String(error);
-        stepResults.push({
-          intentId,
-          toolName: toolSelection.toolName,
-          success: false,
-          error: errorMessage,
-        });
-
-        logger.error(`[CloudIntentEngine] Step ${intentId} (${toolSelection.toolName}) failed: ${errorMessage}`);
-
-        // Decide whether to continue based on configuration
-        if (this.config.execution.retryAttempts) {
-          // Retry logic can be added here
-        }
-      }
-    }
-
-    // Calculate final result
-    const success = stepResults.every(step => step.success);
-    const finalResult = success ? context.results.get(executionOrder[executionOrder.length - 1]) : undefined;
-
-    return {
-      success,
-      finalResult,
-      stepResults,
-    };
   }
 
   /**
-   * Parse and plan workflow (without execution)
+   * Process a conversation history using LLM function calling (multi-turn).
+   *
+   * This is used for multi-turn tool calling where the LLM can call tools,
+   * see results, and decide if more calls are needed.
+   *
+   * The conversation history should include system prompt, user messages,
+   * and assistant messages with tool results.
    */
-  async parseAndPlan(query: string): Promise<WorkflowPlan> {
-    console.log(`[CloudIntentEngine] parseAndPlan called for query: "${query}"`);
-    logger.info(`[CloudIntentEngine] parseAndPlan called for query: "${query}"`);
-    logger.debug(`[CloudIntentEngine] Parsing and planning workflow: "${query}"`);
+  async processQueryWithHistory(
+    messages: Array<{ role: string; content: string }>,
+    options?: {
+      model?: string;
+      temperature?: number;
+      maxTokens?: number;
+      toolChoice?: 'auto' | 'none' | 'required';
+    },
+  ): Promise<FunctionCallingResult & { text?: string }> {
+    logger.debug(`[CloudIntentEngine] processQueryWithHistory called with ${messages.length} messages`);
 
-    const startTime = Date.now();
+    if (this.availableTools.length === 0) {
+      logger.warn('[CloudIntentEngine] No tools available for processQueryWithHistory');
+      return {
+        hasToolCall: false,
+        toolCalls: [],
+        text: '',
+        raw: null,
+        provider: this.config.llm.provider,
+        model: this.config.llm.model || 'unknown',
+      };
+    }
 
     try {
-      // Parse intent
-      console.log(`[CloudIntentEngine] Calling parseIntent for query: "${query}"`);
-      logger.info(`[CloudIntentEngine] Calling parseIntent for query: "${query}"`);
-      const intentResult = await this.parseIntent(query);
-      console.log(`[CloudIntentEngine] parseIntent returned ${intentResult.intents.length} intents`);
-      logger.info(`[CloudIntentEngine] parseIntent returned ${intentResult.intents.length} intents`);
+      const response = await this.llmClient.chat({
+        messages: messages as any,
+        tools: this.toLLMTools(),
+        toolChoice: options?.toolChoice || 'auto',
+        temperature: options?.temperature ?? 0.1,
+        maxTokens: options?.maxTokens ?? 2048,
+      });
 
-      // Select tools
-      console.log(`[CloudIntentEngine] Calling selectTools for ${intentResult.intents.length} intents`);
-      logger.info(`[CloudIntentEngine] Calling selectTools for ${intentResult.intents.length} intents`);
-      const toolSelections = await this.selectTools(intentResult.intents);
-      console.log(`[CloudIntentEngine] selectTools returned ${toolSelections.length} tool selections`);
-      logger.info(`[CloudIntentEngine] selectTools returned ${toolSelections.length} tool selections`);
+      const toolCalls = this.parseToolCalls(response);
 
-      // Build dependency graph and get execution order
-      const dependencyGraph = this.buildDependencyGraph(intentResult.intents, intentResult.edges);
-      const executionOrder = this.topologicalSort(dependencyGraph);
+      logger.debug(`[CloudIntentEngine] processQueryWithHistory result: ${toolCalls.length > 0 ? toolCalls.length + ' tool call(s)' : 'no tool call, text response'}`);
 
-      if (!executionOrder) {
-        throw new Error('Circular dependency detected in workflow');
-      }
+      return {
+        hasToolCall: toolCalls.length > 0,
+        toolCalls,
+        text: response.text,
+        raw: response.raw,
+        provider: response.provider,
+        model: response.model,
+      };
+    } catch (error: any) {
+      logger.error(`[CloudIntentEngine] processQueryWithHistory failed: ${error.message}`);
+      return {
+        hasToolCall: false,
+        toolCalls: [],
+        text: '',
+        raw: null,
+        provider: this.config.llm.provider,
+        model: this.config.llm.model || 'unknown',
+      };
+    }
+  }
 
-      const plan: WorkflowPlan = {
+  // ==================== Plan-then-Execute Methods ====================
+
+  /**
+   * Step 1: Plan — Generate a tool execution plan (DAG) from a user query.
+   *
+   * Uses LLM function calling to analyze the query against available MCP tools
+   * and generate a structured plan with multiple steps and their dependencies.
+   *
+   * The plan is returned WITHOUT executing any tools. The caller should:
+   * 1. Present the plan to the user for confirmation
+   * 2. Call executePlan() with the confirmed plan
+   *
+   * Example:
+   *   const plan = await engine.planQuery('先查上海到北京的高铁，再截图保存');
+   *   // plan.steps = [
+   *   //   { id: 'step_1', toolName: 'get-tickets', arguments: { from: '上海', to: '北京' }, dependsOn: [] },
+   *   //   { id: 'step_2', toolName: 'screenshot', arguments: {}, dependsOn: ['step_1'] },
+   *   // ]
+   */
+  async planQuery(
+    query: string,
+    options?: {
+      systemPrompt?: string;
+      model?: string;
+      temperature?: number;
+      maxTokens?: number;
+    },
+  ): Promise<ToolExecutionPlan> {
+    logger.info(`[CloudIntentEngine] planQuery called: "${query}"`);
+
+    const planId = `plan_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+
+    if (this.availableTools.length === 0) {
+      logger.warn('[CloudIntentEngine] No tools available for planQuery');
+      return {
+        id: planId,
         query,
-        parsedIntents: intentResult.intents,
-        dependencies: intentResult.edges,
-        toolSelections,
-        executionOrder,
-        estimatedSteps: intentResult.intents.length,
+        steps: [],
+        confirmed: false,
         createdAt: new Date(),
+        summary: 'No MCP tools available. Please install MCP services first.',
+      };
+    }
+
+    const systemPrompt = options?.systemPrompt || this.buildPlanSystemPrompt();
+
+    try {
+      // First attempt: try with toolChoice 'auto' (allows LLM to decide)
+      let response = await this.llmClient.chat({
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: query },
+        ],
+        tools: this.toLLMTools(),
+        toolChoice: 'auto',
+        temperature: options?.temperature ?? 0.2,
+        maxTokens: options?.maxTokens ?? 4096,
+      });
+
+      let toolCalls = this.parseToolCalls(response);
+
+      // If no tool calls were made, retry with toolChoice 'auto' and lower temperature
+      if (toolCalls.length === 0) {
+        logger.debug('[CloudIntentEngine] No tool calls in first attempt, retrying with lower temperature');
+        response = await this.llmClient.chat({
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: query },
+          ],
+          tools: this.toLLMTools(),
+          toolChoice: 'auto',
+          temperature: 0.1,
+          maxTokens: options?.maxTokens ?? 4096,
+        });
+        toolCalls = this.parseToolCalls(response);
+      }
+      
+      // If still no tool calls, try with a more explicit prompt
+      if (toolCalls.length === 0) {
+        logger.debug('[CloudIntentEngine] No tool calls in second attempt, retrying with explicit prompt');
+        response = await this.llmClient.chat({
+          messages: [
+            { role: 'system', content: systemPrompt + '\n\nYou MUST select one of the available tools above to fulfill the user\'s request. Pick the tool that directly produces the answer.' },
+            { role: 'user', content: query },
+          ],
+          tools: this.toLLMTools(),
+          toolChoice: 'auto',
+          temperature: 0.1,
+          maxTokens: options?.maxTokens ?? 4096,
+        });
+        toolCalls = this.parseToolCalls(response);
+      }
+      
+      // Convert LLM tool calls into a plan
+      // Note: No post-processing needed — LLM function calling already selects the correct tool
+      // and extracts the right parameters. We fully trust the LLM's tool selection.
+      const steps: PlanStep[] = toolCalls.map((tc, index) => ({
+        id: `step_${index + 1}`,
+        toolName: tc.toolName,
+        description: this.describeToolCall(tc.toolName, tc.arguments),
+        arguments: tc.arguments,
+        dependsOn: index > 0 ? [`step_${index}`] : [],
+      }));
+
+      // Build summary
+      const summary = this.buildPlanSummary(query, steps);
+
+      const plan: ToolExecutionPlan = {
+        id: planId,
+        query,
+        steps,
+        confirmed: false,
+        createdAt: new Date(),
+        summary,
       };
 
-      const duration = Date.now() - startTime;
-      console.log(`[CloudIntentEngine] Workflow plan created in ${duration}ms with ${intentResult.intents.length} steps`);
-      logger.info(`[CloudIntentEngine] Workflow plan created in ${duration}ms with ${intentResult.intents.length} steps`);
-      logger.debug(`[CloudIntentEngine] Workflow plan created in ${duration}ms with ${intentResult.intents.length} steps`);
-
+      logger.info(`[CloudIntentEngine] planQuery generated ${steps.length} steps: ${summary}`);
       return plan;
-    } catch (error) {
-      console.log(`[CloudIntentEngine] Failed to parse and plan workflow: ${error}`);
-      console.log(`[CloudIntentEngine] parseAndPlan error stack: ${error instanceof Error ? error.stack : 'No stack'}`);
-      logger.error(`[CloudIntentEngine] Failed to parse and plan workflow: ${error}`);
-      throw error;
+    } catch (error: any) {
+      logger.error(`[CloudIntentEngine] planQuery failed: ${error.message}`);
+      return {
+        id: planId,
+        query,
+        steps: [],
+        confirmed: false,
+        createdAt: new Date(),
+        summary: `Failed to generate plan: ${error.message}`,
+      };
     }
   }
 
   /**
-   * Execute workflow with enhanced tracking
+   * Step 2: Confirm — Validate and confirm a tool execution plan.
+   *
+   * This method:
+   * 1. Validates the plan structure (no circular deps, valid tool names, etc.)
+   * 2. Calls the confirmation callback for user interaction
+   * 3. Returns the confirmed (or modified) plan
    */
-  async executeWorkflowWithTracking(
-    intents: AtomicIntent[],
-    toolSelections: ToolSelectionResult[],
-    edges: DependencyEdge[],
+  async confirmPlan(
+    plan: ToolExecutionPlan,
+    confirmationCallback?: PlanConfirmationCallback,
+  ): Promise<ToolExecutionPlan> {
+    logger.info(`[CloudIntentEngine] confirmPlan called for plan ${plan.id}`);
+
+    // Validate plan structure
+    const validationErrors = this.validatePlan(plan);
+    if (validationErrors.length > 0) {
+      logger.warn(`[CloudIntentEngine] Plan validation failed: ${validationErrors.join('; ')}`);
+      return {
+        ...plan,
+        summary: `Plan validation failed: ${validationErrors.join('; ')}`,
+      };
+    }
+
+    // If no callback provided, auto-confirm
+    if (!confirmationCallback) {
+      logger.info('[CloudIntentEngine] No confirmation callback, auto-confirming plan');
+      return {
+        ...plan,
+        confirmed: true,
+        confirmedAt: new Date(),
+      };
+    }
+
+    // Call the confirmation callback
+    try {
+      const response = await confirmationCallback(plan);
+
+      if (response.confirmed) {
+        const confirmedPlan: ToolExecutionPlan = {
+          ...(response.modifiedPlan || plan),
+          confirmed: true,
+          confirmedAt: new Date(),
+        };
+        logger.info(`[CloudIntentEngine] Plan ${plan.id} confirmed by user`);
+        return confirmedPlan;
+      } else {
+        logger.info(`[CloudIntentEngine] Plan ${plan.id} rejected by user: ${response.feedback || 'no feedback'}`);
+        return {
+          ...plan,
+          confirmed: false,
+          summary: `User cancelled the plan: ${response.feedback || 'User did not provide feedback'}`,
+        };
+      }
+    } catch (error: any) {
+      logger.error(`[CloudIntentEngine] Confirmation callback failed: ${error.message}`);
+      return {
+        ...plan,
+        confirmed: false,
+        summary: `Confirmation process error: ${error.message}`,
+      };
+    }
+  }
+
+  /**
+   * Step 3: Execute — Execute a confirmed tool execution plan.
+   *
+   * Executes steps in dependency order with:
+   * - Variable substitution ({{step_1.result}})
+   * - Error handling per step
+   * - Duration tracking
+   */
+  async executePlan(
+    plan: ToolExecutionPlan,
     toolExecutor: (toolName: string, params: Record<string, any>) => Promise<any>,
-    callbacks?: {
-      onStepStarted?: (step: { intentId: string; toolName: string; intentDescription: string }) => void;
-      onStepCompleted?: (step: EnhancedExecutionStep) => void;
-      onStepFailed?: (step: EnhancedExecutionStep) => void;
-    },
-  ): Promise<EnhancedExecutionResult> {
-    logger.info(`[CloudIntentEngine] Executing workflow with enhanced tracking for ${intents.length} steps`);
+  ): Promise<PlanExecutionResult> {
+    logger.info(`[CloudIntentEngine] executePlan called for plan ${plan.id} with ${plan.steps.length} steps`);
 
     const startTime = Date.now();
+
+    if (!plan.confirmed) {
+      logger.warn('[CloudIntentEngine] Plan not confirmed, refusing to execute');
+      return {
+        success: false,
+        plan,
+        stepResults: [],
+        totalDuration: 0,
+        finalResult: 'Plan has not been confirmed. Call confirmPlan() first.',
+      };
+    }
+
+    if (plan.steps.length === 0) {
+      logger.warn('[CloudIntentEngine] Plan has no steps');
+      return {
+        success: true,
+        plan,
+        stepResults: [],
+        totalDuration: 0,
+        finalResult: 'No steps to execute.',
+      };
+    }
+
+    // Build execution context for variable substitution
     const context: ExecutionContext = {
       results: new Map(),
       variables: new Map(),
     };
 
-    const executionSteps: EnhancedExecutionStep[] = [];
+    const stepResults: PlanExecutionResult['stepResults'] = [];
 
-    // Build dependency graph
-    const dependencyGraph = this.buildDependencyGraph(intents, edges);
-
-    // Topological sort
-    const executionOrder = this.topologicalSort(dependencyGraph);
+    // Topological sort to determine execution order
+    const executionOrder = this.topologicalSortPlan(plan.steps);
 
     if (!executionOrder) {
       return {
         success: false,
-        parsedIntents: intents,
-        dependencies: edges,
-        toolSelections,
-        executionSteps: [],
-        statistics: {
-          totalSteps: intents.length,
-          successfulSteps: 0,
-          failedSteps: intents.length,
-          totalDuration: Date.now() - startTime,
-          averageStepDuration: 0,
-          llmCalls: 0,
-        },
-        finalResult: 'Circular dependency detected in workflow',
+        plan,
+        stepResults: [],
+        totalDuration: Date.now() - startTime,
+        finalResult: 'Circular dependency detected in plan',
       };
     }
 
-    let successfulSteps = 0;
-    let failedSteps = 0;
-    let totalStepDuration = 0;
-
-    // Execute in order
-    for (const intentId of executionOrder) {
-      const intent = intents.find(i => i.id === intentId);
-      const toolSelection = toolSelections.find(s => s.intentId === intentId);
-
-      if (!intent || !toolSelection) {
-        const errorStep: EnhancedExecutionStep = {
-          intentId,
-          intentDescription: 'Unknown intent',
-          intentType: 'unknown',
-          intentParameters: {},
+    // Execute steps in order
+    for (const stepId of executionOrder) {
+      const step = plan.steps.find(s => s.id === stepId);
+      if (!step) {
+        stepResults.push({
+          stepId,
           toolName: 'unknown',
-          toolDescription: 'No tool selected',
-          mappedParameters: {},
-          confidence: 0,
           success: false,
-          error: 'Intent or tool selection not found',
-          startedAt: new Date(),
-          completedAt: new Date(),
+          error: `Step ${stepId} not found in plan`,
           duration: 0,
-        };
-
-        executionSteps.push(errorStep);
-        failedSteps++;
+        });
         continue;
       }
 
       const stepStartTime = Date.now();
-      const stepStartedAt = new Date();
-
-      // Notify step started
-      if (callbacks?.onStepStarted) {
-        callbacks.onStepStarted({
-          intentId,
-          toolName: toolSelection.toolName,
-          intentDescription: intent.description,
-        });
-      }
 
       try {
-        // Step 1: Resolve parameters (handle variable substitution like {{A1}})
-        let resolvedParams = this.resolveParameters(
-          toolSelection.mappedParameters,
-          context,
-        );
+        // Resolve parameters with variable substitution
+        const resolvedArgs = this.resolvePlanParameters(step.arguments, context);
 
-        // Step 2: Dynamically re-map parameters based on tool's actual schema
-        // This ensures variables replaced from previous steps (which might be objects) 
-        // are correctly aligned to the target tool's expected types (like strings)
-        const bestTool = this.availableTools.find(t => t.name === toolSelection.toolName);
-        if (bestTool) {
-          resolvedParams = ParameterMapper.mapParameters(
-            bestTool.name,
-            bestTool.inputSchema,
-            resolvedParams
-          );
-        }
+        // Execute the tool
+        const result = await toolExecutor(step.toolName, resolvedArgs);
 
-        // Execute tool
-        const result = await toolExecutor(toolSelection.toolName, resolvedParams);
+        // Store result in context
+        context.results.set(step.id, result);
 
-        // Save result to context
-        context.results.set(intentId, result);
+        const duration = Date.now() - stepStartTime;
 
-        const stepDuration = Date.now() - stepStartTime;
-        totalStepDuration += stepDuration;
-
-        const successStep: EnhancedExecutionStep = {
-          intentId,
-          intentDescription: intent.description,
-          intentType: intent.type,
-          intentParameters: intent.parameters,
-          toolName: toolSelection.toolName,
-          toolDescription: toolSelection.toolDescription,
-          mappedParameters: toolSelection.mappedParameters,
-          confidence: toolSelection.confidence,
+        stepResults.push({
+          stepId: step.id,
+          toolName: step.toolName,
           success: true,
           result,
-          startedAt: stepStartedAt,
-          completedAt: new Date(),
-          duration: stepDuration,
-        };
+          duration,
+        });
 
-        executionSteps.push(successStep);
-        successfulSteps++;
+        logger.info(`[CloudIntentEngine] Step ${step.id} (${step.toolName}) completed in ${duration}ms`);
+      } catch (error: any) {
+        const duration = Date.now() - stepStartTime;
+        const errorMessage = error.message || String(error);
 
-        // Notify step completed
-        if (callbacks?.onStepCompleted) {
-          callbacks.onStepCompleted(successStep);
-        }
-
-        logger.info(`[CloudIntentEngine] Step ${intentId} (${toolSelection.toolName}) completed in ${stepDuration}ms`);
-      } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : String(error);
-        const stepDuration = Date.now() - stepStartTime;
-        totalStepDuration += stepDuration;
-
-        const failedStep: EnhancedExecutionStep = {
-          intentId,
-          intentDescription: intent.description,
-          intentType: intent.type,
-          intentParameters: intent.parameters,
-          toolName: toolSelection.toolName,
-          toolDescription: toolSelection.toolDescription,
-          mappedParameters: toolSelection.mappedParameters,
-          confidence: toolSelection.confidence,
+        stepResults.push({
+          stepId: step.id,
+          toolName: step.toolName,
           success: false,
           error: errorMessage,
-          startedAt: stepStartedAt,
-          completedAt: new Date(),
-          duration: stepDuration,
-        };
+          duration,
+        });
 
-        executionSteps.push(failedStep);
-        failedSteps++;
+        logger.error(`[CloudIntentEngine] Step ${step.id} (${step.toolName}) failed: ${errorMessage}`);
 
-        // Notify step failed
-        if (callbacks?.onStepFailed) {
-          callbacks.onStepFailed(failedStep);
-        }
-
-        logger.error(`[CloudIntentEngine] Step ${intentId} (${toolSelection.toolName}) failed in ${stepDuration}ms: ${errorMessage}`);
-
-        // Decide whether to continue based on configuration
-        if (this.config.execution.retryAttempts) {
-          // Retry logic can be added here
-        }
+        // Stop execution on first failure
+        break;
       }
     }
 
     const totalDuration = Date.now() - startTime;
-    const averageStepDuration = executionSteps.length > 0 ? totalStepDuration / executionSteps.length : 0;
-
-    // Calculate final result
-    const success = executionSteps.every(step => step.success);
-    const finalResult = success ? context.results.get(executionOrder[executionOrder.length - 1]) : undefined;
+    const success = stepResults.every(sr => sr.success);
+    const finalResult = success
+      ? stepResults[stepResults.length - 1]?.result
+      : undefined;
 
     return {
       success,
+      plan,
+      stepResults,
       finalResult,
-      parsedIntents: intents,
-      dependencies: edges,
-      toolSelections,
-      executionSteps,
-      statistics: {
-        totalSteps: intents.length,
-        successfulSteps,
-        failedSteps,
-        totalDuration,
-        averageStepDuration,
-        llmCalls: 0, // This would need to be tracked during parsing and tool selection
-      },
+      totalDuration,
     };
   }
 
   /**
-   * Preview workflow plan (parse and select tools only)
+   * Convenience method: Plan → Confirm → Execute in one call.
+   *
+   * This is the recommended entry point for the Plan-then-Execute flow.
    */
-  async previewPlan(query: string): Promise<WorkflowPlan> {
-    return await this.parseAndPlan(query);
-  }
-
-  /**
-   * Confirm and execute workflow plan
-   */
-  async confirmAndExecute(
-    plan: WorkflowPlan,
+  async planAndExecute(
+    query: string,
+    confirmationCallback: PlanConfirmationCallback,
     toolExecutor: (toolName: string, params: Record<string, any>) => Promise<any>,
-    callbacks?: {
-      onStepStarted?: (step: { intentId: string; toolName: string; intentDescription: string }) => void;
-      onStepCompleted?: (step: EnhancedExecutionStep) => void;
-      onStepFailed?: (step: EnhancedExecutionStep) => void;
+    options?: {
+      systemPrompt?: string;
+      model?: string;
+      temperature?: number;
     },
-  ): Promise<EnhancedExecutionResult> {
-    logger.info(`[CloudIntentEngine] Confirming and executing workflow plan with ${plan.estimatedSteps} steps`);
+  ): Promise<PlanExecutionResult> {
+    logger.info(`[CloudIntentEngine] planAndExecute called: "${query}"`);
 
-    return await this.executeWorkflowWithTracking(
-      plan.parsedIntents,
-      plan.toolSelections,
-      plan.dependencies,
-      toolExecutor,
-      callbacks,
-    );
+    // Step 1: Plan
+    const plan = await this.planQuery(query, options);
+    if (plan.steps.length === 0) {
+      return {
+        success: false,
+        plan,
+        stepResults: [],
+        totalDuration: 0,
+        finalResult: plan.summary,
+      };
+    }
+
+    // Step 2: Confirm
+    const confirmedPlan = await this.confirmPlan(plan, confirmationCallback);
+    if (!confirmedPlan.confirmed) {
+      return {
+        success: false,
+        plan: confirmedPlan,
+        stepResults: [],
+        totalDuration: 0,
+        finalResult: confirmedPlan.summary,
+      };
+    }
+
+    // Step 3: Execute
+    return await this.executePlan(confirmedPlan, toolExecutor);
   }
 
-  // ==================== Private Methods ====================
+  // ==================== Plan-then-Execute Private Helpers ====================
 
   /**
-   * Build intent parsing prompt with minimal decomposition principle
-   * Generic SDK approach - no domain-specific hardcoding
+   * Build the system prompt for plan generation
    */
-  private buildIntentParsePrompt(query: string): string {
-    // Get available tools information for context
-    const toolContext = this.generateToolContextForPrompt();
+  private buildPlanSystemPrompt(): string {
+    return `You are an intelligent tool orchestration planner. Your job is to select the EXACT tool that fulfills the user's request.
 
-    return `You are an intelligent workflow analyzer. Please analyze the following user query and decide whether it needs to be decomposed into multiple steps.
+AVAILABLE TOOLS:
+${this.availableTools.map(t => `- ${t.name}: ${t.description || 'No description'}`).join('\n')}
 
-## User Query
-"${query}"
+RULES:
+1. Select the tool that DIRECTLY produces the answer the user wants — the tool whose description best matches the user's intent
+2. Extract ALL parameters from the user's query and pass them to the tool
+3. For simple queries (a single action), use EXACTLY ONE tool call
+4. DO NOT call helper/intermediate tools unless the user explicitly asks for them — pick the tool that directly fulfills the request
+5. If the user asks for data or information, pick the tool that retrieves that data directly
+6. When a user asks to "query" or "search" for something, look for a tool whose name or description contains words like "query", "search", "get", "list", "find" that match the subject of the query
 
-## Available Tools Context
-${toolContext}
+IMPORTANT: Call the tool that directly fulfills the user's request. Each tool call becomes a step in the execution plan.
 
-## Analysis Principles (IMPORTANT)
-
-### 1. MINIMAL DECOMPOSITION PRINCIPLE
-- **Default: Single Intent** - Most queries should be kept as a single intent
-- **Only decompose when explicitly needed** - Only if the query clearly requires multiple independent steps
-- **Single tool priority** - If a single tool can handle the entire query, use a single intent
-
-### 2. WHEN TO DECOMPOSE (Only in these cases):
-- Query contains explicit sequence markers: "then", "next", "after that", "and then", "first...then..."
-- Query describes multiple independent actions: "analyze X and send to Y", "fetch data and process it"
-- No single tool can handle all requirements
-
-### 3. WHEN TO KEEP SINGLE INTENT (Most cases):
-- Simple queries: "search for X", "get information about Y", "query data"
-- Single action queries: "open website", "take screenshot", "send message"
-- Tool-specific queries: queries that match a specific tool's purpose
-- Queries that a single tool can handle completely
-
-### 4. GENERAL GUIDELINES:
-- Simple data retrieval queries → SINGLE intent
-- Information search queries → SINGLE intent
-- Complex workflows with multiple actions → MAY need decomposition
-- Queries with temporal sequence → MAY need decomposition
-
-## Output Format
-Please output JSON with the following structure:
-
-{
-  "intents": [
-    {
-      "id": "A1",
-      "type": "action_type",
-      "description": "Step description",
-      "parameters": {}
-    }
-  ],
-  "edges": []
-}
-
-## Important Notes:
-1. Most queries should have only ONE intent in the "intents" array
-2. Only add multiple intents if decomposition is absolutely necessary
-3. For single intents, use the most appropriate tool name as the "type"
-4. For parameters, extract relevant information from the query
-5. Consider tool capabilities when deciding decomposition
-
-## Example Outputs:
-
-Example 1 (Single intent - simple query):
-{
-  "intents": [
-    {
-      "id": "A1",
-      "type": "search",
-      "description": "Search for information",
-      "parameters": {
-        "query": "latest AI developments"
-      }
-    }
-  ],
-  "edges": []
-}
-
-Example 2 (Single intent - data retrieval):
-{
-  "intents": [
-    {
-      "id": "A1",
-      "type": "get_data",
-      "description": "Retrieve data",
-      "parameters": {
-        "query": "customer information"
-      }
-    }
-  ],
-  "edges": []
-}
-
-Example 3 (Multiple intents - only when explicitly needed):
-{
-  "intents": [
-    {
-      "id": "A1",
-      "type": "fetch_details",
-      "description": "Get details from source",
-      "parameters": {
-        "source": "database",
-        "id": 123
-      }
-    },
-    {
-      "id": "A2",
-      "type": "analyze_content",
-      "description": "Analyze content",
-      "parameters": {
-        "content": "{{A1}}"
-      }
-    },
-    {
-      "id": "A3",
-      "type": "send_message",
-      "description": "Send analysis report",
-      "parameters": {
-        "channel": "#reports",
-        "message": "{{A2}}"
-      }
-    }
-  ],
-  "edges": [
-    {"from": "A1", "to": "A2"},
-    {"from": "A2", "to": "A3"}
-  ]
-}
-
-Output only JSON, no other content.`;
+CRITICAL: Some tools are "helper" or "intermediate" tools that only prepare data for other tools. For example:
+- A tool that looks up codes or IDs is a helper tool — it does NOT produce the final answer
+- A tool that retrieves the actual data (tickets, files, weather, etc.) is the FINAL tool
+- If you need a helper tool AND a final tool, you MUST call BOTH in sequence
+- NEVER select a helper tool as the only tool — it won't produce the answer the user wants`;
   }
 
   /**
-   * Generate tool context for prompt
+   * Build a human-readable summary of the plan
    */
-  private generateToolContextForPrompt(): string {
-    if (!this.availableTools || this.availableTools.length === 0) {
-      return 'No tools available.';
+  private buildPlanSummary(query: string, steps: PlanStep[]): string {
+    if (steps.length === 0) {
+      return 'No execution steps were generated.';
     }
 
-    // Group tools by likely capability
-    const singleStepTools = this.availableTools.filter(tool =>
-      this.isLikelySingleStepTool(tool),
-    );
+    const stepDescriptions = steps.map((step, i) => {
+      const deps = step.dependsOn.length > 0
+        ? ` (depends on: ${step.dependsOn.join(', ')})`
+        : '';
+      return `${i + 1}. ${step.description}${deps}`;
+    });
 
-    const multiStepTools = this.availableTools.filter(tool =>
-      !this.isLikelySingleStepTool(tool),
-    );
+    return `Will execute ${steps.length} steps:\n${stepDescriptions.join('\n')}`;
+  }
 
-    let context = 'Available tools:\n';
+  /**
+   * Describe a tool call in human-readable form
+   */
+  private describeToolCall(toolName: string, args: Record<string, any>): string {
+    const tool = this.toolCache.get(toolName);
+    const toolDesc = tool?.description || toolName;
 
-    if (singleStepTools.length > 0) {
-      context += '\nSingle-step tools (can handle complete queries):\n';
-      singleStepTools.forEach(tool => {
-        context += `- ${tool.name}: ${tool.description}\n`;
+    // Try to extract key parameters for a more descriptive summary
+    const keyParams = Object.entries(args)
+      .filter(([key]) => !['query', 'text', 'input'].includes(key))
+      .slice(0, 3)
+      .map(([key, value]) => {
+        const strValue = typeof value === 'string' ? value : JSON.stringify(value);
+        return `${key}=${strValue}`;
       });
+
+    if (keyParams.length > 0) {
+      return `${toolDesc} (${keyParams.join(', ')})`;
     }
 
-    if (multiStepTools.length > 0) {
-      context += '\nMulti-step tools (may need decomposition):\n';
-      multiStepTools.forEach(tool => {
-        context += `- ${tool.name}: ${tool.description}\n`;
-      });
-    }
-
-    return context;
+    return toolDesc;
   }
 
   /**
-   * Check if a tool is likely single-step
+   * Validate a plan's structure
    */
-  private isLikelySingleStepTool(tool: Tool): boolean {
-    const toolName = tool.name.toLowerCase();
+  private validatePlan(plan: ToolExecutionPlan): string[] {
+    const errors: string[] = [];
 
-    // Single-step tool patterns
-    const singleStepPatterns = [
-      /^get-/, /^fetch-/, /^query-/, /^search-/, /^find-/, /^lookup-/,
-      /^read-/, /^retrieve-/, /^open-/, /^close-/, /^start-/, /^stop-/,
-      /^create-/, /^delete-/, /^update-/, /^send-/, /^post-/, /^notify-/,
-    ];
+    if (!plan.id) errors.push('Plan ID is required');
+    if (!plan.query) errors.push('Plan query is required');
 
-    // Multi-step tool patterns
-    const multiStepPatterns = [
-      /^analyze-/, /^process-/, /^transform-/, /^pipeline-/,
-      /^workflow-/, /^orchestrate-/, /^coordinate-/,
-    ];
+    // Validate each step
+    const stepIds = new Set<string>();
+    for (const step of plan.steps) {
+      if (!step.id) errors.push('Step ID is required');
+      if (stepIds.has(step.id)) errors.push(`Duplicate step ID: ${step.id}`);
+      stepIds.add(step.id);
 
-    // Check patterns
-    if (singleStepPatterns.some(pattern => pattern.test(toolName))) {
+      if (!step.toolName) errors.push(`Step ${step.id}: toolName is required`);
+
+      // Validate dependencies reference existing steps
+      for (const dep of step.dependsOn) {
+        if (!plan.steps.find(s => s.id === dep)) {
+          errors.push(`Step ${step.id}: dependency ${dep} not found`);
+        }
+      }
+    }
+
+    return errors;
+  }
+
+  /**
+   * Topological sort of plan steps
+   */
+  private topologicalSortPlan(steps: PlanStep[]): string[] | null {
+    const visited = new Set<string>();
+    const visiting = new Set<string>();
+    const order: string[] = [];
+
+    function visit(stepId: string, stepMap: Map<string, PlanStep>): boolean {
+      if (visited.has(stepId)) return true;
+      if (visiting.has(stepId)) return false; // Circular dependency
+
+      visiting.add(stepId);
+
+      const step = stepMap.get(stepId);
+      if (step) {
+        for (const dep of step.dependsOn) {
+          if (!visit(dep, stepMap)) return false;
+        }
+      }
+
+      visiting.delete(stepId);
+      visited.add(stepId);
+      order.push(stepId);
       return true;
     }
 
-    if (multiStepPatterns.some(pattern => pattern.test(toolName))) {
-      return false;
+    const stepMap = new Map(steps.map(s => [s.id, s]));
+
+    for (const step of steps) {
+      if (!visit(step.id, stepMap)) return null; // Circular dependency
     }
 
-    // Default: assume single-step for simplicity
-    return true;
+    return order;
   }
 
   /**
-   * Call LLM with automatic initialization retry
+   * Resolve plan parameters with variable substitution
    */
-  private async callLLM(prompt: string, options?: {
-    temperature?: number;
-    maxTokens?: number;
-  }): Promise<string> {
-    try {
-      // Use AI's raw API call
-      const response = await this.ai.callRawAPI({
-        messages: [
-          {
-            role: 'system',
-            content: 'You are a workflow parser, please output strictly in JSON format as required.',
-          },
-          {
-            role: 'user',
-            content: prompt,
-          },
-        ],
-        temperature: options?.temperature || 0.1,
-        maxTokens: options?.maxTokens || 1024,
-        responseFormat: { type: 'json_object' },
-      });
-
-      // Extract text content from response based on provider
-      let text = '';
-
-      if (response.choices && response.choices[0]?.message?.content) {
-        // OpenAI, Azure, DeepSeek format
-        text = response.choices[0].message.content;
-      } else if (response.content && response.content[0]?.text) {
-        // Anthropic format
-        text = response.content[0].text;
-      } else if (response.candidates && response.candidates[0]?.content?.parts?.[0]?.text) {
-        // Google format
-        text = response.candidates[0].content.parts[0].text;
-      } else if (response.response) {
-        // Ollama format
-        text = response.response;
-      } else if (response.text) {
-        // Generic format
-        text = response.text;
-      }
-
-      if (!text) {
-        throw new Error('Empty response from LLM');
-      }
-
-      return text;
-    } catch (error: any) {
-      // Check if error is due to AI not configured
-      const isConfigError = error.message?.includes('AI provider not configured') || 
-                           error.message?.includes('AI_NOT_CONFIGURED') ||
-                           error.code === 'AI_NOT_CONFIGURED';
-      
-      if (isConfigError) {
-        logger.warn(`[CloudIntentEngine] AI not configured, attempting to initialize: ${error.message}`);
-        
-        try {
-          // Try to initialize AI
-          await this.initialize();
-          logger.info('[CloudIntentEngine] AI initialized successfully, retrying LLM call');
-          
-          // Retry the LLM call
-          const response = await this.ai.callRawAPI({
-            messages: [
-              {
-                role: 'system',
-                content: 'You are a workflow parser, please output strictly in JSON format as required.',
-              },
-              {
-                role: 'user',
-                content: prompt,
-              },
-            ],
-            temperature: options?.temperature || 0.1,
-            maxTokens: options?.maxTokens || 1024,
-            responseFormat: { type: 'json_object' },
-          });
-
-          // Extract text content from response based on provider
-          let text = '';
-
-          if (response.choices && response.choices[0]?.message?.content) {
-            text = response.choices[0].message.content;
-          } else if (response.content && response.content[0]?.text) {
-            text = response.content[0].text;
-          } else if (response.candidates && response.candidates[0]?.content?.parts?.[0]?.text) {
-            text = response.candidates[0].content.parts[0].text;
-          } else if (response.response) {
-            text = response.response;
-          } else if (response.text) {
-            text = response.text;
-          }
-
-          if (!text) {
-            throw new Error('Empty response from LLM after retry');
-          }
-
-          return text;
-        } catch (retryError: any) {
-          logger.error(`[CloudIntentEngine] LLM call failed after retry: ${retryError}`);
-          throw new Error(`AI configuration failed: ${retryError.message}`);
-        }
-      } else {
-        logger.error(`[CloudIntentEngine] LLM call failed: ${error}`);
-        throw error;
-      }
-    }
-  }
-
-  /**
-   * Parse intent response
-   */
-  private parseIntentResponse(response: string): IntentParseResult {
-    try {
-      // Extract JSON part (handle possible extra text)
-      const jsonMatch = response.match(/\{[\s\S]*\}/);
-      if (!jsonMatch) {
-        throw new Error('No JSON found in response');
-      }
-
-      const parsed = JSON.parse(jsonMatch[0]);
-
-      // Validate structure
-      if (!Array.isArray(parsed.intents) || !Array.isArray(parsed.edges)) {
-        throw new Error('Invalid response structure');
-      }
-
-      // Validate and sanitize each intent to prevent undefined type/description
-      parsed.intents.forEach((intent: any, index: number) => {
-        if (!intent.id) {
-          intent.id = `A${index + 1}`;
-        }
-        if (!intent.type || typeof intent.type !== 'string') {
-          intent.type = 'process';
-        }
-        if (!intent.description || typeof intent.description !== 'string') {
-          intent.description = 'Process query';
-        }
-        if (!intent.parameters || typeof intent.parameters !== 'object') {
-          intent.parameters = {};
-        }
-      });
-
-      return {
-        intents: parsed.intents,
-        edges: parsed.edges,
-      };
-    } catch (error) {
-      logger.error(`[CloudIntentEngine] Failed to parse intent response: ${error}`);
-      throw error;
-    }
-  }
-
-
-  /**
-   * Fallback: use simple rule-based intent parsing
-   */
-  private fallbackIntentParse(query: string): IntentParseResult {
-    const queryLower = query.toLowerCase();
-    const intents: AtomicIntent[] = [];
-    const edges: DependencyEdge[] = [];
-
-    let intentCounter = 1;
-
-    // Simple rule matching
-    if (queryLower.includes('open') && queryLower.includes('web')) {
-      intents.push({
-        id: `A${intentCounter++}`,
-        type: 'open_web',
-        description: 'Open webpage',
-        parameters: { url: this.extractUrl(query) || 'https://www.example.com' },
-      });
-    }
-
-    if (queryLower.includes('search')) {
-      intents.push({
-        id: `A${intentCounter++}`,
-        type: 'search',
-        description: 'Search content',
-        parameters: { keyword: this.extractKeyword(query) || 'default' },
-      });
-
-      // Add dependency if there's an open web intent
-      if (intents.some(i => i.type === 'open_web')) {
-        edges.push({ from: 'A1', to: 'A2' });
-      }
-    }
-
-    if (queryLower.includes('screenshot') || queryLower.includes('capture')) {
-      intents.push({
-        id: `A${intentCounter++}`,
-        type: 'screenshot',
-        description: 'Take screenshot',
-        parameters: {},
-      });
-
-      // Add dependency if there's a search intent
-      if (intents.some(i => i.type === 'search')) {
-        const searchIntent = intents.find(i => i.type === 'search');
-        const screenshotIntent = intents.find(i => i.type === 'screenshot');
-        if (searchIntent && screenshotIntent) {
-          edges.push({ from: searchIntent.id, to: screenshotIntent.id });
-        }
-      }
-    }
-
-    // If no intent matched, create a generic intent
-    if (intents.length === 0) {
-      // Try to extract parameters from Chinese query
-      const extractedParams = this.extractParametersFromGenericQuery(query);
-      
-      intents.push({
-        id: 'A1',
-        type: 'process',
-        description: 'Process query',
-        parameters: extractedParams,
-      });
-    }
-
-    return { intents, edges };
-  }
-
-  /**
-   * Select tool for a single intent with enhanced error handling and fallback strategies
-   */
-  private async selectToolForIntent(intent: AtomicIntent): Promise<ToolSelectionResult> {
-    console.log(`[CloudIntentEngine] selectToolForIntent called for intent ${intent.id}: "${intent.description}"`);
-    
-    // If tool list is empty, return default result
-    if (this.availableTools.length === 0) {
-      console.log(`[CloudIntentEngine] No tools available for intent ${intent.id}: ${intent.description}`);
-      return {
-        intentId: intent.id,
-        toolName: 'unknown',
-        toolDescription: 'No tools available',
-        mappedParameters: intent.parameters,
-        confidence: 0,
-      };
-    }
-
-    console.log(`[CloudIntentEngine] Available tools count: ${this.availableTools.length}`);
-
-    // Step 1: Perform FlexSearch to get initial candidates and rankings (High Performance)
-    const searchRankings = new Map<string, number>();
-    
-    if (this.toolRegistry) {
-      console.log(`[CloudIntentEngine] Using ToolRegistry FlexSearch for intent ${intent.id}`);
-      const searchResults = this.toolRegistry.searchTools(intent.description);
-      
-      // Map rankings (normalize score based on position for now)
-      searchResults.forEach((rt, index) => {
-        const score = 1.0 - (index * 0.1); // Linear decay
-        searchRankings.set(rt.tool.name, Math.max(0.1, score));
-      });
-      
-      if (searchResults.length > 0) {
-        console.log(`[CloudIntentEngine] FlexSearch found ${searchResults.length} candidates`);
-      }
-    }
-
-    // Step 2: Use ToolScorer with FlexSearch context (Hybrid Multi-dimensional Scoring)
-    try {
-      console.log(`[CloudIntentEngine] Attempting Hybrid ToolScorer selection for intent ${intent.id}`);
-      const scoredResults = ToolScorer.scoreAll(intent, this.availableTools, {
-        historicalUsage: new Map(), // Could be populated from registry metadata
-        userPreferences: {},
-        searchRankings: searchRankings
-      });
-      
-      // If confidence is high enough, we can skip LLM and return immediately
-      if (scoredResults.length > 0 && scoredResults[0].confidence > 0.7) {
-        const best = scoredResults[0];
-        const bestTool = this.availableTools.find(t => t.name === best.toolName);
-        console.log(`[CloudIntentEngine] Hybrid Scorer selected tool '${best.toolName}' with confidence ${best.confidence}`);
-        return {
-          intentId: intent.id,
-          toolName: best.toolName,
-          toolDescription: bestTool?.description || 'No description available',
-          mappedParameters: this.simpleParameterMapping(intent.parameters, bestTool || this.availableTools[0]),
-          confidence: best.confidence,
-        };
-      }
-    } catch (scorerError) {
-      console.log(`[CloudIntentEngine] Hybrid Scorer selection failed: ${scorerError}`);
-    }
-
-    // Step 3: LLM-based tool selection (Fallback/Verification for complex cases)
-    console.log(`[CloudIntentEngine] Falling back to LLM-based tool selection for intent ${intent.id}`);
-
-    // Build tool selection prompt
-    const prompt = this.buildToolSelectionPrompt(intent);
-    // ... (rest of LLM logic can remain similar, but now it's a fallback)
-
-    // Strategy 4: Fallback to basic keyword matching
-    console.log(`[CloudIntentEngine] Falling back to basic keyword matching for intent ${intent.id}`);
-    const fallbackMatch = this.fallbackToolSelection(intent);
-
-    if (fallbackMatch.confidence > 0.3) {
-      console.log(`[CloudIntentEngine] Keyword matching selected tool '${fallbackMatch.toolName}' for intent ${intent.id} with confidence ${fallbackMatch.confidence}`);
-      return fallbackMatch;
-    }
-
-    // Strategy 5: Try to find any tool that can handle the intent type
-    console.log(`[CloudIntentEngine] Attempting intent-type based matching for intent ${intent.id}`);
-    const typeBasedMatch = this.intentTypeBasedToolSelection(intent);
-    if (typeBasedMatch && typeBasedMatch.confidence > 0.2) {
-      console.log(`[CloudIntentEngine] Type-based matching selected tool '${typeBasedMatch.toolName}' for intent ${intent.id} with confidence ${typeBasedMatch.confidence}`);
-      return typeBasedMatch;
-    }
-
-    // Last resort: Return unknown tool with intent parameters
-    console.log(`[CloudIntentEngine] No suitable tool found for intent ${intent.id}: ${intent.description}`);
-    return {
-      intentId: intent.id,
-      toolName: 'unknown',
-      toolDescription: 'No suitable tool found for this intent',
-      mappedParameters: intent.parameters,
-      confidence: 0,
-    };
-  }
-
-  /**
-   * Build tool selection prompt with enhanced parameter extraction guidance
-   * Uses dynamic examples from tool metadata (Tool.examples) instead of hardcoded examples
-   */
-  private buildToolSelectionPrompt(intent: AtomicIntent): string {
-    // Format tool list as string
-    const toolsDescription = this.availableTools.map(tool => {
-      const schema = tool.inputSchema;
-      const properties = schema.properties || {};
-      const required = schema.required || [];
-      
-      // Create a more readable parameter description
-      const paramDescriptions = Object.entries(properties).map(([paramName, paramSchema]: [string, any]) => {
-        const isRequired = required.includes(paramName);
-        const type = paramSchema.type || 'any';
-        const description = paramSchema.description || '';
-        const example = paramSchema.example || '';
-        
-        let paramDesc = `    - ${paramName} (${type}${isRequired ? ', required' : ''})`;
-        if (description) paramDesc += `: ${description}`;
-        if (example) paramDesc += `, e.g.: ${example}`;
-        
-        return paramDesc;
-      }).join('\n');
-      
-      return `- ${tool.name}: ${tool.description}
-  Parameters:
-${paramDescriptions}`;
-    }).join('\n\n');
-
-    // Generate dynamic examples from tool metadata
-    const examplesSection = ToolExampleProvider.generateExamplesSection(
-      this.availableTools,
-      4, // max 4 examples
-    );
-
-    return `You are an intelligent tool selector. Your task is to:
-1. Select the most appropriate tool for the user's intent
-2. Extract ALL parameter values from the user's intent text
-3. Map extracted values to the tool's parameters
-
-## User Intent
-"${intent.description}"
-
-## Available Tools
-${toolsDescription}
-
-## CRITICAL INSTRUCTIONS FOR PARAMETER EXTRACTION
-
-### 1. EXTRACT ALL VALUES DIRECTLY FROM THE USER INTENT TEXT
-Carefully analyze the user's intent text and extract ALL specific values mentioned. This is your PRIMARY source of information:
-- **Locations**: Extract city names, addresses, place names in ANY language (e.g., "北京", "New York", "广州", "Tokyo")
-- **Dates**: Extract dates in any format (e.g., "2024-12-25", "tomorrow", "next Monday", "2026年6月1日")
-- **Numbers**: Extract quantities, counts, IDs, amounts
-- **Keywords**: Extract specific terms, filters, types (e.g., "高铁", "express", "premium", "urgent")
-- **Text content**: Extract any specific text, queries, messages
-
-### 2. MAP EXTRACTED VALUES TO TOOL PARAMETERS
-For each tool parameter, find the corresponding value in the user's intent:
-- **Location parameters** (from, to, source, destination, origin, target, path, address, station):
-  - Look for patterns in ANY language: "from X to Y", "X to Y", "从X到Y", "X到Y", "X-Y", "X→Y"
-  - Extract location names mentioned in the intent regardless of language
-  
-- **Date parameters** (date, time, datetime, timestamp):
-  - Extract dates in any format (both "2026-06-01" and "2026年6月1日")
-  - Convert relative dates: "today" → current date, "tomorrow" → next day's date
-  
-- **Filter parameters** (filter, type, category, flags, mode):
-  - Look for keywords that indicate filtering criteria (e.g., "高铁" → "G", "动车" → "D")
-  
-- **Text parameters** (query, text, content, message, keyword, name):
-  - Extract the relevant text content from the intent
-
-### 3. IGNORE LOW-QUALITY CONTEXT PARAMETERS
-The context parameters from previous analysis may contain generic fields like "keywords", "query", "text", "numbers" that are NOT reliable.
-- DO NOT rely on these generic fields for parameter extraction
-- ALWAYS extract values directly from the User Intent text instead
-- The User Intent text is your authoritative source
-
-### 4. HANDLE MISSING PARAMETERS
-- If a parameter value cannot be extracted from the user's intent, OMIT it entirely (do NOT include it in the arguments object)
-- NEVER use null for any parameter value - just don't include the parameter
-- For optional parameters with defaults, omitting them lets the server use its default value
-- Document any assumptions made
-
-## EXAMPLES
-${examplesSection || `Example 1: Simple query
-User Intent: "Execute the tool with default parameters"
-Selected Tool: ${this.availableTools[0]?.name || 'unknown'}
-Arguments:
-{}`}
-
-## OUTPUT FORMAT
-Output ONLY JSON in this exact format:
-{
-  "tool_name": "selected_tool_name",
-  "arguments": {
-    // Map ALL extracted values to tool parameters
-    // OMIT any parameter whose value cannot be determined (do NOT include it)
-  },
-  "confidence": 0.95 // Confidence score (0-1)
-}
-
-IMPORTANT: DO NOT output any text before or after the JSON.`;
-  }
-
-  /**
-   * Parse tool selection response with intelligent parameter mapping
-   */
-  private parseToolSelectionResponse(response: string, intent: AtomicIntent): ToolSelectionResult {
-    try {
-      logger.info(`[CloudIntentEngine] Raw LLM response for intent ${intent.id}: ${response.substring(0, 500)}...`);
-      
-      const jsonMatch = response.match(/\{[\s\S]*\}/);
-      if (!jsonMatch) {
-        throw new Error('No JSON found in response');
-      }
-
-      const parsed = JSON.parse(jsonMatch[0]);
-      logger.info(`[CloudIntentEngine] Parsed LLM response for intent ${intent.id}: ${JSON.stringify(parsed, null, 2)}`);
-
-      // Validate structure
-      if (!parsed.tool_name || !parsed.arguments || typeof parsed.confidence !== 'number') {
-        throw new Error('Invalid tool selection response structure');
-      }
-
-      // Get tool details from cache
-      const tool = this.toolCache.get(parsed.tool_name);
-      logger.info(`[CloudIntentEngine] Found tool in cache for ${parsed.tool_name}:`, {
-        hasTool: !!tool,
-        hasInputSchema: !!(tool?.inputSchema),
-        toolDescription: tool?.description
-      });
-
-      // Initialize mapped parameters with LLM-generated arguments
-      let mappedParameters = parsed.arguments;
-      logger.info(`[CloudIntentEngine] LLM generated arguments for ${parsed.tool_name}: ${JSON.stringify(mappedParameters, null, 2)}`);
-
-      // Merge context parameters from Phase 1 if they are not present in Phase 2 result
-      if (intent.parameters && Object.keys(intent.parameters).length > 0) {
-        logger.info(`[CloudIntentEngine] Merging Phase 1 parameters for ${parsed.tool_name}: ${JSON.stringify(intent.parameters, null, 2)}`);
-        
-        // Use ParameterMapper to map Phase 1 parameters to tool schema names
-        if (tool && tool.inputSchema) {
-          try {
-            const { normalized } = ParameterMapper.validateAndNormalize(
-              parsed.tool_name,
-              tool.inputSchema,
-              { ...intent.parameters, ...mappedParameters }
-            );
-            mappedParameters = normalized;
-            logger.info(`[CloudIntentEngine] Successfully merged and normalized parameters: ${JSON.stringify(mappedParameters, null, 2)}`);
-          } catch (error) {
-            logger.warn(`[CloudIntentEngine] Failed to merge/normalize Phase 1 parameters for ${parsed.tool_name}:`, error);
-            // Fallback: simple merge
-            mappedParameters = { ...intent.parameters, ...mappedParameters };
-          }
-        } else {
-          mappedParameters = { ...intent.parameters, ...mappedParameters };
-        }
-      }
-
-      // Apply intelligent parameter mapping if tool schema is available
-      if (tool && tool.inputSchema) {
-        try {
-          logger.info(`[CloudIntentEngine] Tool input schema for ${parsed.tool_name}: ${JSON.stringify(tool.inputSchema, null, 2)}`);
-          
-          // Use ParameterMapper to normalize and map parameters
-          const { normalized, warnings } = ParameterMapper.validateAndNormalize(
-            parsed.tool_name,
-            tool.inputSchema,
-            mappedParameters
-          );
-
-          mappedParameters = normalized;
-
-          // Log warnings if any
-          if (warnings.length > 0) {
-            logger.info(`[CloudIntentEngine] Parameter mapping warnings for tool ${parsed.tool_name}: ${JSON.stringify(warnings, null, 2)}`);
-          }
-
-          logger.info(`[CloudIntentEngine] Mapped parameters for tool ${parsed.tool_name}:`, {
-            original: parsed.arguments,
-            mapped: mappedParameters
-          });
-        } catch (mappingError) {
-          // If mapping fails, keep original parameters but log warning
-          logger.warn(`[CloudIntentEngine] Parameter mapping failed for tool ${parsed.tool_name}:`, mappingError);
-          // Keep original parameters as fallback
-        }
-      } else {
-        logger.info(`[CloudIntentEngine] No tool schema available for ${parsed.tool_name}, using original parameters`);
-      }
-
-      // Check if all parameters are null or undefined
-      const allParamsNull = Object.values(mappedParameters).every(v => v === null || v === undefined);
-      if (allParamsNull && tool && tool.inputSchema) {
-        logger.info(`[CloudIntentEngine] All parameters are null for tool ${parsed.tool_name}, attempting to extract from query text`);
-        
-        // Try to extract parameters from the intent description
-        const extractedParams = this.extractParametersFromQuery(intent.description, tool.inputSchema);
-        
-        if (Object.keys(extractedParams).length > 0) {
-          logger.info(`[CloudIntentEngine] Extracted ${Object.keys(extractedParams).length} parameters from query text: ${JSON.stringify(extractedParams, null, 2)}`);
-          mappedParameters = { ...mappedParameters, ...extractedParams };
-        } else {
-          logger.info(`[CloudIntentEngine] No parameters could be extracted from query text`);
-        }
-      }
-
-      return {
-        intentId: intent.id,
-        toolName: parsed.tool_name,
-        toolDescription: tool?.description || 'No description available',
-        mappedParameters,
-        confidence: parsed.confidence,
-      };
-    } catch (error) {
-      logger.error(`[CloudIntentEngine] Failed to parse tool selection response: ${error}`);
-      throw error;
-    }
-  }
-
-  /**
-   * Fallback tool selection using keyword matching
-   * Enhanced with multilingual keyword extraction (same as CLI's guessToolsForQuery)
-   */
-  private fallbackToolSelection(intent: AtomicIntent): ToolSelectionResult {
-    // Extract keywords from intent description (supports Chinese, English, etc.)
-    const intentDesc = intent.description || '';
-    const intentType = intent.type || '';
-    const keywords = extractKeywords(intentDesc);
-    
-    let bestMatch: { tool: Tool; score: number } | null = null;
-
-    for (const tool of this.availableTools) {
-      const toolName = tool.name || '';
-      const toolDesc = tool.description || '';
-
-      // Calculate match score using the shared utility function
-      const score = calculateToolMatchScore(keywords, {
-        name: toolName,
-        description: toolDesc,
-        keywords: [],
-      });
-
-      // Additional scoring for intent type matching
-      let typeScore = 0;
-      if (intentType && toolName) {
-        const intentTypeLower = intentType.toLowerCase();
-        if (toolName.toLowerCase().includes(intentTypeLower)) {
-          typeScore += 3;
-        }
-      }
-      if (intentType && toolDesc) {
-        const intentTypeLower = intentType.toLowerCase();
-        if (toolDesc.toLowerCase().includes(intentTypeLower)) {
-          typeScore += 2;
-        }
-      }
-
-      const totalScore = score + typeScore;
-
-      if (totalScore > 0 && (!bestMatch || totalScore > bestMatch.score)) {
-        bestMatch = { tool, score: totalScore };
-      }
-    }
-
-
-    if (bestMatch) {
-      return {
-        intentId: intent.id,
-        toolName: bestMatch.tool.name,
-        toolDescription: bestMatch.tool.description || 'No description available',
-        mappedParameters: this.simpleParameterMapping(intent.parameters, bestMatch.tool),
-        confidence: Math.min(bestMatch.score / 10, 0.8), // Normalize to 0-0.8 range
-      };
-    }
-
-    // Use default tool if configured
-    const defaultToolName = this.config.fallback.defaultTools?.[intent.type];
-    if (defaultToolName) {
-      const defaultTool = this.availableTools.find(t => t.name === defaultToolName);
-      if (defaultTool) {
-        return {
-          intentId: intent.id,
-          toolName: defaultTool.name,
-          toolDescription: defaultTool.description,
-          mappedParameters: intent.parameters,
-          confidence: 0.3,
-        };
-      }
-    }
-
-    // Return unknown tool
-    return {
-      intentId: intent.id,
-      toolName: 'unknown',
-      toolDescription: 'No matching tool found',
-      mappedParameters: intent.parameters,
-      confidence: 0,
-    };
-  }
-
-  /**
-   * Semantic tool selection with improved heuristics (Generic version)
-   */
-  private semanticToolSelection(intent: AtomicIntent): ToolSelectionResult {
-    const intentLower = intent.description.toLowerCase();
-    const intentTypeLower = intent.type.toLowerCase();
-
-    // Generic semantic categories - no service-specific logic
-    const genericSemanticCategories: Record<string, string[]> = {
-      // Generic operation categories
-      'data_retrieval': ['get', 'fetch', 'retrieve', 'read', 'obtain', 'acquire'],
-      'data_creation': ['create', 'make', 'generate', 'write', 'add', 'insert'],
-      'data_update': ['update', 'modify', 'edit', 'change', 'adjust'],
-      'data_deletion': ['delete', 'remove', 'erase', 'clear', 'drop'],
-      'data_listing': ['list', 'show', 'display', 'enumerate', 'browse'],
-      'communication': ['send', 'post', 'message', 'notify', 'alert', 'share'],
-      'analysis': ['analyze', 'review', 'evaluate', 'assess', 'check', 'examine'],
-      'search': ['search', 'find', 'lookup', 'query', 'discover'],
-      'file_operations': ['file', 'document', 'content', 'text', 'data'],
-      'network_operations': ['url', 'web', 'http', 'network', 'connect'],
-    };
-
-    // Generic action verbs
-    const genericActionVerbs = [
-      'get', 'list', 'create', 'update', 'delete', 'send', 'post',
-      'analyze', 'generate', 'read', 'write', 'open', 'close', 'start',
-      'stop', 'run', 'execute', 'call', 'invoke', 'fetch', 'retrieve',
-    ];
-
-    let bestMatch: { tool: Tool; score: number } | null = null;
-
-    for (const tool of this.availableTools) {
-      let score = 0;
-      const toolNameLower = tool.name.toLowerCase();
-      const toolDescLower = tool.description.toLowerCase();
-
-      // 1. Check if intent type is in tool name or description
-      if (toolNameLower.includes(intentTypeLower) || toolDescLower.includes(intentTypeLower)) {
-        score += 4;
-      }
-
-      // 2. Check generic semantic category matches
-      for (const [, keywords] of Object.entries(genericSemanticCategories)) {
-        const hasIntentKeyword = keywords.some(keyword => intentLower.includes(keyword));
-        const hasToolKeyword = keywords.some(keyword =>
-          toolNameLower.includes(keyword) || toolDescLower.includes(keyword),
-        );
-
-        if (hasIntentKeyword && hasToolKeyword) {
-          score += 3;
-        }
-      }
-
-      // 3. Check generic action verb matches
-      for (const verb of genericActionVerbs) {
-        if (intentLower.includes(verb) && (toolNameLower.includes(verb) || toolDescLower.includes(verb))) {
-          score += 2;
-        }
-      }
-
-      // 4. Check parameter compatibility (using generic parameter mapping)
-      const intentParamKeys = Object.keys(intent.parameters);
-      if (tool.inputSchema?.properties) {
-        const toolParamKeys = Object.keys(tool.inputSchema.properties);
-        const matchingParams = intentParamKeys.filter(param =>
-          toolParamKeys.some(toolParam =>
-            param.toLowerCase() === toolParam.toLowerCase() ||
-            this.areParametersCompatibleGeneric(param, toolParam),
-          ),
-        );
-
-        if (matchingParams.length > 0) {
-          score += matchingParams.length;
-        }
-      }
-
-      // 5. Check semantic overlap between tool description and intent description
-      const intentWords = new Set(intentLower.split(/\W+/).filter(w => w.length > 2));
-      const toolDescWords = new Set(toolDescLower.split(/\W+/).filter(w => w.length > 2));
-      const overlappingWords = [...intentWords].filter(word => toolDescWords.has(word));
-      if (overlappingWords.length > 0) {
-        score += overlappingWords.length;
-      }
-
-      if (score > 0 && (!bestMatch || score > bestMatch.score)) {
-        bestMatch = { tool, score };
-      }
-    }
-
-    if (bestMatch) {
-      const normalizedScore = Math.min(bestMatch.score / 15, 0.8); // Adjust normalization factor
-      return {
-        intentId: intent.id,
-        toolName: bestMatch.tool.name,
-        toolDescription: bestMatch.tool.description,
-        mappedParameters: this.simpleParameterMapping(intent.parameters, bestMatch.tool),
-        confidence: normalizedScore,
-      };
-    }
-
-    // No semantic match found
-    throw new Error('No semantic match found');
-  }
-
-  /**
-   * Generic parameter compatibility check (Generic version)
-   */
-  private areParametersCompatibleGeneric(intentParam: string, toolParam: string): boolean {
-    const intentParamLower = intentParam.toLowerCase();
-    const toolParamLower = toolParam.toLowerCase();
-
-    // 1. Direct match
-    if (intentParamLower === toolParamLower) {
-      return true;
-    }
-
-    // 2. Generic parameter mappings
-    const genericParamMappings: Record<string, string[]> = {
-      // Data identifiers
-      'id': ['id', 'identifier', 'uid', 'uuid', 'key'],
-      'name': ['name', 'title', 'label', 'display_name'],
-      'description': ['description', 'desc', 'info', 'details'],
-
-      // Data content
-      'content': ['content', 'text', 'body', 'data', 'message', 'value'],
-      'text': ['text', 'content', 'message', 'body', 'data'],
-      'data': ['data', 'content', 'payload', 'body', 'value'],
-
-      // File operations
-      'file': ['file', 'path', 'filename', 'filepath', 'location'],
-      'path': ['path', 'filename', 'file', 'filepath', 'directory', 'folder', 'location'],
-      'filename': ['filename', 'file', 'path', 'filepath'],
-      'directory': ['directory', 'folder', 'path', 'location'],
-
-      // Network operations
-      'url': ['url', 'uri', 'link', 'address', 'endpoint'],
-      'address': ['address', 'url', 'uri', 'endpoint', 'location'],
-
-      // Search operations
-      'query': ['query', 'search', 'q', 'filter', 'term', 'keyword'],
-      'search': ['search', 'query', 'q', 'filter', 'term', 'keyword'],
-
-      // Time related
-      'time': ['time', 'timestamp', 'date', 'datetime', 'when'],
-      'date': ['date', 'datetime', 'timestamp', 'time'],
-
-      // Quantity related
-      'count': ['count', 'number', 'amount', 'quantity', 'total'],
-      'limit': ['limit', 'max', 'maximum', 'count', 'size'],
-    };
-
-    // 3. Check generic mappings
-    if (genericParamMappings[intentParamLower]) {
-      return genericParamMappings[intentParamLower].includes(toolParamLower);
-    }
-
-    // 4. Check reverse mappings
-    for (const [, values] of Object.entries(genericParamMappings)) {
-      if (values.includes(intentParamLower) && values.includes(toolParamLower)) {
-        return true;
-      }
-    }
-
-    // 5. Fuzzy matching
-    const normalizedIntentParam = intentParamLower.replace(/_/g, '').replace(/-/g, '');
-    const normalizedToolParam = toolParamLower.replace(/_/g, '').replace(/-/g, '');
-
-    return (
-      // Contains relationship
-      normalizedIntentParam.includes(normalizedToolParam) ||
-      normalizedToolParam.includes(normalizedIntentParam) ||
-      // Simple edit distance
-      this.calculateSimpleSimilarity(intentParamLower, toolParamLower) > 0.7 ||
-      // Common prefix/suffix
-      intentParamLower.startsWith(toolParamLower.substring(0, 3)) ||
-      toolParamLower.startsWith(intentParamLower.substring(0, 3))
-    );
-  }
-
-  /**
-   * Calculate simple string similarity (0-1)
-   */
-  private calculateSimpleSimilarity(str1: string, str2: string): number {
-    if (str1 === str2) {return 1.0;}
-
-    const longer = str1.length > str2.length ? str1 : str2;
-    const shorter = str1.length > str2.length ? str2 : str1;
-
-    // If length difference is too large, similarity is low
-    if (longer.length - shorter.length > 3) {
-      return 0.0;
-    }
-
-    // Calculate common characters
-    let commonChars = 0;
-    for (let i = 0; i < shorter.length; i++) {
-      if (longer.includes(shorter[i])) {
-        commonChars++;
-      }
-    }
-
-    return commonChars / longer.length;
-  }
-
-  /**
-   * Generic intent type based tool selection
-   */
-  private intentTypeBasedToolSelection(intent: AtomicIntent): ToolSelectionResult {
-    // Generic intent type to tool pattern mappings
-    const genericIntentTypeToToolPatterns: Record<string, string[]> = {
-      // Data retrieval patterns
-      'get_data': ['get', 'fetch', 'retrieve', 'read', 'obtain'],
-      'list_data': ['list', 'show', 'display', 'enumerate', 'browse'],
-      'create_data': ['create', 'make', 'generate', 'write', 'add'],
-      'update_data': ['update', 'modify', 'edit', 'change', 'adjust'],
-      'delete_data': ['delete', 'remove', 'erase', 'clear', 'drop'],
-
-      // Communication patterns
-      'send_message': ['send', 'post', 'message', 'notify', 'alert'],
-      'receive_message': ['receive', 'get_message', 'read_message', 'fetch_message'],
-
-      // Analysis patterns
-      'analyze_content': ['analyze', 'review', 'evaluate', 'assess', 'check'],
-      'summarize_content': ['summarize', 'abstract', 'condense', 'extract'],
-      'generate_content': ['generate', 'create', 'write', 'compose'],
-
-      // File operations
-      'read_file': ['read', 'get', 'fetch', 'open', 'load'],
-      'write_file': ['write', 'create', 'save', 'update', 'modify'],
-      'list_files': ['list', 'show', 'display', 'browse', 'enumerate'],
-
-      // Network operations
-      'open_url': ['open', 'browse', 'navigate', 'visit', 'go'],
-      'fetch_url': ['fetch', 'get', 'retrieve', 'download', 'load'],
-      'search_web': ['search', 'find', 'lookup', 'query', 'discover'],
-
-      // System operations
-      'execute_command': ['execute', 'run', 'call', 'invoke', 'start'],
-      'check_status': ['status', 'check', 'verify', 'validate', 'test'],
-    };
-
-    // Extract base intent type (remove suffixes like _with_ai, _to_service, etc.)
-    const intentType = intent.type || '';
-    const baseIntentType = intentType.replace(/_with_[a-z]+$/, '').replace(/_to_[a-z]+$/, '');
-
-    // Get patterns for the base intent type
-    const patterns = genericIntentTypeToToolPatterns[baseIntentType] || [];
-
-    // Also try the full intent type
-    const fullPatterns = genericIntentTypeToToolPatterns[intentType] || [];
-    const allPatterns = [...new Set([...patterns, ...fullPatterns])];
-
-    for (const pattern of allPatterns) {
-      const matchingTool = this.availableTools.find(tool => {
-        const toolName = (tool.name || '').toLowerCase();
-        const toolDesc = (tool.description || '').toLowerCase();
-        const patternLower = pattern.toLowerCase();
-        return toolName.includes(patternLower) || toolDesc.includes(patternLower);
-      });
-
-      if (matchingTool) {
-        return {
-          intentId: intent.id,
-          toolName: matchingTool.name,
-          toolDescription: matchingTool.description || 'No description available',
-          mappedParameters: this.simpleParameterMapping(intent.parameters, matchingTool),
-          confidence: 0.4, // Lower confidence for type-based matching
-        };
-      }
-    }
-
-    // Try to find any tool that mentions the intent type or base type
-    for (const tool of this.availableTools) {
-      const toolNameLower = (tool.name || '').toLowerCase();
-      const toolDescLower = (tool.description || '').toLowerCase();
-      const intentTypeLower = intentType.toLowerCase();
-      const baseIntentTypeLower = baseIntentType.toLowerCase();
-
-      if (intentTypeLower && (toolNameLower.includes(intentTypeLower) || toolDescLower.includes(intentTypeLower)) ||
-          baseIntentTypeLower && (toolNameLower.includes(baseIntentTypeLower) || toolDescLower.includes(baseIntentTypeLower))) {
-        return {
-          intentId: intent.id,
-          toolName: tool.name,
-          toolDescription: tool.description || 'No description available',
-          mappedParameters: this.simpleParameterMapping(intent.parameters, tool),
-          confidence: 0.3,
-        };
-      }
-    }
-
-    // No type-based match found - return a default result
-    return {
-      intentId: intent.id,
-      toolName: 'unknown',
-      toolDescription: 'No type-based match found',
-      mappedParameters: intent.parameters,
-      confidence: 0,
-    };
-  }
-
-  /**
-   * Enhanced parameter mapping using ParameterMapper
-   */
-  private simpleParameterMapping(intentParams: Record<string, any>, tool: Tool): Record<string, any> {
-    // Use ParameterMapper for intelligent parameter mapping
-    return ParameterMapper.mapParameters(
-      tool.name,
-      tool.inputSchema,
-      intentParams,
-    );
-  }
-
-  /**
-   * Extract URL from query
-   */
-  private extractUrl(query: string): string | null {
-    const urlRegex = /(https?:\/\/[^\s]+)/g;
-    const match = query.match(urlRegex);
-    return match ? match[0] : null;
-  }
-
-  /**
-   * Extract keyword from query
-   */
-  private extractKeyword(query: string): string | null {
-    // Simple extraction: look for content after "search for" or similar phrases
-    const patterns = [
-      /search\s+for\s+["']?([^"'\s]+)["']?/i,
-      /search\s+["']?([^"'\s]+)["']?/i,
-      /find\s+["']?([^"'\s]+)["']?/i,
-      /look\s+for\s+["']?([^"'\s]+)["']?/i,
-    ];
-
-    for (const pattern of patterns) {
-      const match = query.match(pattern);
-      if (match && match[1]) {
-        return match[1];
-      }
-    }
-
-    return null;
-  }
-
-  /**
-   * Build dependency graph
-   */
-  private buildDependencyGraph(intents: AtomicIntent[], edges: DependencyEdge[]): Map<string, Set<string>> {
-    const graph = new Map<string, Set<string>>();
-
-    // Initialize graph with all intents
-    intents.forEach(intent => {
-      graph.set(intent.id, new Set());
-    });
-
-    // Add edges
-    edges.forEach(edge => {
-      const dependencies = graph.get(edge.to);
-      if (dependencies) {
-        dependencies.add(edge.from);
-      }
-    });
-
-    return graph;
-  }
-
-  /**
-   * Topological sort (Kahn's algorithm)
-   */
-  private topologicalSort(graph: Map<string, Set<string>>): string[] | null {
-    const sorted: string[] = [];
-    const indegree = new Map<string, number>();
-    const queue: string[] = [];
-
-    // Calculate indegree for each node
-    graph.forEach((dependencies, node) => {
-      indegree.set(node, dependencies.size);
-      if (dependencies.size === 0) {
-        queue.push(node);
-      }
-    });
-
-    // Process nodes with zero indegree
-    while (queue.length > 0) {
-      const node = queue.shift()!;
-      sorted.push(node);
-
-      // Decrease indegree of neighbors
-      graph.forEach((dependencies, neighbor) => {
-        if (dependencies.has(node)) {
-          const newIndegree = (indegree.get(neighbor) || 0) - 1;
-          indegree.set(neighbor, newIndegree);
-
-          if (newIndegree === 0) {
-            queue.push(neighbor);
-          }
-        }
-      });
-    }
-
-    // Check for cycles
-    if (sorted.length !== graph.size) {
-      return null; // Cycle detected
-    }
-
-    return sorted;
-  }
-
-  /**
-   * Resolve parameters with variable substitution
-   */
-  private resolveParameters(
-    parameters: Record<string, any>,
+  private resolvePlanParameters(
+    args: Record<string, any>,
     context: ExecutionContext,
   ): Record<string, any> {
     const resolved: Record<string, any> = {};
 
-    for (const [key, value] of Object.entries(parameters)) {
+    for (const [key, value] of Object.entries(args)) {
       if (typeof value === 'string') {
-        // Enhanced variable substitution with multiple formats
-        // Format 1: {{intentId.field}} - direct field access
-        // Format 2: {{intentId}} - get the entire result object
-        // Format 3: {{intentId.workflowResult}} - get workflow result
-        const varMatch = value.match(/\{\{([A-Za-z0-9_]+)(?:\.([A-Za-z0-9_]+))?\}\}/);
-        if (varMatch) {
-          const [, intentId, field] = varMatch;
-          const result = context.results.get(intentId);
-
-          if (result) {
-            if (!field) {
-              // If no field specified, extract the most useful content from the result
-              resolved[key] = this.extractUsefulContent(result, intentId);
-            } else if (typeof result === 'object' && field in result) {
-              // If field exists in result, return it
-              resolved[key] = result[field];
-            } else {
-              // Try to find the field in nested structures
-              const nestedValue = this.findNestedValue(result, field);
-              if (nestedValue !== undefined) {
-                resolved[key] = nestedValue;
-              } else {
-                // Keep original if substitution fails
-                resolved[key] = value;
-              }
-            }
-          } else {
-            // Keep original if intent result not found
-            resolved[key] = value;
-          }
-        } else {
-          resolved[key] = value;
-        }
+        // Replace {{step_X.result}} or {{step_X.result.field}} patterns
+        resolved[key] = value.replace(/\{\{step_(\d+)\.result(?:(?:\.(\w+)))?\}\}/g, (match, stepNum, field) => {
+          const stepId = `step_${stepNum}`;
+          const result = context.results.get(stepId);
+          if (result === undefined) return match;
+          if (field && result && typeof result === 'object') return result[field] ?? match;
+          return result ?? match;
+        });
+      } else if (Array.isArray(value)) {
+        resolved[key] = value.map(v =>
+          typeof v === 'string' ? this.resolvePlanParameters({ _: v }, context)._
+            : v
+        );
+      } else if (value && typeof value === 'object') {
+        resolved[key] = this.resolvePlanParameters(value, context);
       } else {
         resolved[key] = value;
       }
@@ -2189,1116 +976,4 @@ IMPORTANT: DO NOT output any text before or after the JSON.`;
     return resolved;
   }
 
-  /**
-   * Find nested value in object using dot notation or common field names
-   */
-  private findNestedValue(obj: any, field: string): any {
-    if (!obj || typeof obj !== 'object') {
-      return undefined;
-    }
-
-    // Try direct access first
-    if (field in obj) {
-      return obj[field];
-    }
-
-    // Try common aliases for AI results
-    const commonAliases: Record<string, string[]> = {
-      'content': ['summary', 'markdown', 'text', 'result', 'output'],
-      'summary': ['content', 'markdown', 'text', 'result'],
-      'result': ['content', 'summary', 'output', 'workflowResult'],
-      'output': ['content', 'summary', 'result'],
-    };
-
-    // Check if field has aliases
-    if (field in commonAliases) {
-      for (const alias of commonAliases[field]) {
-        if (alias in obj) {
-          return obj[alias];
-        }
-      }
-    }
-
-    // Try dot notation for nested access
-    if (field.includes('.')) {
-      const parts = field.split('.');
-      let current = obj;
-      for (const part of parts) {
-        if (current && typeof current === 'object' && part in current) {
-          current = current[part];
-        } else {
-          return undefined;
-        }
-      }
-      return current;
-    }
-
-    return undefined;
-  }
-
-  /**
-   * Get available tools
-   */
-  getAvailableTools(): any[] {
-    return [...this.availableTools];
-  }
-
-  /**
-   * Extract useful content from result object for variable substitution
-   * This method intelligently extracts the most relevant content from different types of tool results
-   */
-  private extractUsefulContent(result: any, intentId: string): any {
-    logger.debug(`[CloudIntentEngine] extractUsefulContent called for intent ${intentId}, result type: ${typeof result}`);
-
-    if (!result) {
-      logger.debug('[CloudIntentEngine] Result is null or undefined');
-      return result;
-    }
-
-    // If result is already a string, return it
-    if (typeof result === 'string') {
-      logger.debug(`[CloudIntentEngine] Result is string, length: ${result.length}`);
-      return result;
-    }
-
-    // If result is an object, try to extract the most useful content
-    if (typeof result === 'object') {
-      logger.debug(`[CloudIntentEngine] Result is object, keys: ${Object.keys(result).join(', ')}`);
-
-      // Check for common result structures
-
-      // 1. GitHub MCP tool results (content array with text)
-      if (Array.isArray(result.content) && result.content.length > 0) {
-        logger.debug(`[CloudIntentEngine] Found content array with ${result.content.length} items`);
-        const firstContent = result.content[0];
-        if (firstContent && firstContent.text) {
-          logger.debug(`[CloudIntentEngine] First content has text property, length: ${firstContent.text.length}`);
-          try {
-            // Try to parse JSON text
-            const parsed = JSON.parse(firstContent.text);
-            logger.debug('[CloudIntentEngine] Successfully parsed JSON from text');
-            // Return the parsed JSON object for AI analysis
-            return parsed;
-          } catch (error) {
-            logger.debug(`[CloudIntentEngine] Failed to parse JSON: ${error}`);
-            // If not JSON, return the text as-is
-            return firstContent.text;
-          }
-        }
-      }
-
-      // 2. AI tool results (with summary or content field)
-      if (result.summary) {
-        logger.debug('[CloudIntentEngine] Found summary field');
-        return result.summary;
-      }
-      if (result.content && typeof result.content === 'string') {
-        logger.debug(`[CloudIntentEngine] Found string content field, length: ${result.content.length}`);
-        return result.content;
-      }
-      if (result.markdown) {
-        logger.debug('[CloudIntentEngine] Found markdown field');
-        return result.markdown;
-      }
-      if (result.text) {
-        logger.debug('[CloudIntentEngine] Found text field');
-        return result.text;
-      }
-
-      // 3. Standardized workflow result format
-      if (result.workflowResult && result.workflowResult.content) {
-        logger.debug('[CloudIntentEngine] Found workflowResult.content');
-        return result.workflowResult.content;
-      }
-
-      // 4. For other objects, return the object as-is (will be JSON.stringify'd by AI tool)
-      logger.debug('[CloudIntentEngine] No specific content found, returning object as-is');
-      return result;
-    }
-
-    // For any other type, return as-is
-    logger.debug(`[CloudIntentEngine] Result is other type: ${typeof result}`);
-    return result;
-  }
-
-  /**
-   * Get engine status
-   */
-  getStatus(): {
-    initialized: boolean;
-    toolsCount: number;
-    llmProvider: string;
-    llmConfigured: boolean;
-    } {
-    return {
-      initialized: this.ai.getStatus().enabled,
-      toolsCount: this.availableTools.length,
-      llmProvider: this.config.llm.provider,
-      llmConfigured: !!this.config.llm.apiKey,
-    };
-  }
-
-  // ==================== Minimal Decomposition Helper Methods ====================
-
-  /**
-   * Pre-analyze query for minimal decomposition decision
-   */
-  private preAnalyzeQuery(query: string): QueryPreAnalysis {
-    const queryLower = query.toLowerCase();
-
-    return {
-      query,
-      isLikelySimpleQuery: this.isLikelySimpleQuery(queryLower),
-      isLikelyDataRetrievalQuery: this.isLikelyDataRetrievalQuery(queryLower),
-      hasMultipleActions: this.hasMultipleActions(queryLower),
-      hasTemporalMarkers: this.hasTemporalMarkers(queryLower),
-      likelySingleToolMatch: this.findLikelySingleToolMatch(queryLower),
-      complexityScore: this.calculateQueryComplexity(queryLower),
-    };
-  }
-
-  /**
-   * Check if query is likely simple (should be single intent)
-   */
-  private isLikelySimpleQuery(queryLower: string): boolean {
-    // Generic simple query patterns - no domain-specific logic
-    const simplePatterns = [
-      /^(search|find|lookup|query|get|fetch|retrieve)\s+/,
-      /^open\s+/,
-      /^close\s+/,
-      /^start\s+/,
-      /^stop\s+/,
-      /^send\s+/,
-      /^create\s+/,
-      /^delete\s+/,
-      /^read\s+/,
-      /^write\s+/,
-      /^list\s+/,
-      /^show\s+/,
-    ];
-
-    return simplePatterns.some(pattern => pattern.test(queryLower));
-  }
-
-  /**
-   * Check if query is likely a simple data retrieval query
-   */
-  private isLikelyDataRetrievalQuery(queryLower: string): boolean {
-    // Generic data retrieval patterns
-    const dataRetrievalPatterns = [
-      /^(get|fetch|retrieve|read|obtain)\s+/,
-      /data\s+(from|about)/,
-      /information\s+(about|on)/,
-      /query\s+(data|information)/,
-    ];
-
-    return dataRetrievalPatterns.some(pattern => pattern.test(queryLower));
-  }
-
-  /**
-   * Check if query has multiple actions
-   */
-  private hasMultipleActions(queryLower: string): boolean {
-    const actionVerbs = [
-      'search', 'find', 'get', 'fetch', 'retrieve',
-      'analyze', 'process', 'send', 'post', 'create',
-      'update', 'delete', 'open', 'close', 'start', 'stop',
-    ];
-
-    const verbCount = actionVerbs.filter(verb => queryLower.includes(verb)).length;
-    return verbCount > 1;
-  }
-
-  /**
-   * Check if query has temporal markers indicating sequence
-   */
-  private hasTemporalMarkers(queryLower: string): boolean {
-    const temporalMarkers = [
-      'then', 'next', 'after', 'after that', 'and then',
-      'first', 'second', 'third', 'finally',
-      'step 1', 'step 2', 'step 3',
-    ];
-
-    return temporalMarkers.some(marker => queryLower.includes(marker));
-  }
-
-  /**
-   * Find likely single tool match for query
-   */
-  private findLikelySingleToolMatch(queryLower: string): string | null {
-    if (!this.availableTools || this.availableTools.length === 0) {
-      return null;
-    }
-
-    // Check for direct tool name matches
-    for (const tool of this.availableTools) {
-      const toolNameLower = tool.name.toLowerCase();
-
-      // Check if tool name appears in query
-      if (queryLower.includes(toolNameLower)) {
-        return tool.name;
-      }
-
-      // Check for common tool patterns (generic)
-      if (toolNameLower.includes('search') && queryLower.includes('search')) {
-        return tool.name;
-      }
-
-      if (toolNameLower.includes('get') && queryLower.includes('get')) {
-        return tool.name;
-      }
-
-      if (toolNameLower.includes('fetch') && queryLower.includes('fetch')) {
-        return tool.name;
-      }
-
-      if (toolNameLower.includes('query') && queryLower.includes('query')) {
-        return tool.name;
-      }
-    }
-
-    return null;
-  }
-
-  /**
-   * Calculate query complexity score (0-1)
-   */
-  private calculateQueryComplexity(queryLower: string): number {
-    let score = 0;
-
-    // Factor 1: Length
-    if (queryLower.length > 100) {score += 0.3;}
-    else if (queryLower.length > 50) {score += 0.2;}
-    else if (queryLower.length > 20) {score += 0.1;}
-
-    // Factor 2: Multiple actions
-    if (this.hasMultipleActions(queryLower)) {score += 0.3;}
-
-    // Factor 3: Temporal markers
-    if (this.hasTemporalMarkers(queryLower)) {score += 0.3;}
-
-    // Factor 4: Complex patterns
-    if (queryLower.includes('analyze') && queryLower.includes('send')) {score += 0.2;}
-    if (queryLower.includes('fetch') && queryLower.includes('process')) {score += 0.2;}
-
-    return Math.min(1, score);
-  }
-
-  /**
-   * Apply minimal decomposition correction
-   */
-  private applyMinimalDecompositionCorrection(
-    result: IntentParseResult,
-    query: string,
-    preAnalysis: QueryPreAnalysis,
-  ): IntentParseResult {
-    // Rule 1: If it's a simple query but was decomposed, consider merging
-    if (preAnalysis.isLikelySimpleQuery && result.intents.length > 1 && preAnalysis.complexityScore < 0.5) {
-      logger.info(`[CloudIntentEngine] Simple query was decomposed into ${result.intents.length} intents, considering merge`);
-
-      // If there's a likely single tool match, use it
-      if (preAnalysis.likelySingleToolMatch) {
-        return {
-          intents: [{
-            id: 'A1',
-            type: preAnalysis.likelySingleToolMatch,
-            description: `Execute: ${query}`,
-            parameters: { query },
-          }],
-          edges: [],
-        };
-      }
-    }
-
-    // Rule 2: If AI returned single intent but pre-analysis suggests it might need decomposition,
-    // trust the AI (but log it)
-    if (result.intents.length === 1 && preAnalysis.complexityScore > 0.7) {
-      logger.info('[CloudIntentEngine] Complex query kept as single intent by AI, trusting AI decision');
-    }
-
-    // Rule 3: If too many intents were generated, try to merge
-    if (result.intents.length > 3 && preAnalysis.complexityScore < 0.6) {
-      logger.info(`[CloudIntentEngine] Query decomposed into ${result.intents.length} intents, which seems excessive. Attempting to merge.`);
-
-      // Find the most appropriate single tool
-      const singleTool = preAnalysis.likelySingleToolMatch
-        ? this.availableTools.find(t => t.name === preAnalysis.likelySingleToolMatch)
-        : this.findMostAppropriateToolForQuery(query);
-
-      if (singleTool) {
-        return {
-          intents: [{
-            id: 'A1',
-            type: singleTool.name,
-            description: `Execute: ${query}`,
-            parameters: { query },
-          }],
-          edges: [],
-        };
-      }
-    }
-
-    // Return original result if no correction needed
-    return result;
-  }
-
-  /**
-   * Assess parsing confidence
-   * Generic approach: confidence reflects how well the parsed intents match available tools
-   * No service-specific logic - works for ANY MCP service
-   */
-  private assessParsingConfidence(result: IntentParseResult, query: string): number {
-    let confidence = 0.5; // Base confidence (lowered from 0.7 to be more conservative)
-
-    const queryLower = query.toLowerCase();
-
-    // Factor 1: Simple query check
-    const isSimpleQuery = this.isLikelySimpleQuery(queryLower);
-    if (isSimpleQuery && result.intents.length === 1) {
-      confidence += 0.1; // Simple queries should be single intent
-    } else if (isSimpleQuery && result.intents.length > 1) {
-      confidence -= 0.1; // Simple queries decomposed = lower confidence
-    }
-
-    // Factor 2: Tool matching quality (REPLACED old "tool existence check")
-    // This now checks how well the selected tools actually match the intent
-    if (this.availableTools.length > 0) {
-      const toolMatchScores = result.intents.map(intent => {
-        if (!intent.type) return 0;
-        
-        // Find the best matching tool for this intent
-        let bestScore = 0;
-        for (const tool of this.availableTools) {
-          const toolNameLower = tool.name.toLowerCase();
-          const toolDescLower = tool.description.toLowerCase();
-          const intentTypeLower = intent.type.toLowerCase();
-          const intentDescLower = intent.description.toLowerCase();
-          
-          let score = 0;
-          
-          // Direct name match (strongest signal)
-          if (toolNameLower === intentTypeLower) {
-            score += 0.5;
-          } else if (toolNameLower.includes(intentTypeLower) || intentTypeLower.includes(toolNameLower)) {
-            score += 0.3;
-          }
-          
-          // Description match
-          const intentWords = new Set(intentDescLower.split(/\W+/).filter(w => w.length > 2));
-          const toolDescWords = new Set(toolDescLower.split(/\W+/).filter(w => w.length > 2));
-          const commonWords = [...intentWords].filter(w => toolDescWords.has(w));
-          if (commonWords.length > 0) {
-            score += Math.min(commonWords.length / Math.max(intentWords.size, 1), 0.3);
-          }
-          
-          // Parameter compatibility
-          const intentParams = Object.keys(intent.parameters || {});
-          if (tool.inputSchema?.properties && intentParams.length > 0) {
-            const toolParams = Object.keys(tool.inputSchema.properties);
-            const matchingParams = intentParams.filter(p => 
-              toolParams.some(tp => tp.toLowerCase() === p.toLowerCase())
-            );
-            score += (matchingParams.length / Math.max(intentParams.length, 1)) * 0.2;
-          }
-          
-          if (score > bestScore) bestScore = score;
-        }
-        
-        return bestScore;
-      });
-      
-      const avgToolMatchScore = toolMatchScores.reduce((a, b) => a + b, 0) / toolMatchScores.length;
-      confidence += avgToolMatchScore * 0.3; // Tool matching quality contributes up to 0.3
-    } else {
-      confidence -= 0.2; // No tools available = lower confidence
-    }
-
-    // Factor 3: Parameter completeness
-    const hasParameters = result.intents.every(intent =>
-      intent.parameters && Object.keys(intent.parameters).length > 0,
-    );
-
-    if (hasParameters) {
-      confidence += 0.05; // Reduced from 0.1
-    }
-
-    // Factor 4: Edge consistency
-    const validEdges = result.edges.every(edge =>
-      result.intents.some(i => i.id === edge.from) &&
-      result.intents.some(i => i.id === edge.to),
-    );
-
-    if (validEdges) {
-      confidence += 0.05; // Reduced from 0.1
-    }
-
-    return Math.max(0, Math.min(1, confidence));
-  }
-
-  /**
-   * Log decomposition decision for debugging
-   */
-  private logDecompositionDecision(
-    query: string,
-    originalIntentCount: number,
-    correctedIntentCount: number,
-    confidence: number,
-  ): void {
-    logger.debug(`[CloudIntentEngine] Decomposition decision for: "${query}"`);
-    logger.debug(`  - Original intents: ${originalIntentCount}`);
-    logger.debug(`  - Corrected intents: ${correctedIntentCount}`);
-    logger.debug(`  - Confidence: ${confidence.toFixed(2)}`);
-
-    if (originalIntentCount !== correctedIntentCount) {
-      logger.debug(`  - Correction applied: ${originalIntentCount} → ${correctedIntentCount} intents`);
-    }
-  }
-
-  /**
-   * Find most appropriate tool for query
-   */
-  private findMostAppropriateToolForQuery(query: string): Tool | null {
-    if (!this.availableTools || this.availableTools.length === 0) {
-      return null;
-    }
-
-    const queryLower = query.toLowerCase();
-    let bestTool = null;
-    let bestScore = 0;
-
-    for (const tool of this.availableTools) {
-      let score = 0;
-      const toolNameLower = (tool.name || '').toLowerCase();
-      const toolDescLower = (tool.description || '').toLowerCase();
-
-      // Score based on name match
-      if (queryLower.includes(toolNameLower)) {
-        score += 3;
-      }
-
-      // Score based on common verbs
-      const commonVerbs = ['get', 'fetch', 'search', 'find', 'query', 'read', 'write'];
-      for (const verb of commonVerbs) {
-        if (queryLower.includes(verb) && (toolNameLower.includes(verb) || toolDescLower.includes(verb))) {
-          score += 2;
-        }
-      }
-
-      // Score based on description relevance
-      const queryWords = queryLower.split(/\W+/).filter(w => w.length > 2);
-      const toolDescWords = toolDescLower.split(/\W+/).filter(w => w.length > 2);
-      const overlappingWords = queryWords.filter(word => toolDescWords.includes(word));
-      score += overlappingWords.length;
-
-      if (score > bestScore) {
-        bestScore = score;
-        bestTool = tool;
-      }
-    }
-
-    return bestScore > 0 ? bestTool : null;
-  }
-
-  // ==================== Interactive Feedback Methods ====================
-
-  /**
-   * Check if confirmation should be requested
-   */
-  private shouldRequestConfirmation(confidence: number, options?: ParseIntentOptions): boolean {
-    // Default thresholds
-    const confidenceThreshold = 0.6;
-    const autoProceedThreshold = 0.8;
-
-    // If confidence is very high, auto proceed
-    if (confidence >= autoProceedThreshold && options?.autoProceedOnHighConfidence !== false) {
-      return false;
-    }
-
-    // If confidence is below threshold, request confirmation
-    if (confidence < confidenceThreshold) {
-      return true;
-    }
-
-    // If requireConfirmation is explicitly set to true
-    if (options?.requireConfirmation === true) {
-      return true;
-    }
-
-    return false;
-  }
-
-  /**
-   * Build confirmation request with intelligent options
-   */
-  private buildConfirmationRequest(
-    query: string,
-    parsedIntents: IntentParseResult,
-    confidence: number,
-    preAnalysis: QueryPreAnalysis,
-    options?: ParseIntentOptions,
-  ): UserConfirmationRequest {
-    const reason = this.generateConfirmationReason(confidence, preAnalysis, parsedIntents);
-    const confirmationOptions = this.generateConfirmationOptions(query, parsedIntents, preAnalysis, options);
-
-    return {
-      query,
-      parsedIntents: parsedIntents.intents,
-      confidence,
-      reason,
-      options: confirmationOptions,
-      analysis: {
-        isLikelySimpleQuery: preAnalysis.isLikelySimpleQuery,
-        hasMultipleActions: preAnalysis.hasMultipleActions,
-        hasTemporalMarkers: preAnalysis.hasTemporalMarkers,
-        likelySingleToolMatch: preAnalysis.likelySingleToolMatch,
-        complexityScore: preAnalysis.complexityScore,
-      },
-      timestamp: new Date(),
-    };
-  }
-
-  /**
-   * Generate confirmation reason based on analysis
-   */
-  private generateConfirmationReason(
-    confidence: number,
-    preAnalysis: QueryPreAnalysis,
-    parsedIntents: IntentParseResult,
-  ): string {
-    const reasons: string[] = [];
-
-    if (confidence < 0.5) {
-      reasons.push('Low parsing confidence');
-    }
-
-    if (preAnalysis.isLikelySimpleQuery && parsedIntents.intents.length > 1) {
-      reasons.push('Simple query was decomposed into multiple intents');
-    }
-
-    if (preAnalysis.hasTemporalMarkers && parsedIntents.intents.length === 1) {
-      reasons.push('Query contains sequence markers but was kept as single intent');
-    }
-
-    if (parsedIntents.intents.length > 3) {
-      reasons.push('Query was decomposed into many intents');
-    }
-
-    if (reasons.length === 0) {
-      return `Confidence level is ${confidence.toFixed(2)}`;
-    }
-
-    return reasons.join('; ');
-  }
-
-  /**
-   * Generate intelligent confirmation options
-   */
-  private generateConfirmationOptions(
-    query: string,
-    parsedIntents: IntentParseResult,
-    preAnalysis: QueryPreAnalysis,
-    options?: ParseIntentOptions,
-  ): ConfirmationOption[] {
-    const optionsList: ConfirmationOption[] = [];
-    const maxOptions = options?.requireConfirmation ? 3 : 2;
-
-    // Option 1: Proceed as-is
-    optionsList.push({
-      id: 'proceed',
-      description: `Proceed with ${parsedIntents.intents.length} intent(s) as parsed`,
-      suggestedAction: 'proceed',
-      confidence: this.assessParsingConfidence(parsedIntents, query),
-      parsedIntents: parsedIntents.intents,
-      reason: 'Trust the AI parsing result',
-    });
-
-    // Option 2: Try to merge to single intent (if applicable)
-    if (preAnalysis.isLikelySimpleQuery && parsedIntents.intents.length > 1) {
-      const singleIntent = this.createSingleIntentFromQuery(query, preAnalysis);
-      optionsList.push({
-        id: 'merge',
-        description: 'Merge to single intent (simpler approach)',
-        suggestedAction: 'modify',
-        confidence: 0.7,
-        parsedIntents: [singleIntent],
-        reason: 'Query appears to be simple and should be single intent',
-      });
-    }
-
-    // Option 3: Reparse with different parameters
-    optionsList.push({
-      id: 'reparse',
-      description: 'Reparse query with different approach',
-      suggestedAction: 'reparse',
-      confidence: 0.5,
-      reason: 'Try parsing again with adjusted parameters',
-    });
-
-    // Option 4: Abort (only if explicitly requested)
-    if (options?.requireConfirmation) {
-      optionsList.push({
-        id: 'abort',
-        description: 'Cancel this operation',
-        suggestedAction: 'abort',
-        reason: 'User decided to cancel',
-      });
-    }
-
-    // Limit options to maxOptions
-    return optionsList.slice(0, maxOptions);
-  }
-
-  /**
-   * Create single intent from query for merging option
-   */
-  private createSingleIntentFromQuery(query: string, preAnalysis: QueryPreAnalysis): AtomicIntent {
-    // Find the most appropriate tool
-    const toolName = preAnalysis.likelySingleToolMatch || 'process';
-
-    return {
-      id: 'A1',
-      type: toolName,
-      description: `Execute: ${query}`,
-      parameters: { query },
-    };
-  }
-
-  /**
-   * Handle user confirmation response
-   */
-  private handleConfirmationResponse(
-    response: UserConfirmationResponse,
-    originalResult: IntentParseResult,
-    query: string,
-    preAnalysis: QueryPreAnalysis,
-  ): IntentParseResult {
-    const selectedOption = response.selectedOptionId;
-
-    switch (selectedOption) {
-      case 'proceed':
-        // Use original result, possibly with user modifications
-        if (response.userModifiedIntents && response.userModifiedIntents.length > 0) {
-          logger.info('[CloudIntentEngine] User modified intents, using modified version');
-          return {
-            intents: response.userModifiedIntents,
-            edges: this.generateEdgesForIntents(response.userModifiedIntents),
-          };
-        }
-        logger.info('[CloudIntentEngine] User confirmed to proceed with original parsing');
-        return originalResult;
-
-      case 'merge':
-        // Merge to single intent
-        logger.info('[CloudIntentEngine] User selected to merge to single intent');
-        const singleIntent = this.createSingleIntentFromQuery(query, preAnalysis);
-        return {
-          intents: [singleIntent],
-          edges: [],
-        };
-
-      case 'reparse':
-        // Reparse with adjusted parameters
-        logger.info('[CloudIntentEngine] User selected to reparse query');
-        // For now, return original result (in real implementation, would reparse)
-        return originalResult;
-
-      case 'abort':
-        // Return empty result to indicate abortion
-        logger.info('[CloudIntentEngine] User aborted the operation');
-        return {
-          intents: [],
-          edges: [],
-        };
-
-      default:
-        logger.warn(`[CloudIntentEngine] Unknown option selected: ${selectedOption}, proceeding with original`);
-        return originalResult;
-    }
-  }
-
-  /**
-   * Generate edges for modified intents
-   */
-  private generateEdgesForIntents(intents: AtomicIntent[]): DependencyEdge[] {
-    const edges: DependencyEdge[] = [];
-
-    // Simple linear dependency for multiple intents
-    for (let i = 0; i < intents.length - 1; i++) {
-      edges.push({
-        from: intents[i].id,
-        to: intents[i + 1].id,
-      });
-    }
-
-    return edges;
-  }
-
-  /**
-   * Record feedback for learning system
-   */
-  private recordFeedbackForLearning(
-    query: string,
-    parsedIntents: IntentParseResult,
-    confidence: number,
-    userResponse: UserConfirmationResponse | null,
-    success: boolean,
-  ): void {
-    // In a real implementation, this would store feedback in a database or file
-    // For now, just log it
-    logger.info(`[CloudIntentEngine] Feedback recorded for query: "${query}"`);
-    logger.info(`  - Confidence: ${confidence.toFixed(2)}`);
-    logger.info(`  - Intents: ${parsedIntents.intents.length}`);
-    logger.info(`  - User response: ${userResponse ? userResponse.selectedOptionId : 'auto-proceed'}`);
-    logger.info(`  - Success: ${success}`);
-
-    // Simple learning: adjust confidence thresholds based on success
-    if (success && confidence < 0.6) {
-      logger.debug('[CloudIntentEngine] Learning: Successful execution with low confidence, consider lowering threshold');
-    } else if (!success && confidence > 0.7) {
-      logger.debug('[CloudIntentEngine] Learning: Failed execution with high confidence, consider raising threshold');
-    }
-  }
-
-  /**
-   * Extract parameters from query text using simple pattern matching
-   * This is a generic fallback when LLM returns null parameters
-   */
-  private extractParametersFromQuery(query: string, inputSchema: any): Record<string, any> {
-    const extractedParams: Record<string, any> = {};
-    const properties = inputSchema.properties || {};
-    const queryLower = query.toLowerCase();
-    
-    // Extract common parameter types from query
-    for (const [paramName, paramSchema] of Object.entries(properties)) {
-      if (!paramSchema || typeof paramSchema !== 'object') {
-        continue;
-      }
-      
-      const paramNameLower = paramName.toLowerCase();
-      const paramSchemaObj = paramSchema as any;
-      const paramType = paramSchemaObj.type || 'string';
-      
-      // Skip if parameter name is too generic
-      if (paramNameLower === 'query' || paramNameLower === 'input' || paramNameLower === 'text') {
-        continue;
-      }
-      
-      // Try to extract based on parameter name patterns
-      if (paramNameLower.includes('date') || paramNameLower.includes('time')) {
-        // Try to extract date
-        const dateMatch = this.extractDateFromQuery(query);
-        if (dateMatch) {
-          extractedParams[paramName] = dateMatch;
-        }
-      } else if (paramNameLower.includes('from') || paramNameLower.includes('source') || paramNameLower.includes('origin')) {
-        // Try to extract "from" location
-        const fromLocation = this.extractLocationFromQuery(query, 'from');
-        if (fromLocation) {
-          extractedParams[paramName] = fromLocation;
-        }
-      } else if (paramNameLower.includes('to') || paramNameLower.includes('destination') || paramNameLower.includes('target')) {
-        // Try to extract "to" location
-        const toLocation = this.extractLocationFromQuery(query, 'to');
-        if (toLocation) {
-          extractedParams[paramName] = toLocation;
-        }
-      } else if (paramNameLower.includes('number') || paramNameLower.includes('count') || paramNameLower.includes('quantity')) {
-        // Try to extract numbers
-        const numbers = this.extractNumbersFromQuery(query);
-        if (numbers.length > 0) {
-          extractedParams[paramName] = paramType === 'array' ? numbers : numbers[0];
-        }
-      } else if (paramNameLower.includes('filter') || paramNameLower.includes('keyword') || paramNameLower.includes('term')) {
-        // Try to extract keywords
-        const keywords = this.extractKeywordsFromQuery(query);
-        if (keywords.length > 0) {
-          extractedParams[paramName] = paramType === 'array' ? keywords : keywords[0];
-        }
-      }
-    }
-    
-    return extractedParams;
-  }
-  
-  /**
-   * Extract date from query text
-   * Supports multiple formats including Chinese date formats
-   */
-  private extractDateFromQuery(query: string): string | null {
-    // Date patterns supporting multiple formats
-    const datePatterns = [
-      // Chinese format: 2026年5月4日 or 2026年05月04日
-      /(\d{4})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日/,
-      // Chinese format: 5月4日 (without year)
-      /(\d{1,2})\s*月\s*(\d{1,2})\s*日/,
-      // Standard formats
-      /\d{4}-\d{2}-\d{2}/, // YYYY-MM-DD
-      /\d{2}\/\d{2}\/\d{4}/, // MM/DD/YYYY
-      /\d{4}\/\d{2}\/\d{2}/, // YYYY/MM/DD
-      /\d{4}\.\d{2}\.\d{2}/, // YYYY.MM.DD
-      // Relative dates
-      /(today|tomorrow|yesterday)/i,
-    ];
-    
-    for (const pattern of datePatterns) {
-      const match = query.match(pattern);
-      if (match) {
-        // For Chinese date format, normalize to YYYY-MM-DD
-        if (match[1] && match[2] && match[3] && pattern.toString().includes('年')) {
-          const year = match[1].padStart(4, '0');
-          const month = match[2].padStart(2, '0');
-          const day = match[3].padStart(2, '0');
-          return `${year}-${month}-${day}`;
-        }
-        // For Chinese date without year (月/日), use current year
-        if (match[1] && match[2] && pattern.toString().includes('月') && !pattern.toString().includes('年')) {
-          const now = new Date();
-          const year = now.getFullYear().toString();
-          const month = match[1].padStart(2, '0');
-          const day = match[2].padStart(2, '0');
-          return `${year}-${month}-${day}`;
-        }
-        return match[0];
-      }
-    }
-    
-    return null;
-  }
-
-  
-  /**
-   * Extract location from query text
-   * Generic approach using language-agnostic patterns (supports Chinese, English, etc.)
-   */
-  private extractLocationFromQuery(query: string, direction: 'from' | 'to'): string | null {
-    // Generic location extraction patterns (language-agnostic)
-    // Supports both English (from X to Y) and Chinese (从X到Y, X到Y) patterns
-    const locationPatterns = {
-      'from': [
-        // English: from X to Y
-        /from\s+["']?([^"'\s,]+(?:\s+[^"'\s,]+){0,2})["']?\s+to/i,
-        // English: source/origin = X
-        /(?:from|source|origin)\s*[:=]\s*["']?([^"'\s,]+(?:\s+[^"'\s,]+){0,2})["']?/i,
-        // Chinese: 从X到Y (extract X)
-        /从\s*([^\s,，]+(?:\s*[^\s,，]+){0,2})\s*到/i,
-        // Chinese: X到Y (extract X, where X is before 到)
-        /([^\s,，]+(?:\s*[^\s,，]+){0,2})\s*到\s*([^\s,，]+)/i,
-      ],
-      'to': [
-        // English: from X to Y
-        /from\s+[^"'\s,]+\s+to\s+["']?([^"'\s,]+(?:\s+[^"'\s,]+){0,2})["']?/i,
-        // English: destination/target = X
-        /(?:to|destination|target)\s*[:=]\s*["']?([^"'\s,]+(?:\s+[^"'\s,]+){0,2})["']?/i,
-        // Chinese: 从X到Y (extract Y)
-        /从\s*[^\s,，]+\s*到\s*([^\s,，]+(?:\s*[^\s,，]+){0,2})/i,
-        // Chinese: X到Y (extract Y, where Y is after 到)
-        /[^\s,，]+\s*到\s*([^\s,，]+(?:\s*[^\s,，]+){0,2})/i,
-      ]
-    };
-    
-    const patterns = locationPatterns[direction];
-    for (const pattern of patterns) {
-      const match = query.match(pattern);
-      if (match && match[1]) {
-        return match[1].trim();
-      }
-    }
-    
-    return null;
-  }
-
-  
-  /**
-   * Extract numbers from query text
-   */
-  private extractNumbersFromQuery(query: string): number[] {
-    const numbers: number[] = [];
-    const numberPattern = /\d+/g;
-    let match;
-    
-    while ((match = numberPattern.exec(query)) !== null) {
-      const num = parseInt(match[0], 10);
-      if (!isNaN(num)) {
-        numbers.push(num);
-      }
-    }
-    
-    return numbers;
-  }
-  
-  /**
-   * Extract keywords from query text
-   */
-  private extractKeywordsFromQuery(query: string): string[] {
-    // Remove common stop words and extract meaningful words
-    const stopWords = [
-      'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for',
-      'of', 'with', 'by', 'is', 'are', 'was', 'were', 'be', 'been', 'being',
-      'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could',
-      'should', 'may', 'might', 'shall', 'can', 'need', 'dare', 'ought',
-    ];
-    const words = query.split(/[\s\p{P}]+/u).filter(word => 
-      word.length > 1 && 
-      !stopWords.includes(word.toLowerCase()) &&
-      !/^\d+$/.test(word)
-    );
-    
-    return words;
-  }
-
-  /**
-   * Get confirmation configuration (for external use)
-   */
-  getConfirmationConfig(): ConfirmationConfig {
-    return {
-      enabled: true,
-      confidenceThreshold: 0.6,
-      autoProceedThreshold: 0.8,
-      maxOptions: 3,
-      learnFromFeedback: true,
-      feedbackHistorySize: 100,
-    };
-  }
-
-  /**
-   * Extract parameters from generic query (for fallback intent parsing)
-   * Generic approach that works for any MCP service, not hardcoded for specific services
-   */
-  private extractParametersFromGenericQuery(query: string): Record<string, any> {
-    const params: Record<string, any> = {};
-    
-    // Generic parameter extraction patterns that work across different domains
-    // These are language-agnostic and service-agnostic patterns
-    
-    // 1. Extract dates (universal pattern, supports Chinese and English formats)
-    const datePatterns = [
-      // Chinese format: 2026年5月4日
-      /(\d{4})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日/,
-      // Chinese format: 5月4日 (without year)
-      /(\d{1,2})\s*月\s*(\d{1,2})\s*日/,
-      // Standard formats
-      /\d{4}-\d{2}-\d{2}/, // YYYY-MM-DD
-      /\d{2}\/\d{2}\/\d{4}/, // MM/DD/YYYY
-      /\d{4}\/\d{2}\/\d{2}/, // YYYY/MM/DD
-      /\d{4}\.\d{2}\.\d{2}/, // YYYY.MM.DD
-      /(today|tomorrow|yesterday)/i, // Relative dates
-    ];
-    
-    for (const pattern of datePatterns) {
-      const match = query.match(pattern);
-      if (match) {
-        // For Chinese date format, normalize to YYYY-MM-DD
-        if (match[1] && match[2] && match[3] && pattern.toString().includes('年')) {
-          const year = match[1].padStart(4, '0');
-          const month = match[2].padStart(2, '0');
-          const day = match[3].padStart(2, '0');
-          params.date = `${year}-${month}-${day}`;
-        } else if (match[1] && match[2] && pattern.toString().includes('月') && !pattern.toString().includes('年')) {
-          const now = new Date();
-          const year = now.getFullYear().toString();
-          const month = match[1].padStart(2, '0');
-          const day = match[2].padStart(2, '0');
-          params.date = `${year}-${month}-${day}`;
-        } else {
-          params.date = match[0];
-        }
-        break;
-      }
-    }
-
-    
-    // 2. Extract numbers and quantities
-    const numberPattern = /\d+/g;
-    const numbers: number[] = [];
-    let match;
-    
-    while ((match = numberPattern.exec(query)) !== null) {
-      const num = parseInt(match[0], 10);
-      if (!isNaN(num)) {
-        numbers.push(num);
-      }
-    }
-    
-    if (numbers.length > 0) {
-      params.numbers = numbers;
-      // For single numbers, also add as count/quantity
-      if (numbers.length === 1) {
-        params.count = numbers[0];
-        params.quantity = numbers[0];
-      }
-    }
-    
-    // 3. Extract keywords (remove stop words)
-    const stopWords = [
-      'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for',
-      'of', 'with', 'by', 'is', 'are', 'was', 'were', 'be', 'been', 'being',
-      'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could',
-      'should', 'may', 'might', 'shall', 'can', 'need', 'dare', 'ought',
-    ];
-    
-    const words = query.split(/[\s\p{P}]+/u).filter(word => 
-      word.length > 1 && 
-      !stopWords.includes(word.toLowerCase()) &&
-      !/^\d+$/.test(word)
-    );
-    
-    if (words.length > 0) {
-      params.keywords = words;
-    }
-    
-    // 4. Extract location-like patterns (generic, not service-specific)
-    // This looks for patterns like "from X to Y" or "X to Y" in any language
-    // Supports both English and Chinese patterns
-    const locationPatterns = [
-      // English: "from X to Y"
-      /from\s+([^\s,，]+(?:\s+[^\s,，]+){0,2})\s+to\s+([^\s,，]+(?:\s+[^\s,，]+){0,2})/i,
-      // Generic: "X to Y" or "X -> Y"
-      /([^\s,，]+(?:\s+[^\s,，]+){0,2})\s+(?:to|->)\s+([^\s,，]+(?:\s+[^\s,，]+){0,2})/i,
-      // Chinese: "从X到Y" or "X到Y"
-      /从\s*([^\s,，]+(?:\s*[^\s,，]+){0,2})\s*到\s*([^\s,，]+(?:\s*[^\s,，]+){0,2})/,
-      // Chinese: "X到Y" (X and Y separated by 到)
-      /([^\s,，]+(?:\s*[^\s,，]+){0,2})\s*到\s*([^\s,，]+(?:\s*[^\s,，]+){0,2})/,
-    ];
-    
-    for (const pattern of locationPatterns) {
-      const locationMatch = query.match(pattern);
-      if (locationMatch && locationMatch[1] && locationMatch[2]) {
-        params.from = locationMatch[1].trim();
-        params.to = locationMatch[2].trim();
-        params.source = params.from; // Alternative name
-        params.destination = params.to; // Alternative name
-        break;
-      }
-    }
-
-    
-    // 5. Always include the original query for context
-    // This ensures LLM has the full context even if we couldn't extract specific parameters
-    params.query = query;
-    params.text = query;
-    
-    return params;
-  }
-
-  /**
-   * Update confirmation configuration
-   */
-  updateConfirmationConfig(config: Partial<ConfirmationConfig>): void {
-    logger.info('[CloudIntentEngine] Updating confirmation configuration');
-    // In a real implementation, this would update the configuration
-    // For now, just log it
-    logger.debug(`[CloudIntentEngine] New config: ${JSON.stringify(config, null, 2)}`);
-  }
-}
-
-// ==================== Helper Type Definitions ====================
-
-interface QueryPreAnalysis {
-  query: string;
-  isLikelySimpleQuery: boolean;
-  isLikelyDataRetrievalQuery: boolean;
-  hasMultipleActions: boolean;
-  hasTemporalMarkers: boolean;
-  likelySingleToolMatch: string | null;
-  complexityScore: number;
 }

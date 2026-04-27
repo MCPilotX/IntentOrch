@@ -19,7 +19,7 @@ export type {
 
 // Export constants
 export {
-  MCPILOT_HOME,
+  INTORCH_HOME,
   CONFIG_PATH,
   LOGS_DIR,
   VENVS_DIR,
@@ -48,7 +48,4 @@ export {
 
 // Export logger
 export { logger } from './logger';
-
-// Export performance monitor
-export { PerformanceMonitor } from './performance-monitor';
 

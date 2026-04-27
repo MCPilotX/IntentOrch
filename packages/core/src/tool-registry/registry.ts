@@ -2,8 +2,6 @@ import fs from 'fs/promises';
 import path from 'path';
 import { getInTorchDir } from '../utils/paths';
 import { normalizeServerName, getDisplayName } from '../utils/server-name';
-import { extractKeywords } from '../utils/keyword-extractor';
-import { Index } from 'flexsearch';
 
 export interface ToolMetadata {
   name: string;
@@ -41,14 +39,9 @@ export interface ExtendedManifest {
 export class ToolRegistry {
   private tools: Map<string, ToolMetadata> = new Map();
   private registryPath: string;
-  private searchIndex: Index;
 
   constructor() {
     this.registryPath = path.join(getInTorchDir(), 'tool-registry.json');
-    this.searchIndex = new Index({
-      tokenize: 'forward',
-      cache: true
-    });
   }
 
   async load(): Promise<void> {
@@ -57,8 +50,6 @@ export class ToolRegistry {
       const registry = JSON.parse(data);
       
       this.tools.clear();
-      // Reset index on reload
-      this.searchIndex = new Index({ tokenize: 'forward', cache: true });
 
       for (const tool of registry.tools || []) {
         // Skip tools with invalid serverName (e.g., "github:/" from old buggy URL parsing)
@@ -74,43 +65,11 @@ export class ToolRegistry {
         
         const key = this.getToolKey(tool.serverName, tool.name);
         this.tools.set(key, tool);
-        this.updateIndex(tool);
       }
     } catch (error) {
       // File does not exist or format error, use empty registry
       this.tools.clear();
     }
-  }
-
-  // Helper to build searchable content and update index
-  private updateIndex(tool: ToolMetadata): void {
-    const schemaDescriptions = Object.values(tool.parameters || {})
-      .map((prop: any) => prop.description || '')
-      .join(' ');
-
-    const indexContent = [
-      tool.name,
-      tool.description || '',
-      schemaDescriptions,
-      ...(tool.keywords || [])
-    ].join(' ');
-    
-    // Use tool key as index ID
-    this.searchIndex.add(this.getToolKey(tool.serverName, tool.name), indexContent);
-  }
-
-  /**
-   * Search tools using FlexSearch full-text index
-   */
-  searchTools(query: string): ToolMetadata[] {
-    const results = this.searchIndex.search(query, {
-      limit: 20,
-      suggest: true
-    });
-    
-    return (results as string[])
-      .map(key => this.tools.get(key))
-      .filter((t): t is ToolMetadata => t !== undefined);
   }
 
   async save(): Promise<void> {
@@ -156,7 +115,6 @@ export class ToolRegistry {
       
       const key = this.getToolKey(normalizedServerName, tool.name);
       this.tools.set(key, toolWithServer);
-      this.updateIndex(toolWithServer); // Update FlexSearch index
       
       console.log(`Registered tool: ${tool.name} from ${displayName} (${normalizedServerName})${requiresPreprocessing ? ' [requires preprocessing]' : ''}`);
     }
@@ -208,7 +166,6 @@ export class ToolRegistry {
           
           if (!existingTool.isDynamic || existingTime < newTime) {
             this.tools.set(key, toolMetadata);
-            this.updateIndex(toolMetadata); // Update FlexSearch index
             console.log(`[ToolRegistry] Updated dynamic tool: ${tool.name} from ${displayName}`);
           } else {
             console.log(`[ToolRegistry] Skipping existing dynamic tool: ${tool.name}`);
@@ -216,7 +173,6 @@ export class ToolRegistry {
         } else {
           // Register new tool
           this.tools.set(key, toolMetadata);
-          this.updateIndex(toolMetadata); // Update FlexSearch index
           console.log(`[ToolRegistry] Registered dynamic tool: ${tool.name} from ${displayName}`);
         }
       } catch (error) {
@@ -286,55 +242,6 @@ export class ToolRegistry {
 
   private getToolKey(serverName: string, toolName: string): string {
     return `${serverName}::${toolName}`;
-  }
-
-  // Intelligent tool matching: guess required tools based on query content
-  async guessToolsForQuery(query: string): Promise<ToolMetadata[]> {
-    const keywords = this.extractKeywords(query);
-    const matchedTools: Array<{ tool: ToolMetadata; score: number }> = [];
-    
-    for (const tool of this.tools.values()) {
-      let score = 0;
-      
-      // 1. Check tool keyword matches
-      if (tool.keywords) {
-        for (const keyword of keywords) {
-          if (tool.keywords.some(k => k.toLowerCase().includes(keyword.toLowerCase()))) {
-            score += 3;
-          }
-        }
-      }
-      
-      // 2. Check tool name matches
-      for (const keyword of keywords) {
-        if (tool.name.toLowerCase().includes(keyword.toLowerCase())) {
-          score += 2;
-        }
-      }
-      
-      // 3. Check tool description matches
-      if (tool.description) {
-        for (const keyword of keywords) {
-          if (tool.description.toLowerCase().includes(keyword.toLowerCase())) {
-            score += 1;
-          }
-        }
-      }
-      
-      if (score > 0) {
-        matchedTools.push({ tool, score });
-      }
-    }
-    
-    // Sort by score and return only tools
-    return matchedTools
-      .sort((a, b) => b.score - a.score)
-      .map(item => item.tool);
-  }
-
-  private extractKeywords(query: string): string[] {
-    // Use the shared keyword extractor utility
-    return extractKeywords(query);
   }
 
   /**

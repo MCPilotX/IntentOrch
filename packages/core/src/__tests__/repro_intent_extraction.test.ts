@@ -1,8 +1,8 @@
-import { CloudIntentEngine, AtomicIntent, ToolSelectionResult } from '../packages/core/src/ai/cloud-intent-engine';
-import { ParameterMapper } from '../packages/core/src/mcp/parameter-mapper';
+import { CloudIntentEngine } from '../ai/cloud-intent-engine';
+import { ParameterMapper } from '../mcp/parameter-mapper';
 
 // Mock logger to avoid cluttering output
-jest.mock('../packages/core/src/core/logger', () => ({
+jest.mock('../core/logger', () => ({
   logger: {
     info: jest.fn(),
     debug: jest.fn(),
@@ -44,38 +44,6 @@ describe('CloudIntentEngine Parameter Extraction Fix', () => {
       },
     ];
     engine.setAvailableTools(mockTools);
-  });
-
-  it('should merge Phase 1 parameters into Phase 2 tool arguments', async () => {
-    const intent: AtomicIntent = {
-      id: 'A1',
-      type: 'search',
-      description: '查询车票',
-      parameters: {
-        from: '北京',
-        to: '上海',
-      },
-    };
-
-    // Mock LLM response for tool selection (Phase 2)
-    // Simulating a case where LLM fails to extract arguments from the simplified description
-    const mockLlmResponse = JSON.stringify({
-      tool_name: 'get-tickets',
-      arguments: {
-        fromStation: null,
-        toStation: null,
-      },
-      confidence: 0.9,
-    });
-
-    // We need to mock callLLM which is private, or mock the whole process
-    // For this test, we'll manually call the private parseToolSelectionResponse
-    const result = (engine as any).parseToolSelectionResponse(mockLlmResponse, intent);
-
-    expect(result.toolName).toBe('get-tickets');
-    // from/to should be mapped to fromStation/toStation via ParameterMapper
-    expect(result.mappedParameters.fromStation).toBe('北京');
-    expect(result.mappedParameters.toStation).toBe('上海');
   });
 
   it('should correctly extract locations using the refined regex', () => {

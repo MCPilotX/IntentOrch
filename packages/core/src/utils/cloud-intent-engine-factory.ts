@@ -121,17 +121,6 @@ export async function createCloudIntentEngine(
   // Based on the type definition, CloudIntentEngine has an initialize() method
   await engine.initialize();
   
-  // Log configuration (without exposing API key)
-  const safeConfig = {
-    ...config,
-    llm: {
-      ...config.llm,
-      apiKey: config.llm.apiKey ? '***' + config.llm.apiKey.slice(-4) : '(not set)'
-    }
-  };
-  
-  console.log('Created CloudIntentEngine with configuration:', safeConfig);
-  
   return engine;
 }
 

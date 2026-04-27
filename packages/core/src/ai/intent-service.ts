@@ -68,12 +68,7 @@ export class IntentService {
         aiConfig: this.aiConfig
       });
       
-      // Inject ToolRegistry into the engine for FlexSearch capabilities
-      if (this.cloudIntentEngine.setToolRegistry) {
-        this.cloudIntentEngine.setToolRegistry(this.toolRegistry);
-      }
-      
-      console.log('[IntentService] CloudIntentEngine initialized with ToolRegistry injection');
+      console.log('[IntentService] CloudIntentEngine initialized');
     }
   }
   
@@ -132,9 +127,9 @@ export class IntentService {
       // Set available tools for the intent engine
       this.cloudIntentEngine.setAvailableTools(tools);
       
-      // Parse and plan the intent using CloudIntentEngine (includes tool selection)
-      console.log('[IntentService] Calling parseAndPlan...');
-      const plan = await this.cloudIntentEngine.parseAndPlan(intent);
+      // Parse and plan the intent using CloudIntentEngine (Plan → Confirm → Execute pipeline)
+      console.log('[IntentService] Calling planQuery...');
+      const plan = await this.cloudIntentEngine.planQuery(intent);
       
       // Convert the plan to workflow steps
       const steps = await this.convertToWorkflowSteps(plan, context);
@@ -158,28 +153,24 @@ export class IntentService {
     }
   }
   
-  private async convertToWorkflowSteps(parseResult: any, context?: any): Promise<WorkflowStep[]> {
+  private async convertToWorkflowSteps(plan: any, context?: any): Promise<WorkflowStep[]> {
     const steps: WorkflowStep[] = [];
     
-    if (!parseResult || !parseResult.parsedIntents || parseResult.parsedIntents.length === 0) {
+    if (!plan || !plan.steps || plan.steps.length === 0) {
       return steps;
     }
     
-    for (const atomicIntent of parseResult.parsedIntents) {
+    for (const planStep of plan.steps) {
       const stepId = `step_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
       
-      const toolSelection = parseResult.toolSelections?.find(
-        (selection: any) => selection.intentId === atomicIntent.id
-      );
-      
-      if (toolSelection && toolSelection.toolName) {
-        const serverId = await this.extractServerId(toolSelection.toolName, context);
+      if (planStep.toolName) {
+        const serverId = await this.extractServerId(planStep.toolName, context);
         const step: WorkflowStep = {
           id: stepId,
           type: 'tool',
           serverId: serverId,
-          toolName: toolSelection.toolName,
-          parameters: await this.adaptParameters(atomicIntent.parameters, { name: toolSelection.toolName })
+          toolName: planStep.toolName,
+          parameters: await this.adaptParameters(planStep.arguments || {}, { name: planStep.toolName })
         };
         
         steps.push(step);
@@ -361,16 +352,16 @@ export class IntentService {
     }
   }
   
-  private calculateConfidence(parseResult: any): number {
-    if (!parseResult || !parseResult.parsedIntents || parseResult.parsedIntents.length === 0) return 0;
+  private calculateConfidence(plan: any): number {
+    if (!plan || !plan.steps || plan.steps.length === 0) return 0;
     let confidence = 0.6;
-    if (parseResult.toolSelections?.length > 0) confidence += 0.2;
+    if (plan.steps.length > 0) confidence += 0.2;
     return Math.min(confidence, 0.95);
   }
   
-  private generateExplanation(parseResult: any, toolCount: number): string {
-    if (!parseResult || !parseResult.parsedIntents || parseResult.parsedIntents.length === 0) return 'Unable to parse intent.';
-    return `Parsed ${parseResult.parsedIntents.length} intents with ${parseResult.toolSelections?.length || 0} tools selected.`;
+  private generateExplanation(plan: any, toolCount: number): string {
+    if (!plan || !plan.steps || plan.steps.length === 0) return 'Unable to parse intent.';
+    return `Parsed ${plan.steps.length} steps with ${toolCount} tools available.`;
   }
 }
 

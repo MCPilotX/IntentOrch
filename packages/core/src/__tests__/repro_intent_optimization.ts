@@ -1,7 +1,5 @@
 
 import { ToolRegistry } from '../mcp/tool-registry';
-import { ToolScorer } from '../ai/tool-scorer';
-import { AtomicIntent } from '../ai/cloud-intent-engine';
 import { Tool } from '../mcp/types';
 import { ParameterMapper } from '../mcp/parameter-mapper';
 
@@ -50,7 +48,7 @@ async function testIntentOptimization() {
   registry.registerTool(tools[1], async () => ({ content: [] }), 'server-2', 'PlotServer');
 
   // 2. 模拟用户意图 (测试查票)
-  const trainIntent: AtomicIntent = {
+  const trainIntent = {
     id: 'A2',
     type: 'query',
     description: '查询2026年5月4日广州到南宁的高铁票',
@@ -63,9 +61,8 @@ async function testIntentOptimization() {
 
   console.log(`\n用户意图: "${trainIntent.description}"`);
 
-  // 3. 测试 FlexSearch 检索
-  const trainSearchResults = registry.searchTools(trainIntent.description);
-  console.log(`FlexSearch 匹配工具: ${trainSearchResults[0]?.tool.name}`);
+  // 3. FlexSearch 检索已移除 — LLM function calling 直接处理工具选择
+  console.log('(FlexSearch 检索已移除，由 LLM function calling 替代)');
 
   // 4. 测试日期归一化逻辑
   const normalizeDate = (dateStr: string) => {

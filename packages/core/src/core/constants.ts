@@ -76,14 +76,15 @@ export const ErrorMessages = {
 } as const;
 
 // ==================== Path Constants ====================
-export const MCPILOT_HOME = process.env.MCPILOT_HOME || 
+// Use ~/.intorch as the unified configuration directory
+export const INTORCH_HOME = process.env.INTORCH_HOME || 
   (process.platform === 'win32' 
-    ? path.join(process.env.APPDATA || process.env.HOME || '', '.mcpilot')
-    : path.join(process.env.HOME || '', '.mcpilot'));
+    ? path.join(process.env.APPDATA || process.env.HOME || '', '.intorch')
+    : path.join(process.env.HOME || '', '.intorch'));
 
-export const CONFIG_PATH = path.join(MCPILOT_HOME, 'config.json');
-export const LOGS_DIR = path.join(MCPILOT_HOME, 'logs');
-export const VENVS_DIR = path.join(MCPILOT_HOME, 'venvs');
+export const CONFIG_PATH = path.join(INTORCH_HOME, 'config.json');
+export const LOGS_DIR = path.join(INTORCH_HOME, 'logs');
+export const VENVS_DIR = path.join(INTORCH_HOME, 'venvs');
 
 // ==================== Default Configuration ====================
 export const DEFAULT_CONFIG = {

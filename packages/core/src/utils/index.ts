@@ -9,4 +9,3 @@ export { getProcessesPath, getConfigPath, getLogsDir, getLogPath, getInTorchDir,
 export { normalizeServerName, getDisplayName } from './server-name';
 export { isProcessRunning, isProcessRunningWithRetry, isWindows } from './system';
 export { OwnerProjectFormat } from './owner-project-format';
-export { shouldUseDaemonMode, withDaemonFallback, withDaemonFallbackForProcesses } from './daemon-mode';

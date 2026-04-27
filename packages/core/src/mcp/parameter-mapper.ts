@@ -221,6 +221,8 @@ export class ParameterMapper {
     const schemaProperties = Object.keys(toolSchema.properties || {});
 
     // First, try direct mapping
+    // Track which source params map to which target for multi-value merging
+    const mappedToTarget = new Map<string, { values: string[]; sourceKeys: string[] }>();
     for (const [sourceName, value] of Object.entries(sourceParams)) {
       // If parameter already matches schema, keep it
       if (schemaProperties.includes(sourceName)) {
@@ -230,6 +232,16 @@ export class ParameterMapper {
       // Try to find mapping for this parameter
       const mapping = this.findMapping(toolName, sourceName, schemaProperties);
       if (mapping) {
+        // Track mapping for potential multi-value merging
+        if (!mappedToTarget.has(mapping.targetName)) {
+          mappedToTarget.set(mapping.targetName, { values: [], sourceKeys: [] });
+        }
+        const entry = mappedToTarget.get(mapping.targetName)!;
+        entry.sourceKeys.push(sourceName);
+        if (typeof value === 'string' && value.length > 0) {
+          entry.values.push(value);
+        }
+
         // Apply mapping only if target parameter doesn't already exist
         // This prevents overwriting existing values (e.g., when both 'content' and 'text' are provided)
         if (!(mapping.targetName in targetParams)) {
@@ -241,6 +253,24 @@ export class ParameterMapper {
         // Clean up the original parameter if it's not a valid property in schema
         if (!schemaProperties.includes(sourceName)) {
           delete targetParams[sourceName];
+        }
+      }
+    }
+
+    // Multi-value merging: if multiple source params mapped to the same target,
+    // merge their values using the schema description's separator hint.
+    for (const [targetName, info] of mappedToTarget) {
+      if (info.values.length >= 2) {
+        const propSchema = toolSchema.properties[targetName] as any;
+        if (propSchema && propSchema.type === 'string') {
+          // Determine separator from schema description
+          const description = propSchema.description || '';
+          let separator = ',';
+          if (description.includes('|')) separator = '|';
+          else if (description.includes(',')) separator = ',';
+          else if (description.includes('、')) separator = '、';
+          
+          targetParams[targetName] = info.values.join(separator);
         }
       }
     }
@@ -270,6 +300,11 @@ export class ParameterMapper {
         if (extracted) {
           targetParams[propName] = extracted;
         }
+      }
+      // Array to string conversion: if schema expects string but we got an array,
+      // join the array elements with comma separator
+      if (propSchema.type === 'string' && Array.isArray(targetParams[propName])) {
+        targetParams[propName] = targetParams[propName].join(',');
       }
     }
 
@@ -418,7 +453,18 @@ export class ParameterMapper {
   }
 
   /**
+   * Common prefixes that LLMs often add to parameter names
+   * when they split a multi-value parameter into individual fields
+   */
+  private static readonly COMMON_PARAM_PREFIXES = [
+    'from_', 'to_', 'source_', 'dest_', 'destination_',
+    'start_', 'end_', 'begin_', 'finish_',
+    'origin_', 'target_', 'input_', 'output_',
+  ];
+
+  /**
    * Find match based on fuzzy substring/similarity
+   * Supports prefix stripping for LLM-generated parameter names
    */
   private static findFuzzyMatch(sourceLower: string, targetProperties: string[]): string | null {
     if (sourceLower.length < 3) return null;
@@ -431,6 +477,25 @@ export class ParameterMapper {
         return prop;
       }
     }
+
+    // Try stripping common prefixes from source name and match against target
+    // This handles cases like "from_city" -> "citys", "to_station" -> "station"
+    for (const prefix of this.COMMON_PARAM_PREFIXES) {
+      if (sourceLower.startsWith(prefix)) {
+        const stripped = sourceLower.slice(prefix.length);
+        if (stripped.length >= 3) {
+          for (const prop of targetProperties) {
+            const propLower = prop.toLowerCase();
+            // Check if stripped source is a substring of target or vice versa
+            if ((propLower.includes(stripped) || stripped.includes(propLower)) &&
+                Math.abs(propLower.length - stripped.length) <= 3) {
+              return prop;
+            }
+          }
+        }
+      }
+    }
+
     return null;
   }
 

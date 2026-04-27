@@ -192,6 +192,11 @@ export class WorkflowEngine {
         }
       });
       
+      // Handle transport errors to prevent process crash
+      client.on('error', (error) => {
+        console.warn(`⚠️ MCP Client error for ${serverName}: ${error.message || error}`);
+      });
+
       // Connect the client
       await client.connect();
       

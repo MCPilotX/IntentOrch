@@ -11,6 +11,7 @@ import { ensureInTorchDir, getDaemonPidPath, getDaemonLogPath, getLogPath } from
 import { DaemonConfig } from './types';
 import { MCPClient } from '../mcp/client';
 import { getExecuteService, type UnifiedExecutionOptions } from '../ai/execute-service';
+import { healthCheckScheduler } from '../kernel/health-check-scheduler';
 
 export class DaemonServer {
   private server: http.Server;
@@ -448,6 +449,12 @@ export class DaemonServer {
                         env: { ...process.env } as Record<string, string>
                     }
                 });
+
+                // Handle transport errors to prevent process crash
+                client.on('error', (error) => {
+                    console.warn(`[Daemon] MCP Client error for ${sid}: ${error.message || error}`);
+                });
+
                 await client.connect();
                 const out = await client.callTool(s.toolName, s.parameters || { /* Intentionally empty */ });
                 results.push({ toolName: s.toolName, status: 'success', output: out });
@@ -1061,9 +1068,91 @@ export class DaemonServer {
           console.error('[Daemon] Error auto-starting servers:', error);
         });
         
+        // Initialize health check scheduler for all running servers
+        this.initHealthCheckScheduler().catch(error => {
+          console.error('[Daemon] Error initializing health check scheduler:', error);
+        });
+        
         resolve();
       });
     });
+  }
+  
+  /**
+   * Initialize health check scheduler for all running MCP servers
+   * Registers each running server with a health check function and starts periodic monitoring
+   */
+  private async initHealthCheckScheduler(): Promise<void> {
+    try {
+      console.log('[Daemon] Initializing health check scheduler...');
+      
+      // Get all running servers
+      const processManager = getProcessManager();
+      const runningServers = await processManager.list();
+      const runningProcesses = runningServers.filter(p => p.status === 'running');
+      
+      if (runningProcesses.length === 0) {
+        console.log('[Daemon] No running servers to register for health checks');
+        return;
+      }
+      
+      console.log(`[Daemon] Registering ${runningProcesses.length} running servers for health checks`);
+      
+      for (const server of runningProcesses) {
+        const serverName = server.serverName || server.name || `server-${server.pid}`;
+        
+        // Register a health check function that pings the server process
+        healthCheckScheduler.registerServer(serverName, async () => {
+          try {
+            // Check if the process is still running
+            const processInfo = await processManager.get(server.pid);
+            return processInfo !== null && processInfo?.status === 'running';
+          } catch {
+            return false;
+          }
+        });
+        
+        console.log(`[Daemon] Registered health check for server: ${serverName} (PID: ${server.pid})`);
+      }
+      
+      // Listen for health state changes
+      healthCheckScheduler.on('degraded', (result) => {
+        console.warn(`[Daemon] Health check: Server "${result.serverName}" is DEGRADED (${result.consecutiveFailures} consecutive failures)`);
+      });
+      
+      healthCheckScheduler.on('recovered', (result) => {
+        console.log(`[Daemon] Health check: Server "${result.serverName}" RECOVERED`);
+      });
+      
+      // Start the scheduler
+      healthCheckScheduler.start();
+      console.log('[Daemon] Health check scheduler started successfully');
+      
+    } catch (error) {
+      console.error('[Daemon] Failed to initialize health check scheduler:', error);
+    }
+  }
+  
+  /**
+   * Register a newly started server with the health check scheduler
+   */
+  private async registerServerHealthCheck(serverName: string, pid: number): Promise<void> {
+    try {
+      const processManager = getProcessManager();
+      
+      healthCheckScheduler.registerServer(serverName, async () => {
+        try {
+          const processInfo = await processManager.get(pid);
+          return processInfo !== null && processInfo?.status === 'running';
+        } catch {
+          return false;
+        }
+      });
+      
+      console.log(`[Daemon] Registered health check for newly started server: ${serverName} (PID: ${pid})`);
+    } catch (error) {
+      console.error(`[Daemon] Failed to register health check for server ${serverName}:`, error);
+    }
   }
   
   /**
@@ -1223,10 +1312,14 @@ export class DaemonServer {
           env: { ...process.env } as Record<string, string>
         }
       });
-      
+
+      // Handle transport errors to prevent process crash
+      client.on('error', (error) => {
+        console.warn(`[Daemon] MCP Client error for ${serverInfo.name} during discovery: ${error.message || error}`);
+      });
+
       // Connect to server
-      await client.connect();
-      
+      await client.connect();      
       // List tools
       const tools = await client.listTools();
       console.log(`[Daemon] Discovered ${tools.length} tools dynamically from server ${serverInfo.name}`);

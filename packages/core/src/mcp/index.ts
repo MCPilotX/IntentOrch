@@ -6,17 +6,11 @@
 // Export type definitions
 export * from './types';
 
-// Export transport layer
-export * from './transport';
-
 // Export client
 export * from './client';
 
 // Export tool registry
 export * from './tool-registry';
-
-// Export enhanced service discovery
-export * from './service-discovery';
 
 // Export tool metadata standardization
 export * from './tool-metadata';

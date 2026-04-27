@@ -19,7 +19,7 @@ export type { RuntimeType, ServiceConfig, Config, AIConfig, DetectionResult } fr
 
 // ==================== AI Modules ====================
 export { AI, AIConfigManager, CloudIntentEngine } from './ai';
-export type { AskResult, IntentResult, CloudIntentEngineConfig } from './ai';
+export type { AskResult, CloudIntentEngineConfig } from './ai';
 
 // ==================== Execute Service ====================
 export { ExecuteService, getExecuteService, createExecuteService } from './ai/execute-service';
@@ -46,6 +46,7 @@ export * from './workflow';
 
 // ==================== Utility Functions ====================
 export * from './utils';
+export { getSqliteDb, closeSqliteDb } from './utils/sqlite';
 
 // ==================== Type Definitions ====================
 export * from './types';
@@ -129,8 +130,7 @@ const intentorch = {
   configureAI: adapter.configureAI.bind(adapter),
   initCloudIntentEngine: adapter.initCloudIntentEngine.bind(adapter),
   connectMCPServer: adapter.connectMCPServer.bind(adapter),
-  parseAndPlanWorkflow: adapter.parseAndPlanWorkflow.bind(adapter),
-  executeWorkflowWithTracking: adapter.executeWorkflowWithTracking.bind(adapter),
+  processQuery: adapter.processQuery.bind(adapter),
   getConnectedServers: adapter.getConnectedServers.bind(adapter),
   disconnectMCPServer: adapter.disconnectMCPServer.bind(adapter),
   cleanup: adapter.cleanup.bind(adapter),

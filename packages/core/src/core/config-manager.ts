@@ -1,6 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { CONFIG_PATH, MCPILOT_HOME, DEFAULT_CONFIG } from './constants';
+import { CONFIG_PATH, INTORCH_HOME, DEFAULT_CONFIG } from './constants';
 import {
   ServiceConfig,
   RuntimeType,
@@ -12,7 +12,7 @@ import {
 import { logger } from './logger';
 
 export class ConfigManager {
-  private static CONFIG_DIR = MCPILOT_HOME;
+  private static CONFIG_DIR = INTORCH_HOME;
   private static SERVICES_DIR = path.join(this.CONFIG_DIR, 'services');
   private static DOCKER_HOSTS_DIR = path.join(this.CONFIG_DIR, 'config', 'docker-hosts');
   private static RUNTIME_PROFILES_DIR = path.join(this.CONFIG_DIR, 'config', 'runtime-profiles');

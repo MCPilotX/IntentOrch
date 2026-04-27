@@ -24,25 +24,13 @@ export class AutoStartManager {
 
   /**
    * Analyze intent and determine required servers
+   * Note: This previously used FlexSearch keyword matching to guess tools.
+   * Now LLM function calling handles tool selection directly, so this method
+   * returns an empty list (no pre-emptive server startup needed).
    */
-  async analyzeIntentForServers(intent: string): Promise<string[]> {
-    console.log(`Analyzing intent for required servers: "${intent}"`);
-    
-    // Use tool registry to guess required tools
-    const suggestedTools = await this.toolRegistry.guessToolsForQuery(intent);
-    
-    if (suggestedTools.length === 0) {
-      console.log('No tools found for the intent');
-      return [];
-    }
-    
-    // Get unique servers from suggested tools
-    const servers = Array.from(
-      new Set(suggestedTools.map(tool => tool.serverName))
-    );
-    
-    console.log(`Found ${servers.length} required servers: ${servers.map(s => getDisplayName(s)).join(', ')}`);
-    return servers;
+  async analyzeIntentForServers(_intent: string): Promise<string[]> {
+    // LLM function calling handles tool selection directly
+    return [];
   }
 
   /**

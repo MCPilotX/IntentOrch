@@ -132,7 +132,7 @@ export class StaticConfigManagerAdapter {
   static async deleteDockerHostConfig(hostName: string): Promise<void> {
     // Note: This method doesn't exist in ConfigService yet
     // For now, we'll implement a simple version
-    const configPath = `${process.env.MCPILOT_HOME || '~/.mcpilot'}/config/docker-hosts/${hostName}.json`;
+    const configPath = `${process.env.INTORCH_HOME || '~/.intorch'}/config/docker-hosts/${hostName}.json`;
     const fs = await import('fs/promises');
     try {
       await fs.unlink(configPath);

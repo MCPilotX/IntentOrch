@@ -13,9 +13,24 @@ import { logsCommand } from './logs';
 import { workflowCommand } from './workflow';
 import { daemonCommand } from './daemon';
 import { dashboardCommand } from './dashboard';
-import { PROGRAM_NAME, PROGRAM_DESCRIPTION, PROGRAM_VERSION } from '@intentorch/core';
+import { PROGRAM_NAME, PROGRAM_DESCRIPTION, PROGRAM_VERSION, closeSqliteDb } from '@intentorch/core';
 
 const program = new Command();
+
+// Ensure DB is closed on exit
+process.on('exit', () => {
+  closeSqliteDb();
+});
+
+process.on('SIGINT', () => {
+  closeSqliteDb();
+  process.exit(0);
+});
+
+process.on('SIGTERM', () => {
+  closeSqliteDb();
+  process.exit(0);
+});
 
 program
   .name(PROGRAM_NAME)

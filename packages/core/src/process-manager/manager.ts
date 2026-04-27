@@ -222,49 +222,7 @@ export class ProcessManager {
         return;
       }
       
-      console.log(`🔍 Attempting dynamic tool discovery for ${manifest.name}`);
-      
-      // Import the tool discovery service
-      const { getMCPToolDiscovery } = await import('../mcp/tool-discovery');
-      const toolDiscovery = getMCPToolDiscovery();
-      
-      // Check if server supports dynamic discovery
-      const supportsDynamic = await toolDiscovery.supportsDynamicDiscovery(serverName);
-      
-      if (!supportsDynamic) {
-        console.log(`ℹ️  Server does not support dynamic tool discovery`);
-        return;
-      }
-      
-      // Wait a bit for the server to fully initialize
-      console.log(`⏳ Waiting for server to initialize before tool discovery...`);
-      await new Promise(resolve => setTimeout(resolve, 3000));
-      
-      // Discover tools from the running process
-      const discoveredTools = await toolDiscovery.discoverToolsFromProcess(
-        serverName,
-        childProcess,
-        manifest,
-        {
-          timeout: 30000,
-          autoRegister: true,
-          maxRetries: 3,
-          retryDelay: 1000,
-          maxRetryDelay: 10000
-        }
-      );
-      
-      if (discoveredTools.length > 0) {
-        console.log(`✅ Discovered ${discoveredTools.length} tools from ${manifest.name}`);
-        for (const tool of discoveredTools.slice(0, 5)) {
-          console.log(`   - ${tool.name}: ${tool.description || 'No description'}`);
-        }
-        if (discoveredTools.length > 5) {
-          console.log(`   ... and ${discoveredTools.length - 5} more`);
-        }
-      } else {
-        console.log(`ℹ️  No tools discovered from ${manifest.name}`);
-      }
+      console.log(`ℹ️  Dynamic tool discovery is not available (module removed)`);
       
     } catch (error: any) {
       console.error(`⚠️  Tool discovery failed for ${manifest.name}:`, error.message);

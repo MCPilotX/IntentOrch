@@ -146,7 +146,10 @@ export interface MCPClientConfig {
   autoConnect?: boolean;
   timeout?: number;
   maxRetries?: number;
+  /** Optional server name for circuit breaker identification */
+  serverName?: string;
 }
+
 
 // ==================== Event Types ====================
 
