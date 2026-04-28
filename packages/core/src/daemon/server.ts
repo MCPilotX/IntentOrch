@@ -1085,6 +1085,9 @@ export class DaemonServer {
     ensureInTorchDir();
     await fs.writeFile(this.config.pidFile, process.pid.toString());
     
+    // Generate daemon auth token if not exists
+    await this.ensureAuthToken();
+    
     // Start the HTTP server
     return new Promise<void>(async (resolve) => {
       this.server.listen(this.config.port, this.config.host, async () => {
@@ -1103,6 +1106,27 @@ export class DaemonServer {
         resolve();
       });
     });
+  }
+  
+  /**
+   * Ensure daemon auth token exists, generate one if not
+   */
+  private async ensureAuthToken(): Promise<void> {
+    try {
+      const secretManager = getSecretManager();
+      const existingToken = await secretManager.get('daemon_auth_token');
+      
+      if (!existingToken) {
+        const crypto = await import('crypto');
+        const newToken = crypto.randomBytes(32).toString('hex');
+        await secretManager.set('daemon_auth_token', newToken);
+        console.log('[Daemon] Generated new auth token');
+      } else {
+        console.log('[Daemon] Using existing auth token');
+      }
+    } catch (error) {
+      console.error('[Daemon] Failed to ensure auth token:', error);
+    }
   }
   
   /**
