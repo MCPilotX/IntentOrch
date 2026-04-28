@@ -14,6 +14,7 @@
  */
 
 import * as fs from 'fs/promises';
+import * as fsSync from 'fs';
 import * as path from 'path';
 import { 
   INTORCH_HOME, 
@@ -29,7 +30,9 @@ import {
   RuntimeSpecificConfig,
   DockerConnectionConfig,
   AIConfig,
-  AIProvider
+  AIProvider,
+  DetectionResult,
+  DetectionEvidence,
 } from './types';
 import { logger } from './logger';
 
@@ -306,6 +309,154 @@ export class ConfigService {
     } catch (error: any) {
       logger.error(`Failed to save service config for ${serviceName}: ${error.message}`);
       throw error;
+    }
+  }
+
+  /**
+   * Update service detection result and optionally auto-update runtime
+   */
+  async updateServiceDetection(
+    serviceName: string,
+    detection: DetectionResult,
+  ): Promise<ServiceConfig> {
+    const config = await this.getServiceConfig(serviceName) || {
+      name: serviceName,
+      path: '',
+    };
+
+    config.detectedRuntime = detection.runtime;
+    config.detectionConfidence = detection.confidence;
+    config.detectionSource = detection.source;
+    config.detectionEvidence = detection.evidence;
+    config.detectionWarning = detection.warning;
+    config.lastDetectedAt = new Date().toISOString();
+
+    // If confidence is high, automatically update runtime
+    const appConfig = await this.getAppConfig();
+    const detectionThreshold = appConfig.detectionThreshold ?? 0.7;
+    if (detection.confidence >= detectionThreshold) {
+      config.runtime = detection.runtime;
+      logger.info(`Auto-updated runtime for ${serviceName}: ${detection.runtime} (confidence: ${detection.confidence})`);
+    }
+
+    await this.saveServiceConfig(serviceName, config);
+    return config;
+  }
+
+  /**
+   * Set service runtime explicitly
+   */
+  async setServiceRuntime(
+    serviceName: string,
+    runtime: RuntimeType,
+    runtimeConfig?: RuntimeSpecificConfig,
+  ): Promise<ServiceConfig> {
+    const config = await this.getServiceConfig(serviceName);
+    if (!config) {
+      throw new Error(`Service ${serviceName} not found`);
+    }
+
+    config.runtime = runtime;
+    config.detectionSource = 'explicit';
+    config.detectionConfidence = 1.0;
+
+    if (runtimeConfig) {
+      config.runtimeConfig = runtimeConfig;
+    }
+
+    await this.saveServiceConfig(serviceName, config);
+    return config;
+  }
+
+  /**
+   * Resolve and merge service configuration with defaults
+   */
+  resolveServiceConfig(
+    userConfig: Partial<ServiceConfig>,
+    servicePath: string,
+  ): ServiceConfig {
+    const baseConfig: ServiceConfig = {
+      name: userConfig.name || path.basename(servicePath),
+      path: servicePath,
+    };
+
+    // Merge user configuration
+    const mergedConfig = { ...baseConfig, ...userConfig };
+
+    // Ensure path is absolute
+    if (!path.isAbsolute(mergedConfig.path)) {
+      mergedConfig.path = path.resolve(mergedConfig.path);
+    }
+
+    // If user specified runtime, set highest priority
+    if (mergedConfig.runtime) {
+      mergedConfig.detectionSource = 'explicit';
+      mergedConfig.detectionConfidence = 1.0;
+    }
+
+    return mergedConfig;
+  }
+
+  /**
+   * Validate service configuration
+   */
+  validateServiceConfig(config: ServiceConfig): string[] {
+    const errors: string[] = [];
+
+    if (!config.name) {
+      errors.push('Service name is required');
+    }
+
+    if (!config.path) {
+      errors.push('Service path is required');
+    } else if (!fsSync.existsSync(config.path)) {
+      errors.push(`Service path does not exist: ${config.path}`);
+    }
+
+    if (!config.runtime && !config.detectedRuntime) {
+      errors.push('Runtime type is required (either explicit or detected)');
+    }
+
+    if (config.detectionConfidence !== undefined) {
+      if (config.detectionConfidence < 0 || config.detectionConfidence > 1) {
+        errors.push(`Detection confidence must be between 0 and 1, got ${config.detectionConfidence}`);
+      }
+    }
+
+    return errors;
+  }
+
+  /**
+   * Get service detection cache
+   */
+  async getServiceDetectionCache(serviceName: string): Promise<DetectionResult | null> {
+    const cachePath = path.join(this.servicesDir, serviceName, 'detection-cache.json');
+
+    try {
+      const data = await fs.readFile(cachePath, 'utf-8');
+      return JSON.parse(data);
+    } catch (error: any) {
+      if (error.code === 'ENOENT') {
+        return null;
+      }
+      logger.error(`Failed to read detection cache for ${serviceName}: ${error.message}`);
+      return null;
+    }
+  }
+
+  /**
+   * Save service detection cache
+   */
+  async saveServiceDetectionCache(serviceName: string, detection: DetectionResult): Promise<void> {
+    const cachePath = path.join(this.servicesDir, serviceName, 'detection-cache.json');
+    const cacheDir = path.dirname(cachePath);
+
+    try {
+      await fs.mkdir(cacheDir, { recursive: true });
+      await fs.writeFile(cachePath, JSON.stringify(detection, null, 2), 'utf-8');
+      logger.debug(`Detection cache saved for ${serviceName}`);
+    } catch (error: any) {
+      logger.error(`Failed to save detection cache for ${serviceName}: ${error.message}`);
     }
   }
 

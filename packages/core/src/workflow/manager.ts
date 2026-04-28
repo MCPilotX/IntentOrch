@@ -1,3 +1,4 @@
+import { logger } from "../core/logger";
 import fs from 'fs/promises';
 import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
@@ -101,7 +102,7 @@ export class WorkflowManager {
             workflows.push(workflow);
           } catch (e) {
             // Skip corrupted files
-            console.warn(`Skipping corrupted workflow file: ${file}`);
+            logger.warn(`Skipping corrupted workflow file: ${file}`);
           }
         }
       }

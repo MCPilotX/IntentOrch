@@ -1,3 +1,4 @@
+import { logger } from "../core/logger";
 /**
  * MCP (Model Context Protocol) Module Entry
  * Provides complete MCP protocol support, focusing on MCP tool management
@@ -171,7 +172,7 @@ export async function discoverLocalMCPServers(): Promise<Array<{
       }
     }
   } catch (error) {
-    console.warn('Failed to discover servers from config:', error);
+    logger.warn('Failed to discover servers from config:', error);
   }
 
   // 2. Discover from environment variables

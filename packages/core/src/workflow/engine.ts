@@ -1,3 +1,4 @@
+import { logger } from "../core/logger";
 import { Workflow, WorkflowContext, WorkflowStep } from './types';
 import { ExpressionEvaluator } from './evaluator';
 import { getProcessManager } from '../process-manager/manager';
@@ -31,7 +32,7 @@ export class WorkflowEngine {
       const steps = workflow.steps || [];
       for (const step of steps) {
         if (step.if && !(await ExpressionEvaluator.evaluateCondition(step.if, context))) {
-          console.log(`⏭️ Skipping step ${step.id} (condition not met)`);
+          logger.info(`⏭️ Skipping step ${step.id} (condition not met)`);
           continue;
         }
 
@@ -66,7 +67,7 @@ export class WorkflowEngine {
       const mappedName = await this.mapServerIdToServerName(step.serverId);
       if (mappedName) {
         serverName = mappedName;
-        console.log(`🔧 Mapped serverId "${step.serverId}" to serverName "${serverName}"`);
+        logger.info(`🔧 Mapped serverId "${step.serverId}" to serverName "${serverName}"`);
       }
     }
     
@@ -85,7 +86,7 @@ export class WorkflowEngine {
       throw new Error(`Step ${step.id} is missing toolName`);
     }
 
-    console.log(`🚀 Executing step ${step.id} (Tool: ${toolName} on ${serverName})...`);
+    logger.info(`🚀 Executing step ${step.id} (Tool: ${toolName} on ${serverName})...`);
     
     let attempt = 0;
     const maxAttempts = step.retry?.maxAttempts || 1;
@@ -97,10 +98,10 @@ export class WorkflowEngine {
       } catch (error: any) {
         attempt++;
         if (attempt >= maxAttempts) {
-          console.error(`❌ Step ${step.id} failed after ${maxAttempts} attempts: ${error.message}`);
+          logger.error(`❌ Step ${step.id} failed after ${maxAttempts} attempts: ${error.message}`);
           throw error;
         }
-        console.warn(`⚠️  Step ${step.id} failed, retrying (${attempt}/${maxAttempts})...`);
+        logger.warn(`⚠️  Step ${step.id} failed, retrying (${attempt}/${maxAttempts})...`);
         await new Promise(r => setTimeout(r, step.retry?.delayMs || 1000));
       }
     }
@@ -111,7 +112,7 @@ export class WorkflowEngine {
     for (const server of servers) {
       const isRunning = await pm.getByServerName(server);
       if (!isRunning) {
-        console.log(`🔌 Auto-starting required server: ${server}`);
+        logger.info(`🔌 Auto-starting required server: ${server}`);
         await pm.start(server);
       }
       
@@ -132,7 +133,7 @@ export class WorkflowEngine {
     const isRunning = await pm.getByServerName(serverName);
     
     if (!isRunning) {
-      console.log(`🔌 Auto-starting server for step: ${serverName}`);
+      logger.info(`🔌 Auto-starting server for step: ${serverName}`);
       await pm.start(serverName);
     }
     
@@ -169,7 +170,7 @@ export class WorkflowEngine {
    */
   private async createMCPClientForServer(serverName: string): Promise<void> {
     try {
-      console.log(`🔌 Creating MCP client for server: ${serverName}`);
+      logger.info(`🔌 Creating MCP client for server: ${serverName}`);
       
       // Get registry client to fetch manifest
       const { getRegistryClient } = await import('../registry/client');
@@ -194,7 +195,7 @@ export class WorkflowEngine {
       
       // Handle transport errors to prevent process crash
       client.on('error', (error) => {
-        console.warn(`⚠️ MCP Client error for ${serverName}: ${error.message || error}`);
+        logger.warn(`⚠️ MCP Client error for ${serverName}: ${error.message || error}`);
       });
 
       // Connect the client
@@ -203,9 +204,9 @@ export class WorkflowEngine {
       // Add to cache
       this.clients.set(serverName, client);
       
-      console.log(`✅ MCP client created and connected for server: ${serverName}`);
+      logger.info(`✅ MCP client created and connected for server: ${serverName}`);
     } catch (error: any) {
-      console.error(`❌ Failed to create MCP client for server ${serverName}:`, error.message);
+      logger.error(`❌ Failed to create MCP client for server ${serverName}:`, error.message);
       throw new Error(`Failed to create MCP client for server ${serverName}: ${error.message}`);
     }
   }
@@ -221,7 +222,7 @@ export class WorkflowEngine {
    */
   private async mapServerIdToServerName(serverId: string): Promise<string | null> {
     try {
-      console.log(`🔍 Attempting to map serverId: "${serverId}"`);
+      logger.info(`🔍 Attempting to map serverId: "${serverId}"`);
       
       // First, try to load tool registry to find actualServerName
       const toolRegistryPath = path.join(getInTorchDir(), 'tool-registry.json');
@@ -233,7 +234,7 @@ export class WorkflowEngine {
         // Search for tools with matching serverName (serverId)
         for (const tool of registry.tools || []) {
           if (tool.serverName === serverId && tool.actualServerName) {
-            console.log(`🔍 Found mapping in tool registry: ${serverId} -> ${tool.actualServerName}`);
+            logger.info(`🔍 Found mapping in tool registry: ${serverId} -> ${tool.actualServerName}`);
             return tool.actualServerName;
           }
         }
@@ -245,7 +246,7 @@ export class WorkflowEngine {
       // Strategy 1: Check if serverId is already a running server name
       for (const server of runningServers) {
         if (server.serverName === serverId) {
-          console.log(`🔍 Exact match found: "${serverId}" is already a running server`);
+          logger.info(`🔍 Exact match found: "${serverId}" is already a running server`);
           return serverId;
         }
       }
@@ -259,7 +260,7 @@ export class WorkflowEngine {
           // Try exact project name match
           for (const server of runningServers) {
             if (server.serverName === projectName) {
-              console.log(`🔍 Mapped owner/project "${serverId}" -> "${projectName}"`);
+              logger.info(`🔍 Mapped owner/project "${serverId}" -> "${projectName}"`);
               return projectName;
             }
           }
@@ -277,7 +278,7 @@ export class WorkflowEngine {
           for (const name of possibleNames) {
             for (const server of runningServers) {
               if (server.serverName === name) {
-                console.log(`🔍 Mapped owner/project "${serverId}" -> "${name}" (variation)`);
+                logger.info(`🔍 Mapped owner/project "${serverId}" -> "${name}" (variation)`);
                 return name;
               }
             }
@@ -293,7 +294,7 @@ export class WorkflowEngine {
         // Try exact match first
         for (const server of runningServers) {
           if (server.serverName === serverPart) {
-            console.log(`🔍 Mapped source:server "${serverId}" -> "${serverPart}"`);
+            logger.info(`🔍 Mapped source:server "${serverId}" -> "${serverPart}"`);
             return serverPart;
           }
         }
@@ -309,7 +310,7 @@ export class WorkflowEngine {
         for (const name of possibleNames) {
           for (const server of runningServers) {
             if (server.serverName === name) {
-              console.log(`🔍 Mapped source:server "${serverId}" -> "${name}" (with suffix)`);
+              logger.info(`🔍 Mapped source:server "${serverId}" -> "${name}" (with suffix)`);
               return name;
             }
           }
@@ -320,31 +321,31 @@ export class WorkflowEngine {
       for (const server of runningServers) {
         // Check if serverId is contained in serverName or vice versa
         if (server.serverName.includes(serverId) || serverId.includes(server.serverName)) {
-          console.log(`🔍 Found partial match: "${serverId}" -> "${server.serverName}"`);
+          logger.info(`🔍 Found partial match: "${serverId}" -> "${server.serverName}"`);
           return server.serverName;
         }
       }
       
       // Strategy 5: Try to start the server if not running
-      console.log(`🔍 Attempting to start server: "${serverId}"`);
+      logger.info(`🔍 Attempting to start server: "${serverId}"`);
       try {
         const pid = await pm.start(serverId);
         const serverProcess = await pm.get(pid);
         if (serverProcess && serverProcess.serverName) {
-          console.log(`🔍 Successfully started server: "${serverId}" -> "${serverProcess.serverName}"`);
+          logger.info(`🔍 Successfully started server: "${serverId}" -> "${serverProcess.serverName}"`);
           return serverProcess.serverName;
         } else {
-          console.warn(`⚠️  Started server but couldn't get process info for PID: ${pid}`);
+          logger.warn(`⚠️  Started server but couldn't get process info for PID: ${pid}`);
         }
       } catch (startError) {
-        console.warn(`⚠️  Failed to start server "${serverId}": ${startError}`);
+        logger.warn(`⚠️  Failed to start server "${serverId}": ${startError}`);
       }
       
-      console.warn(`⚠️  Could not map serverId "${serverId}" to any running server`);
+      logger.warn(`⚠️  Could not map serverId "${serverId}" to any running server`);
       return null;
       
     } catch (error) {
-      console.warn(`⚠️  Failed to map serverId "${serverId}": ${error}`);
+      logger.warn(`⚠️  Failed to map serverId "${serverId}": ${error}`);
       return null;
     }
   }

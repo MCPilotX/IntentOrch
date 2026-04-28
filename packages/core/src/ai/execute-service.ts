@@ -24,10 +24,12 @@ import { getRegistryClient } from '../registry/client';
 import { getWorkflowManager } from '../workflow/manager';
 import { WorkflowEngine } from '../workflow/engine';
 import { AutoStartManager } from '../utils/auto-start-manager';
-import { getAIConfig } from '../utils/config';
+import { getConfigService } from '../core/config-service';
 import { createCloudIntentEngine } from '../utils/cloud-intent-engine-factory';
 import { MCPClient } from '../mcp/client';
 import { logger } from '../core/logger';
+import { IntentOrchError, ErrorFactory, ErrorCode } from '../core/error-handler';
+import { Timeouts, KnownServers } from '../core/constants';
 
 import type { AIConfig } from '../core/types';
 
@@ -51,6 +53,9 @@ export interface UnifiedExecutionResult {
   success: boolean;
   result?: any;
   executionSteps?: any[];
+  steps?: any[]; // For web compatibility
+  status?: string; // For web compatibility
+  confidence?: number; // For web compatibility
   error?: string;
   statistics?: {
     totalSteps: number;
@@ -90,10 +95,10 @@ export class ExecuteService {
     if (!this.initPromise) {
       this.initPromise = (async () => {
         // Use provided AI config or get from system
-        this.aiConfig = aiConfig || await getAIConfig();
+        this.aiConfig = aiConfig || await getConfigService().getAIConfig();
         
         if (!this.aiConfig.provider || !this.aiConfig.apiKey) {
-          throw new Error('AI configuration not set. Please configure AI provider and API key.');
+          throw new IntentOrchError(ErrorCode.AI_NOT_CONFIGURED, 'AI configuration not set. Please configure AI provider and API key.');
         }
 
         // Create CloudIntentEngine using the unified factory
@@ -127,7 +132,7 @@ export class ExecuteService {
       await this.initialize();
       
       if (!this.cloudIntentEngine) {
-        throw new Error('CloudIntentEngine not initialized');
+        throw new IntentOrchError(ErrorCode.ENGINE_NOT_INITIALIZED, 'CloudIntentEngine not initialized');
       }
 
       // Handle auto-start if requested
@@ -224,6 +229,7 @@ CRITICAL: Some tools are "helper" tools that only prepare data for other tools (
             stepResults.push({
               stepId,
               toolName: tc.toolName,
+              arguments: tc.arguments,
               success: true,
               result,
               duration,
@@ -275,6 +281,7 @@ CRITICAL: Some tools are "helper" tools that only prepare data for other tools (
         executionSteps: stepResults.map(sr => ({
           name: sr.toolName,
           toolName: sr.toolName,
+          arguments: sr.arguments,
           success: sr.success,
           result: sr.result,
           error: sr.error,
@@ -339,7 +346,7 @@ CRITICAL: Some tools are "helper" tools that only prepare data for other tools (
       const workflowManager = getWorkflowManager();
       
       if (!await workflowManager.exists(workflowName)) {
-        throw new Error(`Workflow "${workflowName}" not found`);
+        throw new IntentOrchError(ErrorCode.WORKFLOW_NOT_FOUND, `Workflow "${workflowName}" not found`);
       }
       
       const workflow = await workflowManager.load(workflowName);
@@ -413,7 +420,7 @@ CRITICAL: Some tools are "helper" tools that only prepare data for other tools (
       await this.initialize();
       
       if (!this.cloudIntentEngine) {
-        throw new Error('CloudIntentEngine not initialized');
+        throw new IntentOrchError(ErrorCode.ENGINE_NOT_INITIALIZED, 'CloudIntentEngine not initialized');
       }
       
       // Connect to running servers
@@ -440,7 +447,8 @@ CRITICAL: Some tools are "helper" tools that only prepare data for other tools (
       const steps = plan.steps.map((step: any) => ({
         id: `step_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
         type: 'tool',
-        serverId: step.serverName || 'generic-service',
+        serverName: step.serverName || step.serverId || 'generic-service',
+        serverId: step.serverName || step.serverId || 'generic-service',
         toolName: step.toolName,
         parameters: step.arguments || {},
       }));
@@ -475,7 +483,7 @@ CRITICAL: Some tools are "helper" tools that only prepare data for other tools (
       await this.initialize();
       
       if (!this.cloudIntentEngine) {
-        throw new Error('CloudIntentEngine not initialized');
+        throw new IntentOrchError(ErrorCode.ENGINE_NOT_INITIALIZED, 'CloudIntentEngine not initialized');
       }
       
       // Connect to running servers
@@ -564,7 +572,7 @@ CRITICAL: Some tools are "helper" tools that only prepare data for other tools (
       await this.initialize();
       
       if (!this.cloudIntentEngine) {
-        throw new Error('CloudIntentEngine not initialized');
+        throw new IntentOrchError(ErrorCode.ENGINE_NOT_INITIALIZED, 'CloudIntentEngine not initialized');
       }
       
       // Connect to running servers
@@ -639,7 +647,7 @@ CRITICAL: Some tools are "helper" tools that only prepare data for other tools (
       await this.initialize();
       
       if (!this.cloudIntentEngine) {
-        throw new Error('CloudIntentEngine not initialized');
+        throw new IntentOrchError(ErrorCode.ENGINE_NOT_INITIALIZED, 'CloudIntentEngine not initialized');
       }
       
       // Connect to running servers
@@ -726,7 +734,7 @@ CRITICAL: Some tools are "helper" tools that only prepare data for other tools (
       const results = await autoStartManager.ensureServersRunning(requiredServers);
       
       if (!autoStartManager.areAllServersReady(results)) {
-        throw new Error('Some required servers failed to start');
+        throw new IntentOrchError(ErrorCode.SERVER_START_FAILED, 'Some required servers failed to start');
       }
       
       logger.debug(`[ExecuteService] Auto-started ${requiredServers.length} servers`);
@@ -753,16 +761,7 @@ CRITICAL: Some tools are "helper" tools that only prepare data for other tools (
           const registryClient = getRegistryClient();
           
           // Try common known server names
-          const knownServers = [
-            'Joooook/12306-mcp',
-            'modelcontextprotocol/server-filesystem',
-            'modelcontextprotocol/server-github',
-            'modelcontextprotocol/server-postgres',
-            'modelcontextprotocol/server-sqlite',
-            'modelcontextprotocol/server-puppeteer',
-          ];
-          
-          for (const serverName of knownServers) {
+          for (const serverName of KnownServers) {
             try {
               const manifest = await registryClient.getCachedManifest(serverName);
               if (manifest) {
@@ -844,7 +843,6 @@ CRITICAL: Some tools are "helper" tools that only prepare data for other tools (
 
   private async getAvailableTools(): Promise<any[]> {
     const tools: any[] = [];
-    const TOOL_LIST_TIMEOUT = 60000; // 60 seconds timeout per server
     
     for (const [name, server] of this.connectedServers) {
       try {
@@ -853,7 +851,7 @@ CRITICAL: Some tools are "helper" tools that only prepare data for other tools (
         const serverTools = await Promise.race([
           server.client.listTools(),
           new Promise<never>((_, reject) => 
-            setTimeout(() => reject(new Error('Request timeout after 60000ms')), TOOL_LIST_TIMEOUT)
+            setTimeout(() => reject(new Error(`Request timeout after ${Timeouts.TOOL_LIST}ms`)), Timeouts.TOOL_LIST)
           )
         ]);
         
@@ -885,12 +883,12 @@ CRITICAL: Some tools are "helper" tools that only prepare data for other tools (
       const serverName = toolToServer.get(toolName);
       
       if (!serverName) {
-        throw new Error(`Tool ${toolName} not found in any connected server`);
+        throw new IntentOrchError(ErrorCode.TOOL_NOT_FOUND, `Tool ${toolName} not found in any connected server`);
       }
 
       const server = this.connectedServers.get(serverName);
       if (!server) {
-        throw new Error(`Server ${serverName} for tool ${toolName} is no longer connected`);
+        throw new IntentOrchError(ErrorCode.SERVER_DISCONNECTED, `Server ${serverName} for tool ${toolName} is no longer connected`);
       }
 
       logger.debug(`[ExecuteService] Calling tool ${toolName} on server ${serverName}`);
@@ -912,7 +910,7 @@ CRITICAL: Some tools are "helper" tools that only prepare data for other tools (
       const results = await autoStartManager.ensureServersRunning(Array.from(requiredServers));
       
       if (!autoStartManager.areAllServersReady(results)) {
-        throw new Error('Some required servers failed to start');
+        throw new IntentOrchError(ErrorCode.SERVER_START_FAILED, 'Some required servers failed to start');
       }
     }
   }

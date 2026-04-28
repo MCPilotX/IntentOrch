@@ -1,3 +1,4 @@
+import { logger } from "../core/logger";
 import axios from 'axios';
 import { Manifest, RegistrySource, SearchOptions, SearchResult, ServiceInfo } from './types';
 import { PROGRAM_NAME } from '../utils/constants';
@@ -32,11 +33,11 @@ export class OfficialRegistrySource implements RegistrySource {
         if (!path.endsWith('.json')) {
           // If path doesn't end with .json, assume it's a directory and add /mcp.json
           const finalUrl = `${githubUrl}/mcp.json`;
-          console.log(`Trying GitHub Hub URL: ${finalUrl}`);
+          logger.info(`Trying GitHub Hub URL: ${finalUrl}`);
           const response = await axios.get(finalUrl, { timeout: 10000 });
           return response.data;
         } else {
-          console.log(`Trying GitHub Hub URL: ${githubUrl}`);
+          logger.info(`Trying GitHub Hub URL: ${githubUrl}`);
           const response = await axios.get(githubUrl, { timeout: 10000 });
           return response.data;
         }
@@ -52,11 +53,11 @@ export class OfficialRegistrySource implements RegistrySource {
         if (!path.endsWith('.json')) {
           // If path doesn't end with .json, assume it's a directory and add /mcp.json
           const finalUrl = `${giteeUrl}/mcp.json`;
-          console.log(`Trying Gitee Hub URL: ${finalUrl}`);
+          logger.info(`Trying Gitee Hub URL: ${finalUrl}`);
           const response = await axios.get(finalUrl, { timeout: 10000 });
           return response.data;
         } else {
-          console.log(`Trying Gitee Hub URL: ${giteeUrl}`);
+          logger.info(`Trying Gitee Hub URL: ${giteeUrl}`);
           const response = await axios.get(giteeUrl, { timeout: 10000 });
           return response.data;
         }
@@ -181,7 +182,7 @@ export class OfficialRegistrySource implements RegistrySource {
         hasMore: offset + limit < filteredServices.length
       };
     } catch (error) {
-      console.error('Error searching official registry:', error);
+      logger.error('Error searching official registry:', error);
       // Return empty result on error
       return {
         services: [],
@@ -209,8 +210,10 @@ export class GitHubRegistrySource implements RegistrySource {
     // 4. Combined: owner/repo@branch:path (e.g., someuser/some-repo@main:dist/mcp.json)
     // 5. Central hub path: path/to/module (e.g., github/github-mcp-server) - from central hub
     
-    // First, check if it's a direct GitHub repository (contains @ or : which are not part of hub paths)
-    const hasGitHubSyntax = serverName.includes('@') || serverName.includes(':');
+    // First, check if it's a direct GitHub repository
+    // Criteria: contains @ or : (explicit GitHub syntax), OR is in owner/repo format (exactly one slash, no dots)
+    const hasGitHubSyntax = serverName.includes('@') || serverName.includes(':') ||
+      (serverName.match(/\//g)?.length === 1 && !serverName.includes('.') && !serverName.includes('\\'));
     
     if (hasGitHubSyntax) {
       // Parse as direct GitHub repository
@@ -224,7 +227,7 @@ export class GitHubRegistrySource implements RegistrySource {
       for (const tryBranch of branchesToTry) {
         try {
           const url = `https://raw.githubusercontent.com/${owner}/${repo}/${tryBranch}/${filePath}`;
-          console.log(`Trying GitHub URL: ${url}`);
+          logger.info(`Trying GitHub URL: ${url}`);
           const response = await axios.get(url, { timeout: 10000 });
           return response.data;
         } catch (error: any) {
@@ -324,7 +327,7 @@ export class GitHubRegistrySource implements RegistrySource {
     const modulePath = `${moduleName}/mcp.json`;
     const url = `https://raw.githubusercontent.com/${hubOwner}/${hubRepo}/${hubBranch}/${modulePath}`;
     
-    console.log(`Trying GitHub Hub URL: ${url}`);
+    logger.info(`Trying GitHub Hub URL: ${url}`);
     
     try {
       const response = await axios.get(url, { timeout: 10000 });
@@ -406,7 +409,7 @@ export class GitHubRegistrySource implements RegistrySource {
           })
         );
       } catch (error) {
-        console.warn('Failed to fetch from GitHub hub, using fallback list:', error);
+        logger.warn('Failed to fetch from GitHub hub, using fallback list:', error);
         // Fallback to static list if hub is not accessible
         allServices = [
           {
@@ -442,7 +445,7 @@ export class GitHubRegistrySource implements RegistrySource {
         hasMore: offset + limit < filteredServices.length
       };
     } catch (error) {
-      console.error('Error searching GitHub registry:', error);
+      logger.error('Error searching GitHub registry:', error);
       // Return empty result on error
       return {
         services: [],
@@ -763,8 +766,10 @@ export class GiteeRegistrySource implements RegistrySource {
                 const manifestResponse = await axios.get(manifestUrl, { timeout: 5000 });
                 const manifest = manifestResponse.data;
                 
+                // Use category/service-name format to show owner/project
+                const fullServiceName = `${categoryDir.name}/${serviceDir.name}`;
                 allServices.push({
-                  name: serviceDir.name,
+                  name: fullServiceName,
                   description: manifest.description || `Gitee MCP服务: ${serviceDir.name}`,
                   version: manifest.version || '1.0.0',
                   source: 'gitee',
@@ -779,8 +784,9 @@ export class GiteeRegistrySource implements RegistrySource {
                   const directManifestResponse = await axios.get(directManifestUrl, { timeout: 5000 });
                   const directManifest = directManifestResponse.data;
                   
+                  const fullServiceName = `${categoryDir.name}/${serviceDir.name}`;
                   allServices.push({
-                    name: serviceDir.name,
+                    name: fullServiceName,
                     description: directManifest.description || `Gitee MCP服务: ${serviceDir.name}`,
                     version: directManifest.version || '1.0.0',
                     source: 'gitee',
@@ -789,8 +795,9 @@ export class GiteeRegistrySource implements RegistrySource {
                   });
                 } catch (directError) {
                   // If still not found, add basic info
+                  const fullServiceName = `${categoryDir.name}/${serviceDir.name}`;
                   allServices.push({
-                    name: serviceDir.name,
+                    name: fullServiceName,
                     description: `Gitee MCP服务: ${serviceDir.name}`,
                     version: '1.0.0',
                     source: 'gitee',
@@ -801,16 +808,16 @@ export class GiteeRegistrySource implements RegistrySource {
               }
             }
           } catch (categoryError) {
-            console.warn(`Failed to fetch category ${categoryDir.name}:`, categoryError);
+            logger.warn(`Failed to fetch category ${categoryDir.name}:`, categoryError);
             continue;
           }
         }
       } catch (error) {
-        console.warn('Failed to fetch from Gitee hub, using fallback list:', error);
+        logger.warn('Failed to fetch from Gitee hub, using fallback list:', error);
         // Fallback to static list if hub is not accessible
         allServices = [
           {
-            name: '12306-mcp',
+            name: 'Joooook/12306-mcp',
             description: '12306火车票查询服务',
             version: '1.0.0',
             source: 'gitee',
@@ -842,7 +849,7 @@ export class GiteeRegistrySource implements RegistrySource {
         hasMore: offset + limit < filteredServices.length
       };
     } catch (error) {
-      console.error('Error searching Gitee registry:', error);
+      logger.error('Error searching Gitee registry:', error);
       // Return empty result on error
       return {
         services: [],

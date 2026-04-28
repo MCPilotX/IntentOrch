@@ -15,7 +15,9 @@ export interface ProcessInfo {
     };
   };
   startTime: number;
+  startedAt?: string; // ISO string for web compatibility
   status: 'running' | 'stopped' | 'error';
+  serverId?: string; // For web compatibility
   port?: number;
   stdout?: string;
   stderr?: string;

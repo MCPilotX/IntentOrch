@@ -1,3 +1,4 @@
+import { logger } from "./core/logger";
 /**
  * IntentOrch - Docker for MCP Ecosystem
  * 
@@ -18,8 +19,8 @@ export { ConfigService, getConfigService } from './core';
 export type { RuntimeType, ServiceConfig, Config, AIConfig, DetectionResult } from './core';
 
 // ==================== AI Modules ====================
-export { AI, AIConfigManager, CloudIntentEngine } from './ai';
-export type { AskResult, CloudIntentEngineConfig } from './ai';
+export { CloudIntentEngine, LLMClient, getLLMClient } from './ai';
+export type { CloudIntentEngineConfig } from './ai';
 
 // ==================== Execute Service ====================
 export { ExecuteService, getExecuteService, createExecuteService } from './ai/execute-service';
@@ -37,12 +38,14 @@ export { ToolRegistry as ToolRegistryModule } from './tool-registry';
 
 // ==================== 进程管理 ====================
 export { ProcessManager, ProcessStore } from './process-manager';
+export type { ProcessInfo } from './process-manager/types';
 
 // ==================== Secret Management ====================
 export { SecretManager } from './secret';
 
 // ==================== Workflow Modules ====================
 export * from './workflow';
+export type { Workflow, WorkflowStep, WorkflowInput } from './workflow/types';
 
 // ==================== Utility Functions ====================
 export * from './utils';
@@ -50,6 +53,7 @@ export { getSqliteDb, closeSqliteDb } from './utils/sqlite';
 
 // ==================== Type Definitions ====================
 export * from './types';
+export type { DaemonResponse } from './core/types';
 
 // ==================== CLI Tools ====================
 // Note: CLI modules are not directly exported, used via bin/intorch.js
@@ -87,8 +91,8 @@ export async function getSystemStatus() {
 /**
  * 初始化 IntentOrch 系统
  */
-export async function initialize(_config?: any) {
-  console.log(`[IntentOrch] Initializing version ${getVersion()}`);
+export async function initialize(_config?: Record<string, unknown>) {
+  logger.info(`[IntentOrch] Initializing version ${getVersion()}`);
   
   // Add initialization logic here
   // For example: load configuration, initialize services, etc.
@@ -117,6 +121,7 @@ export { getDisplayName } from './utils/server-name';
 export { DaemonClient } from './daemon/client';
 export { DaemonServer } from './daemon/server';
 export { ensureInTorchDir, getDaemonPidPath, getDaemonLogPath, getLogPath } from './utils/paths';
+export { healthCheckScheduler } from './kernel/health-check-scheduler';
 export type { DaemonConfig } from './daemon/types';
 
 // ==================== Default Export ====================
@@ -131,6 +136,7 @@ const intentorch = {
   initCloudIntentEngine: adapter.initCloudIntentEngine.bind(adapter),
   connectMCPServer: adapter.connectMCPServer.bind(adapter),
   processQuery: adapter.processQuery.bind(adapter),
+  parseAndPlanWorkflow: adapter.parseAndPlanWorkflow.bind(adapter),
   getConnectedServers: adapter.getConnectedServers.bind(adapter),
   disconnectMCPServer: adapter.disconnectMCPServer.bind(adapter),
   cleanup: adapter.cleanup.bind(adapter),

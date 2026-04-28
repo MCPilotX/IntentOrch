@@ -1,19 +1,23 @@
 /**
- * Configuration Adapter
+ * @deprecated Configuration Adapter — Use ConfigService directly instead.
  * 
- * This adapter provides backward compatibility for existing code that uses:
+ * This adapter exists only for backward compatibility with legacy code that uses:
  * 1. src/utils/config.ts (ConfigManager singleton)
  * 2. src/core/config-manager.ts (static ConfigManager)
+ * 
+ * New code should use ConfigService (from './config-service') directly.
+ * This file will be removed in a future major version.
  * 
  * It delegates to the new ConfigService while maintaining the old API.
  */
 
 import { ConfigService, getConfigService } from './config-service';
-import type { AIConfig, AIProvider, ServiceConfig, DockerConnectionConfig, RuntimeSpecificConfig } from './types';
+import type { AIConfig, AIProvider, ServiceConfig, DockerConnectionConfig, RuntimeSpecificConfig, DetectionResult } from './types';
 
 // ==================== Adapter for src/utils/config.ts ====================
 
 /**
+ * @deprecated Use ConfigService directly instead.
  * Backward compatibility adapter for the old ConfigManager from src/utils/config.ts
  * This maintains the same API but delegates to the new ConfigService
  */
@@ -99,6 +103,7 @@ export class LegacyConfigManagerAdapter {
 // ==================== Adapter for src/core/config-manager.ts ====================
 
 /**
+ * @deprecated Use ConfigService directly instead.
  * Backward compatibility adapter for the static ConfigManager from src/core/config-manager.ts
  * This provides static methods that delegate to the ConfigService instance
  */
@@ -172,17 +177,6 @@ export class StaticConfigManagerAdapter {
     };
 
     await this.configService.saveAppConfig(mergedConfig);
-  }
-
-  static async getDetectionCache(_serviceName: string): Promise<any> {
-    // Note: Detection cache is not yet implemented in ConfigService
-    // For now, return null
-    return null;
-  }
-
-  static async saveDetectionCache(_serviceName: string, _cache: any): Promise<void> {
-    // Note: Detection cache is not yet implemented in ConfigService
-    // For now, do nothing
   }
 
   static async resetConfig(): Promise<void> {

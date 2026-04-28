@@ -1,3 +1,4 @@
+import { logger } from "../core/logger";
 import { spawn, ChildProcess } from 'child_process';
 import fs from 'fs';
 import { ProcessInfo } from './types';
@@ -7,6 +8,8 @@ import { getRegistryClient } from '../registry/client';
 import { getLogPath, ensureInTorchDir } from '../utils/paths';
 import { isProcessRunningWithRetry } from '../utils/system';
 import { PROGRAM_NAME } from '../utils/constants';
+import { MCPClient } from '../mcp/client';
+import { getToolRegistry } from '../tool-registry/registry';
 
 export class ProcessManager {
   private store: ProcessStoreManager;
@@ -31,8 +34,8 @@ export class ProcessManager {
     
     if (runningServer) {
       // Server is already running, return the existing PID
-      console.log(`ℹ️  Server "${manifest.name}" is already running (PID: ${runningServer.pid})`);
-      console.log(`   Returning existing process instead of creating a new one`);
+      logger.info(`ℹ️  Server "${manifest.name}" is already running (PID: ${runningServer.pid})`);
+      logger.info(`   Returning existing process instead of creating a new one`);
       return runningServer.pid;
     }
 
@@ -70,7 +73,10 @@ export class ProcessManager {
     // Actually, we can't get PID before spawn.
     // We'll use a temporary log file and then rename it in the parent?
     // Or just use a unique ID.
-    const tempLogPath = getLogPath(Date.now()); // Temporary ID
+    // Use a unique temp log path with random suffix to avoid collisions
+    // getLogPath expects a number, so we use a large random number unlikely to collide
+    const tempLogId = Date.now() + Math.floor(Math.random() * 100000);
+    const tempLogPath = getLogPath(tempLogId);
     const logFile = fs.openSync(tempLogPath, 'a');
 
     // Start process as detached so it can continue after CLI exits
@@ -97,14 +103,16 @@ export class ProcessManager {
         detached: true
       };
     } else {
-      // Stdio servers need to keep stdin open for MCP protocol communication
-      // We use pipe for stdin but don't end it immediately
-      // For stdio servers, we need to keep the process attached to maintain stdio connection
-      // but we also want it to survive parent exit
+      // Stdio servers need to keep stdin/stdout open for MCP protocol communication
+      // stdin: pipe (for sending JSON-RPC requests)
+      // stdout: pipe (for receiving JSON-RPC responses via MCP protocol)
+      // stderr: logFile (for logging/debug output)
+      // We keep the process attached to maintain stdio connection
+      // but also want it to survive parent exit
       spawnOptions = {
         ...spawnOptions,
-        stdio: ['pipe', logFile, logFile],
-        detached: true  // Still detached, but we keep stdin pipe open
+        stdio: ['pipe', 'pipe', logFile],
+        detached: true  // Still detached, but we keep stdio pipes open
       };
     }
     
@@ -123,7 +131,8 @@ export class ProcessManager {
       fs.closeSync(logFile);
       fs.renameSync(tempLogPath, finalLogPath);
     } catch (e) {
-      // If rename fails (e.g. file busy), we'll keep the temp one but it's not ideal.
+      // If rename fails (e.g. file busy), clean up the temp file
+      try { fs.unlinkSync(tempLogPath); } catch (e2) { /* ignore */ }
     }
 
     // For detached processes, the exit event may not fire reliably
@@ -179,20 +188,20 @@ export class ProcessManager {
     await this.store.addProcess(processInfo);
 
     if (finalIsAlive) {
-      console.log(`✓ Started ${manifest.name} v${manifest.version} (PID: ${pid})`);
-      console.log(`  Logs: ${finalLogPath}`);
-      console.log(`  Status: Running (detached process)`);
+      logger.info(`✓ Started ${manifest.name} v${manifest.version} (PID: ${pid})`);
+      logger.info(`  Logs: ${finalLogPath}`);
+      logger.info(`  Status: Running (detached process)`);
       
       // Try to discover tools dynamically if server supports it
       await this.discoverToolsIfSupported(serverNameOrUrl, manifest, child);
     } else {
       const exitCode = child.exitCode;
       const signalCode = child.signalCode;
-      console.log(`⚠️  Process ${pid} exited immediately`);
-      console.log(`  Exit code: ${exitCode !== null ? exitCode : 'N/A'}`);
-      console.log(`  Signal: ${signalCode || 'N/A'}`);
-      console.log(`  Check logs: ${finalLogPath}`);
-      console.log(`  Note: Some MCP servers may exit if they require stdio communication`);
+      logger.info(`⚠️  Process ${pid} exited immediately`);
+      logger.info(`  Exit code: ${exitCode !== null ? exitCode : 'N/A'}`);
+      logger.info(`  Signal: ${signalCode || 'N/A'}`);
+      logger.info(`  Check logs: ${finalLogPath}`);
+      logger.info(`  Note: Some MCP servers may exit if they require stdio communication`);
       
       // If process exited immediately, update status in store
       await this.store.updateProcess(pid, { status: 'stopped' });
@@ -202,7 +211,8 @@ export class ProcessManager {
   }
 
   /**
-   * Discover tools from a running MCP server if it supports dynamic discovery
+   * Discover tools from a running MCP server via MCP protocol's tools/list
+   * This enables dynamic tool discovery even when mcp.json has no tools defined
    */
   private async discoverToolsIfSupported(
     serverName: string,
@@ -210,22 +220,70 @@ export class ProcessManager {
     childProcess: ChildProcess
   ): Promise<void> {
     try {
-      // Check if this server supports dynamic tool discovery
-      // For now, we'll check if the manifest is lightweight (no tools defined)
+      // Check if manifest already has tools defined (static mode)
       const hasToolsInManifest = 
         (manifest.tools && manifest.tools.length > 0) ||
         (manifest.capabilities?.tools && manifest.capabilities.tools.length > 0);
       
       if (hasToolsInManifest) {
-        // Server has tools defined in manifest, no need for dynamic discovery
-        console.log(`ℹ️  Server has static tool definitions, skipping dynamic discovery`);
+        logger.info(`ℹ️  Server has static tool definitions, skipping dynamic discovery`);
         return;
       }
       
-      console.log(`ℹ️  Dynamic tool discovery is not available (module removed)`);
+      logger.info(`🔍 Attempting dynamic tool discovery for ${manifest.name}...`);
+      
+      // Create an MCPClient connected to the already-running child process
+      // This avoids spawning a second process and communicates via the existing stdio
+      const client = new MCPClient({
+        transport: {
+          type: 'stdio',
+          command: manifest.runtime.command,
+          args: manifest.runtime.args || [],
+          existingProcess: childProcess
+        },
+        timeout: 15000,
+        maxRetries: 2,
+        serverName: manifest.name
+      });
+      
+      // Listen for stderr from the MCP server (for debugging)
+      client.on('stderr', (msg: string) => {
+        logger.debug(`[${manifest.name}] ${msg}`);
+      });
+      
+      try {
+        await client.connect();
+        
+        // Call tools/list via MCP protocol
+        const tools = await client.listTools();
+        
+        if (tools && tools.length > 0) {
+          logger.info(`✓ Dynamically discovered ${tools.length} tools from ${manifest.name}`);
+          
+          // Register discovered tools to the ToolRegistry
+          const toolRegistry = getToolRegistry();
+          await toolRegistry.registerDynamicTools(serverName, tools);
+          
+          // Log discovered tools (first 3)
+          for (const tool of tools.slice(0, 3)) {
+            logger.info(`  - ${tool.name}: ${tool.description}`);
+          }
+          if (tools.length > 3) {
+            logger.info(`  ... and ${tools.length - 3} more`);
+          }
+        } else {
+          logger.info(`ℹ️  Server ${manifest.name} returned no tools`);
+        }
+        
+        // Disconnect the client after discovery
+        await client.disconnect();
+      } catch (connectError: any) {
+        logger.warn(`⚠️  Dynamic tool discovery failed for ${manifest.name}: ${connectError.message}`);
+        logger.info(`   Tools can still be used via direct MCP protocol calls when needed`);
+      }
       
     } catch (error: any) {
-      console.error(`⚠️  Tool discovery failed for ${manifest.name}:`, error.message);
+      logger.error(`⚠️  Tool discovery error for ${manifest.name}:`, error.message);
       // Don't throw - tool discovery failure shouldn't stop server startup
     }
   }
@@ -242,7 +300,7 @@ export class ProcessManager {
       
       await this.store.updateProcess(pid, { status: 'stopped' });
       this.processes.delete(pid);
-      console.log(`✓ Stopped process ${pid}`);
+      logger.info(`✓ Stopped process ${pid}`);
     } else {
       // If process is not in memory, try to kill it using system command
       try {
@@ -265,12 +323,12 @@ export class ProcessManager {
           }
         } catch (error) {
           // kill command failed, maybe process doesn't exist
-          console.log(`Process ${pid} may not exist or already stopped`);
+          logger.info(`Process ${pid} may not exist or already stopped`);
         }
         
-        console.log(`✓ Stopped process ${pid} using system kill command`);
+        logger.info(`✓ Stopped process ${pid} using system kill command`);
       } catch (error) {
-        console.log(`⚠️ Could not kill process ${pid}: ${error}`);
+        logger.info(`⚠️ Could not kill process ${pid}: ${error}`);
       }
       
       // Update storage status

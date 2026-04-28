@@ -36,9 +36,17 @@ export function startCommand(): Command {
         }
         
         const response = await client.startServer(server);
-        console.log(`✓ Started ${displayName} v${response.version} (PID: ${response.pid})`);
-        console.log(`  Logs: ${response.logPath}`);
-        console.log(`  Status: ${response.status}`);
+        
+        // Check if the server was already running (daemon returned existing process)
+        if (response.alreadyRunning) {
+          console.log(`ℹ️  ${displayName} v${response.version} is already running (PID: ${response.pid})`);
+          console.log(`  Logs: ${response.logPath}`);
+          console.log(`  Status: ${response.status}`);
+        } else {
+          console.log(`✓ Started ${displayName} v${response.version} (PID: ${response.pid})`);
+          console.log(`  Logs: ${response.logPath}`);
+          console.log(`  Status: ${response.status}`);
+        }
       } catch (error) {
         console.error(`✗ Failed to start ${getDisplayName(server)}:`, (error as Error).message);
         process.exit(1);

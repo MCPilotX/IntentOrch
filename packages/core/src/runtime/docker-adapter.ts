@@ -1,3 +1,4 @@
+import { logger } from "../core/logger";
 import { RuntimeAdapter } from './adapter';
 import { ServiceConfig } from '../core/types';
 import { spawn, execSync, type ChildProcess } from 'child_process';
@@ -58,7 +59,7 @@ export class DockerAdapter implements RuntimeAdapter {
   }
 
   async setup(config: ServiceConfig): Promise<void> {
-    console.log(`[Docker] Setting up service: ${config.name}`);
+    logger.info(`[Docker] Setting up service: ${config.name}`);
 
     // Check if Docker is installed
     try {
@@ -71,9 +72,9 @@ export class DockerAdapter implements RuntimeAdapter {
     if (config.image) {
       try {
         execSync(`docker image inspect ${config.image}`, { stdio: 'ignore' });
-        console.log(`[Docker] Image ${config.image} already exists`);
+        logger.info(`[Docker] Image ${config.image} already exists`);
       } catch (error) {
-        console.log(`[Docker] Pulling image: ${config.image}`);
+        logger.info(`[Docker] Pulling image: ${config.image}`);
         try {
           execSync(`docker pull ${config.image}`, { stdio: 'inherit' });
         } catch (pullError: any) {
@@ -86,7 +87,7 @@ export class DockerAdapter implements RuntimeAdapter {
     if (config.dockerfile) {
       const dockerfilePath = path.join(config.path || '.', config.dockerfile);
       if (fs.existsSync(dockerfilePath)) {
-        console.log(`[Docker] Building image from ${dockerfilePath}`);
+        logger.info(`[Docker] Building image from ${dockerfilePath}`);
         try {
           const buildContext = config.buildContext || path.dirname(dockerfilePath);
           execSync(`docker build -t ${config.name} -f ${dockerfilePath} ${buildContext}`, {
@@ -98,19 +99,19 @@ export class DockerAdapter implements RuntimeAdapter {
         }
       } else {
         // Dockerfile specified but doesn't exist - just log a warning
-        console.warn(`[Docker] Dockerfile not found at ${dockerfilePath}, skipping build`);
+        logger.warn(`[Docker] Dockerfile not found at ${dockerfilePath}, skipping build`);
         // Continue without building - user may have pre-built image or will pull from registry
       }
     }
 
-    console.log(`[Docker] Setup completed for service: ${config.name}`);
+    logger.info(`[Docker] Setup completed for service: ${config.name}`);
   }
 
   async startContainer(config: ServiceConfig): Promise<ChildProcess> {
     const { command, args } = this.getSpawnArgs(config);
 
-    console.log(`[Docker] Starting container: ${this.containerName}`);
-    console.log(`[Docker] Command: ${command} ${args.join(' ')}`);
+    logger.info(`[Docker] Starting container: ${this.containerName}`);
+    logger.info(`[Docker] Command: ${command} ${args.join(' ')}`);
 
     const process = spawn(command, args, {
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -118,19 +119,19 @@ export class DockerAdapter implements RuntimeAdapter {
     });
 
     process.stdout?.on('data', (data) => {
-      console.log(`[Docker:${config.name}] ${data.toString().trim()}`);
+      logger.info(`[Docker:${config.name}] ${data.toString().trim()}`);
     });
 
     process.stderr?.on('data', (data) => {
-      console.error(`[Docker:${config.name}] ERR: ${data.toString().trim()}`);
+      logger.error(`[Docker:${config.name}] ERR: ${data.toString().trim()}`);
     });
 
     process.on('error', (error) => {
-      console.error(`[Docker:${config.name}] Failed to start: ${error.message}`);
+      logger.error(`[Docker:${config.name}] Failed to start: ${error.message}`);
     });
 
     process.on('exit', (code, signal) => {
-      console.log(`[Docker:${config.name}] Container exited with code ${code}, signal ${signal}`);
+      logger.info(`[Docker:${config.name}] Container exited with code ${code}, signal ${signal}`);
       this.process = null;
     });
 
@@ -140,7 +141,7 @@ export class DockerAdapter implements RuntimeAdapter {
 
   async stopContainer(): Promise<void> {
     if (this.process) {
-      console.log(`[Docker] Stopping container: ${this.containerName}`);
+      logger.info(`[Docker] Stopping container: ${this.containerName}`);
 
       try {
         execSync(`docker stop ${this.containerName}`, { stdio: 'ignore' });

@@ -99,3 +99,80 @@ export const DEFAULT_CONFIG = {
     fallback: ConfigDefaults.REGISTRY_FALLBACK,
   },
 } as const;
+
+// ==================== Timeout Constants (ms) ====================
+export const Timeouts = {
+  /** Default LLM request timeout */
+  LLM_REQUEST: 30_000,
+  /** Default LLM request max tokens */
+  LLM_MAX_TOKENS: 2048,
+  /** Default LLM temperature */
+  LLM_TEMPERATURE: 0.1,
+  /** Default LLM max retries */
+  LLM_MAX_RETRIES: 3,
+  /** Tool list timeout per server */
+  TOOL_LIST: 60_000,
+  /** Tool execution timeout */
+  TOOL_EXECUTION: 60_000,
+  /** Process graceful shutdown wait */
+  PROCESS_SHUTDOWN: 1_000,
+  /** Process force kill wait */
+  PROCESS_FORCE_KILL: 1_000,
+  /** Server startup wait before tool registration */
+  SERVER_STARTUP_WAIT: 5_000,
+  /** Server initialization wait */
+  SERVER_INIT_WAIT: 2_000,
+  /** Health check interval */
+  HEALTH_CHECK_INTERVAL: 30_000,
+  /** Health check timeout */
+  HEALTH_CHECK_TIMEOUT: 10_000,
+  /** Retry base delay */
+  RETRY_BASE_DELAY: 1_000,
+  /** Retry max delay */
+  RETRY_MAX_DELAY: 10_000,
+  /** Default retry attempts */
+  RETRY_ATTEMPTS: 3,
+  /** Interactive session cleanup default max age */
+  INTERACTIVE_SESSION_MAX_AGE: 3_600_000,
+  /** Multi-turn LLM max turns */
+  MULTI_TURN_MAX_TURNS: 5,
+  /** Plan query max tokens */
+  PLAN_MAX_TOKENS: 4096,
+  /** Plan query temperature */
+  PLAN_TEMPERATURE: 0.2,
+} as const;
+
+// ==================== Daemon Defaults ====================
+export const DaemonDefaults = {
+  PORT: 9658,
+  HOST: 'localhost',
+  VERSION: '0.8.0',
+} as const;
+
+// ==================== LLM Model Defaults ====================
+export const LLMDefaults = {
+  MODEL: 'gpt-3.5-turbo',
+  MODEL_FALLBACK: 'gpt-4o-mini',
+  TEMPERATURE: 0.1,
+  MAX_TOKENS: 2048,
+  TIMEOUT: 30_000,
+  MAX_RETRIES: 3,
+} as const;
+
+// ==================== Execution Defaults ====================
+export const ExecutionDefaults = {
+  MAX_CONCURRENT_TOOLS: 10,
+  TIMEOUT: 60_000,
+  RETRY_ATTEMPTS: 2,
+  RETRY_DELAY: 1_000,
+} as const;
+
+// ==================== Known Server Names ====================
+export const KnownServers = [
+  'Joooook/12306-mcp',
+  'modelcontextprotocol/server-filesystem',
+  'modelcontextprotocol/server-github',
+  'modelcontextprotocol/server-postgres',
+  'modelcontextprotocol/server-sqlite',
+  'modelcontextprotocol/server-puppeteer',
+] as const;

@@ -1,3 +1,17 @@
+import type { 
+  ProcessInfo as CoreProcessInfo, 
+  Workflow as CoreWorkflow, 
+  WorkflowStep as CoreWorkflowStep,
+  WorkflowInput as CoreWorkflowInput,
+  Config as CoreConfig,
+  AIConfig as CoreAIConfig,
+  DaemonResponse as CoreDaemonResponse,
+  RuntimeType
+} from '@intentorch/core';
+
+// Re-export core types for convenience
+export type { CoreProcessInfo, CoreWorkflow, CoreWorkflowStep, CoreConfig, CoreAIConfig, CoreDaemonResponse };
+
 // MCP Server related types
 export interface MCPServer {
   id: string;
@@ -5,7 +19,7 @@ export interface MCPServer {
   version: string;
   description?: string;
   runtime: {
-    type: string;
+    type: string | RuntimeType;
     command: string;
     args?: string[];
     env?: string[];
@@ -18,28 +32,11 @@ export interface MCPServer {
   lastStartedAt?: string;
 }
 
-export interface ProcessInfo {
-  pid: number;
-  serverId: string;
-  serverName: string;
-  status: 'running' | 'stopped' | 'error';
-  startedAt: string;
-  cpuUsage?: number;
-  memoryUsage?: number;
-  logPath?: string;
-}
+// Map Core ProcessInfo to Web's simplified ProcessInfo if needed, 
+// or just use CoreProcessInfo directly in the app.
+export type ProcessInfo = CoreProcessInfo;
 
-export interface Config {
-  ai: {
-    provider?: string;
-    apiKey?: string;
-    model?: string;
-  };
-  registry: {
-    default: string;
-    fallback: string;
-  };
-}
+export type Config = CoreConfig;
 
 export interface Secret {
   name: string;
@@ -123,25 +120,9 @@ export interface InteractiveSession {
   toolSelections?: any[];
 }
 
-export interface Workflow {
-  id: string;
-  name: string;
-  description?: string;
-  steps: WorkflowStep[];
-  createdAt: string;
-  updatedAt: string;
-  lastExecutedAt?: string;
-}
-
-export interface WorkflowStep {
-  id: string;
-  type: 'server' | 'tool' | 'condition' | 'loop';
-  serverName?: string;
-  toolName?: string;
-  parameters?: Record<string, any>;
-  nextSteps?: string[];
-  condition?: string;
-}
+export type Workflow = CoreWorkflow;
+export type WorkflowStep = CoreWorkflowStep;
+export type WorkflowInput = CoreWorkflowInput;
 
 export interface SystemStats {
   totalServers: number;
@@ -223,4 +204,3 @@ export interface NotificationStats {
     system: number;
   };
 }
-

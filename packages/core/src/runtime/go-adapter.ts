@@ -1,3 +1,4 @@
+import { logger } from "../core/logger";
 import { RuntimeAdapter } from './adapter';
 import { ServiceConfig } from '../core/types';
 import { spawn, execSync, type ChildProcess } from 'child_process';
@@ -18,12 +19,12 @@ export class GoAdapter implements RuntimeAdapter {
   }
 
   async setup(config: ServiceConfig): Promise<void> {
-    console.log(`[Go] Setting up service: ${config.name}`);
+    logger.info(`[Go] Setting up service: ${config.name}`);
 
     // Check if Go is installed
     try {
       execSync('go version', { stdio: 'ignore' });
-      console.log('[Go] Go is installed');
+      logger.info('[Go] Go is installed');
     } catch (error) {
       throw new Error('Go is not installed or not in PATH. Please install Go from https://golang.org/dl/');
     }
@@ -33,45 +34,45 @@ export class GoAdapter implements RuntimeAdapter {
     // Check go.mod file
     const goModPath = path.join(servicePath, 'go.mod');
     if (!fs.existsSync(goModPath)) {
-      console.log(`[Go] go.mod not found, creating basic go.mod for ${config.name}`);
+      logger.info(`[Go] go.mod not found, creating basic go.mod for ${config.name}`);
       try {
         execSync(`go mod init ${config.name}`, {
           stdio: 'inherit',
           cwd: servicePath,
         });
       } catch (error: any) {
-        console.warn(`[Go] Failed to create go.mod: ${error.message}`);
+        logger.warn(`[Go] Failed to create go.mod: ${error.message}`);
       }
     }
 
     // Download dependencies
-    console.log('[Go] Downloading dependencies...');
+    logger.info('[Go] Downloading dependencies...');
     try {
       execSync('go mod tidy', {
         stdio: 'inherit',
         cwd: servicePath,
       });
-      console.log('[Go] Dependencies downloaded successfully');
+      logger.info('[Go] Dependencies downloaded successfully');
     } catch (error: any) {
-      console.warn(`[Go] Failed to download dependencies: ${error.message}`);
+      logger.warn(`[Go] Failed to download dependencies: ${error.message}`);
     }
 
     // Build executable (optional)
     if (config.build) {
-      console.log('[Go] Building executable...');
+      logger.info('[Go] Building executable...');
       try {
         const outputName = config.output || config.name;
         execSync(`go build -o ${outputName} ${config.entry}`, {
           stdio: 'inherit',
           cwd: servicePath,
         });
-        console.log(`[Go] Executable built: ${outputName}`);
+        logger.info(`[Go] Executable built: ${outputName}`);
       } catch (error: any) {
-        console.warn(`[Go] Failed to build executable: ${error.message}`);
+        logger.warn(`[Go] Failed to build executable: ${error.message}`);
       }
     }
 
-    console.log(`[Go] Setup completed for service: ${config.name}`);
+    logger.info(`[Go] Setup completed for service: ${config.name}`);
   }
 
   private findGoBinary(config: ServiceConfig): string {
@@ -113,8 +114,8 @@ export class GoAdapter implements RuntimeAdapter {
   async startService(config: ServiceConfig): Promise<ChildProcess> {
     const { command, args } = this.getSpawnArgs(config);
 
-    console.log(`[Go] Starting service: ${config.name}`);
-    console.log(`[Go] Command: ${command} ${args.join(' ')}`);
+    logger.info(`[Go] Starting service: ${config.name}`);
+    logger.info(`[Go] Command: ${command} ${args.join(' ')}`);
 
     const childProcess = spawn(command, args, {
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -127,19 +128,19 @@ export class GoAdapter implements RuntimeAdapter {
     });
 
     childProcess.stdout?.on('data', (data) => {
-      console.log(`[Go:${config.name}] ${data.toString().trim()}`);
+      logger.info(`[Go:${config.name}] ${data.toString().trim()}`);
     });
 
     childProcess.stderr?.on('data', (data) => {
-      console.error(`[Go:${config.name}] ERR: ${data.toString().trim()}`);
+      logger.error(`[Go:${config.name}] ERR: ${data.toString().trim()}`);
     });
 
     childProcess.on('error', (error) => {
-      console.error(`[Go:${config.name}] Failed to start: ${error.message}`);
+      logger.error(`[Go:${config.name}] Failed to start: ${error.message}`);
     });
 
     childProcess.on('exit', (code, signal) => {
-      console.log(`[Go:${config.name}] Process exited with code ${code}, signal ${signal}`);
+      logger.info(`[Go:${config.name}] Process exited with code ${code}, signal ${signal}`);
       this.process = null;
     });
 
@@ -149,7 +150,7 @@ export class GoAdapter implements RuntimeAdapter {
 
   async stopService(): Promise<void> {
     if (this.process) {
-      console.log('[Go] Stopping service');
+      logger.info('[Go] Stopping service');
       this.process.kill();
       this.process = null;
     }
@@ -175,7 +176,7 @@ export class GoAdapter implements RuntimeAdapter {
   }
 
   async compile(config: ServiceConfig): Promise<boolean> {
-    console.log(`[Go] Compiling service: ${config.name}`);
+    logger.info(`[Go] Compiling service: ${config.name}`);
 
     try {
       const outputName = config.output || config.name;
@@ -183,26 +184,26 @@ export class GoAdapter implements RuntimeAdapter {
         stdio: 'inherit',
         cwd: config.path || '.',
       });
-      console.log(`[Go] Successfully compiled: ${outputName}`);
+      logger.info(`[Go] Successfully compiled: ${outputName}`);
       return true;
     } catch (error: any) {
-      console.error(`[Go] Compilation failed: ${error.message}`);
+      logger.error(`[Go] Compilation failed: ${error.message}`);
       return false;
     }
   }
 
   async test(config: ServiceConfig): Promise<boolean> {
-    console.log(`[Go] Running tests for service: ${config.name}`);
+    logger.info(`[Go] Running tests for service: ${config.name}`);
 
     try {
       execSync('go test ./...', {
         stdio: 'inherit',
         cwd: config.path || '.',
       });
-      console.log('[Go] Tests passed');
+      logger.info('[Go] Tests passed');
       return true;
     } catch (error: any) {
-      console.error(`[Go] Tests failed: ${error.message}`);
+      logger.error(`[Go] Tests failed: ${error.message}`);
       return false;
     }
   }

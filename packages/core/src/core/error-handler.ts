@@ -1,3 +1,4 @@
+import { logger } from "./logger";
 /**
  * IntentOrch SDK Unified Error Handling System
  * Balances minimalist style with functional robustness
@@ -7,67 +8,83 @@
 /**
  * Error Code Enumeration
  * Clear categorization for easy identification and handling
+ * 
+ * NOTE: This is a const object (not enum) to support both enum values and string literals.
+ * The ErrorCode type is a union of all possible error code strings.
  */
-export enum ErrorCode {
+export const ErrorCode = {
   // ==================== Configuration Errors (1xx) ====================
-  CONFIG_INVALID = 'CONFIG_001',
-  CONFIG_MISSING = 'CONFIG_002',
-  CONFIG_VALIDATION_FAILED = 'CONFIG_003',
-  CONFIG_MIGRATION_FAILED = 'CONFIG_004',
+  CONFIG_INVALID: 'CONFIG_001',
+  CONFIG_MISSING: 'CONFIG_002',
+  CONFIG_VALIDATION_FAILED: 'CONFIG_003',
+  CONFIG_MIGRATION_FAILED: 'CONFIG_004',
 
   // ==================== Service Errors (2xx) ====================
-  SERVICE_NOT_FOUND = 'SERVICE_001',
-  SERVICE_ALREADY_EXISTS = 'SERVICE_002',
-  SERVICE_START_FAILED = 'SERVICE_003',
-  SERVICE_STOP_FAILED = 'SERVICE_004',
-  SERVICE_HEALTH_CHECK_FAILED = 'SERVICE_005',
+  SERVICE_NOT_FOUND: 'SERVICE_001',
+  SERVICE_ALREADY_EXISTS: 'SERVICE_002',
+  SERVICE_START_FAILED: 'SERVICE_003',
+  SERVICE_STOP_FAILED: 'SERVICE_004',
+  SERVICE_HEALTH_CHECK_FAILED: 'SERVICE_005',
 
   // ==================== Runtime Errors (3xx) ====================
-  RUNTIME_DETECTION_FAILED = 'RUNTIME_001',
-  RUNTIME_NOT_SUPPORTED = 'RUNTIME_002',
-  RUNTIME_NOT_INSTALLED = 'RUNTIME_003',
-  RUNTIME_ADAPTER_ERROR = 'RUNTIME_004',
+  RUNTIME_DETECTION_FAILED: 'RUNTIME_001',
+  RUNTIME_NOT_SUPPORTED: 'RUNTIME_002',
+  RUNTIME_NOT_INSTALLED: 'RUNTIME_003',
+  RUNTIME_ADAPTER_ERROR: 'RUNTIME_004',
 
   // ==================== Process Errors (4xx) ====================
-  PROCESS_NOT_FOUND = 'PROCESS_001',
-  PROCESS_START_FAILED = 'PROCESS_002',
-  PROCESS_STOP_FAILED = 'PROCESS_003',
-  PROCESS_TIMEOUT = 'PROCESS_004',
+  PROCESS_NOT_FOUND: 'PROCESS_001',
+  PROCESS_START_FAILED: 'PROCESS_002',
+  PROCESS_STOP_FAILED: 'PROCESS_003',
+  PROCESS_TIMEOUT: 'PROCESS_004',
 
   // ==================== Resource Errors (5xx) ====================
-  RESOURCE_LIMIT_EXCEEDED = 'RESOURCE_001',
-  MEMORY_LIMIT_EXCEEDED = 'RESOURCE_002',
-  CPU_LIMIT_EXCEEDED = 'RESOURCE_003',
-  DISK_SPACE_INSUFFICIENT = 'RESOURCE_004',
+  RESOURCE_LIMIT_EXCEEDED: 'RESOURCE_001',
+  MEMORY_LIMIT_EXCEEDED: 'RESOURCE_002',
+  CPU_LIMIT_EXCEEDED: 'RESOURCE_003',
+  DISK_SPACE_INSUFFICIENT: 'RESOURCE_004',
 
   // ==================== Permission Errors (6xx) ====================
-  PERMISSION_DENIED = 'PERMISSION_001',
-  FILE_PERMISSION_ERROR = 'PERMISSION_002',
-  NETWORK_PERMISSION_ERROR = 'PERMISSION_003',
+  PERMISSION_DENIED: 'PERMISSION_001',
+  FILE_PERMISSION_ERROR: 'PERMISSION_002',
+  NETWORK_PERMISSION_ERROR: 'PERMISSION_003',
 
   // ==================== Network Errors (7xx) ====================
-  NETWORK_ERROR = 'NETWORK_001',
-  CONNECTION_REFUSED = 'NETWORK_002',
-  CONNECTION_TIMEOUT = 'NETWORK_003',
-  DNS_RESOLUTION_FAILED = 'NETWORK_004',
+  NETWORK_ERROR: 'NETWORK_001',
+  CONNECTION_REFUSED: 'NETWORK_002',
+  CONNECTION_TIMEOUT: 'NETWORK_003',
+  DNS_RESOLUTION_FAILED: 'NETWORK_004',
 
   // ==================== AI Errors (8xx) ====================
-  AI_CONFIG_INVALID = 'AI_001',
-  AI_PROVIDER_NOT_AVAILABLE = 'AI_002',
-  AI_QUERY_FAILED = 'AI_003',
-  AI_MODEL_NOT_FOUND = 'AI_004',
+  AI_CONFIG_INVALID: 'AI_001',
+  AI_PROVIDER_NOT_AVAILABLE: 'AI_002',
+  AI_QUERY_FAILED: 'AI_003',
+  AI_MODEL_NOT_FOUND: 'AI_004',
 
   // ==================== System Errors (9xx) ====================
-  SYSTEM_ERROR = 'SYSTEM_001',
-  UNEXPECTED_ERROR = 'SYSTEM_002',
-  NOT_IMPLEMENTED = 'SYSTEM_003',
+  SYSTEM_ERROR: 'SYSTEM_001',
+  UNEXPECTED_ERROR: 'SYSTEM_002',
+  NOT_IMPLEMENTED: 'SYSTEM_003',
 
   // ==================== Validation Errors (10xx) ====================
-  VALIDATION_FAILED = 'VALIDATION_001',
-  REQUIRED_FIELD_MISSING = 'VALIDATION_002',
-  INVALID_FORMAT = 'VALIDATION_003',
-  OUT_OF_RANGE = 'VALIDATION_004',
-}
+  VALIDATION_FAILED: 'VALIDATION_001',
+  REQUIRED_FIELD_MISSING: 'VALIDATION_002',
+  INVALID_FORMAT: 'VALIDATION_003',
+  OUT_OF_RANGE: 'VALIDATION_004',
+
+  // ==================== Engine Errors (11xx) ====================
+  ENGINE_NOT_INITIALIZED: 'ENGINE_001',
+  TOOL_NOT_FOUND: 'ENGINE_002',
+  SERVER_DISCONNECTED: 'ENGINE_003',
+  WORKFLOW_NOT_FOUND: 'ENGINE_004',
+  AI_NOT_CONFIGURED: 'ENGINE_005',
+  SERVER_START_FAILED: 'ENGINE_006',
+} as const;
+
+/**
+ * Type representing all possible error code values
+ */
+export type ErrorCode = typeof ErrorCode[keyof typeof ErrorCode];
 
 /**
  * Error Severity Levels
@@ -451,14 +468,14 @@ export class ErrorHandler {
       );
 
     // Log error
-    console.error(`[IntentOrch Error] ${mcError.getSummary()}`);
+    logger.error(`[IntentOrch Error] ${mcError.getSummary()}`);
 
     // Execute all registered handlers
     for (const handler of this.handlers) {
       try {
         await handler(mcError);
       } catch (handlerError) {
-        console.error('Error handler failed:', handlerError);
+        logger.error('Error handler failed:', handlerError);
       }
     }
   }
@@ -506,31 +523,31 @@ export class ConsoleErrorHandler {
     const color = colors[error.severity] || '\x1b[0m';
     const reset = '\x1b[0m';
 
-    console.error(`\n${color}╔══════════════════════════════════════════════════════════════╗${reset}`);
-    console.error(`${color}║ IntentOrch Error: ${error.getSummary().padEnd(48)} ║${reset}`);
-    console.error(`${color}╚══════════════════════════════════════════════════════════════╝${reset}`);
+    logger.error(`\n${color}╔══════════════════════════════════════════════════════════════╗${reset}`);
+    logger.error(`${color}║ IntentOrch Error: ${error.getSummary().padEnd(48)} ║${reset}`);
+    logger.error(`${color}╚══════════════════════════════════════════════════════════════╝${reset}`);
 
-    console.error(`\n${color}Details:${reset}`);
-    console.error(error.getDetails());
+    logger.error(`\n${color}Details:${reset}`);
+    logger.error(error.getDetails());
 
     if (error.suggestions.length > 0) {
-      console.error(`\n${color}Suggestions:${reset}`);
+      logger.error(`\n${color}Suggestions:${reset}`);
       error.suggestions.forEach((suggestion, index) => {
-        console.error(`  ${index + 1}. ${suggestion.title}`);
-        console.error(`     ${suggestion.description}`);
+        logger.error(`  ${index + 1}. ${suggestion.title}`);
+        logger.error(`     ${suggestion.description}`);
         if (suggestion.steps.length > 0) {
-          console.error('     Steps:');
+          logger.error('     Steps:');
           suggestion.steps.forEach(step => {
-            console.error(`       • ${step}`);
+            logger.error(`       • ${step}`);
           });
         }
       });
     }
 
-    console.error(`\n${color}Need more help?${reset}`);
-    console.error('  • Check documentation: https://github.com/MCPilotX/IntentOrch/docs');
-    console.error('  • Report issue: https://github.com/MCPilotX/IntentOrch/issues');
-    console.error('  • Ask community: https://github.com/MCPilotX/IntentOrch/discussions\n');
+    logger.error(`\n${color}Need more help?${reset}`);
+    logger.error('  • Check documentation: https://github.com/MCPilotX/IntentOrch/docs');
+    logger.error('  • Report issue: https://github.com/MCPilotX/IntentOrch/issues');
+    logger.error('  • Ask community: https://github.com/MCPilotX/IntentOrch/discussions\n');
   }
 }
 
@@ -584,7 +601,7 @@ export class RetryErrorHandler {
           delay = strategy.maxDelay;
         }
 
-        console.warn(`[Retry] Attempt ${attempt}/${strategy.maxAttempts} failed for '${operation}'. Retrying in ${delay}ms...`);
+        logger.warn(`[Retry] Attempt ${attempt}/${strategy.maxAttempts} failed for '${operation}'. Retrying in ${delay}ms...`);
 
         // Wait for delay
         await new Promise(resolve => setTimeout(resolve, delay));
@@ -619,7 +636,7 @@ export function shouldRetry(error: Error): boolean {
   }
 
   // These error types can usually be resolved by retrying
-  const retryableCodes = [
+  const retryableCodes: ErrorCode[] = [
     ErrorCode.NETWORK_ERROR,
     ErrorCode.CONNECTION_TIMEOUT,
     ErrorCode.CONNECTION_REFUSED,
@@ -627,5 +644,5 @@ export function shouldRetry(error: Error): boolean {
     ErrorCode.SERVICE_START_FAILED,
   ];
 
-  return retryableCodes.includes(error.code);
+  return (retryableCodes as readonly ErrorCode[]).includes(error.code);
 }

@@ -1,3 +1,4 @@
+import { logger } from "../core/logger";
 /**
  * MCP Client Core Class
  * Provides complete MCP protocol client functionality
@@ -32,13 +33,23 @@ class StdioTransport extends EventEmitter {
   private process: ChildProcess | null = null;
   private buffer: string = '';
   private _connected: boolean = false;
+  private _existingProcess: ChildProcess | null = null;
 
-  constructor(private config: { command: string; args?: string[]; env?: Record<string, string> }) {
+  constructor(private config: { command: string; args?: string[]; env?: Record<string, string>; existingProcess?: ChildProcess }) {
     super();
+    this._existingProcess = config.existingProcess || null;
   }
 
   async connect(): Promise<void> {
     if (this._connected) return;
+
+    // If an existing process was provided, use it directly
+    if (this._existingProcess) {
+      this.process = this._existingProcess;
+      this._connected = true;
+      this.emit('connected');
+      return;
+    }
 
     return new Promise((resolve, reject) => {
       try {
@@ -100,6 +111,14 @@ class StdioTransport extends EventEmitter {
 
   async disconnect(): Promise<void> {
     if (this.process) {
+      // If this is an existing process (not spawned by us), don't kill it
+      // Just detach from it
+      if (this._existingProcess) {
+        this.process = null;
+        this._connected = false;
+        return;
+      }
+      
       this.process.kill('SIGTERM');
       // Give it a moment to exit gracefully
       await new Promise(resolve => setTimeout(resolve, 500));
@@ -176,6 +195,7 @@ export class MCPClient extends EventEmitter {
       command: config.transport.command || 'npx',
       args: config.transport.args || [],
       env: config.transport.env as Record<string, string> | undefined,
+      existingProcess: (config.transport as any).existingProcess || undefined,
     });
     this.setupTransportListeners();
   }
@@ -198,9 +218,9 @@ export class MCPClient extends EventEmitter {
         // Health check
         try {
           const tools = await this.listTools();
-          console.debug(`[MCPClient] Health check passed: ${tools.length} tools available`);
+          logger.debug(`[MCPClient] Health check passed: ${tools.length} tools available`);
         } catch (healthError: any) {
-          console.warn(`[MCPClient] Health check failed: ${healthError.message}`);
+          logger.warn(`[MCPClient] Health check failed: ${healthError.message}`);
         }
       },
       {
@@ -271,7 +291,7 @@ export class MCPClient extends EventEmitter {
         const { normalized } = ParameterMapper.validateAndNormalize(toolName, tool.inputSchema, arguments_);
         mappedArguments = normalized;
       } catch (error) {
-        console.warn(`Parameter mapping failed for tool "${toolName}":`, error instanceof Error ? error.message : String(error));
+        logger.warn(`Parameter mapping failed for tool "${toolName}":`, error instanceof Error ? error.message : String(error));
       }
     }
 
@@ -532,7 +552,7 @@ export class MCPClient extends EventEmitter {
       const response = message as JSONRPCResponse;
 
       if (!response || typeof response !== 'object') {
-        console.error('[MCPClient] Invalid response received:', message);
+        logger.error('[MCPClient] Invalid response received:', message);
         return;
       }
 
@@ -564,7 +584,7 @@ export class MCPClient extends EventEmitter {
 
   private handleNotification(response: JSONRPCResponse): void {
     if (response.result) {
-      console.log('Received notification:', response);
+      logger.info('Received notification:', response);
     }
   }
 

@@ -159,6 +159,23 @@ export class DaemonServer {
             // Register tools
             await getToolRegistry().registerToolsFromManifest(serverNameOrUrl, manifest);
 
+
+            // Check if the server is already running before starting
+            const existingProcesses = await getProcessManager().list();
+            const runningServer = existingProcesses.find(p =>
+              p.manifest && p.manifest.name === manifest.name && p.status === 'running'
+            );
+            
+            if (runningServer) {
+              return this.sendJson(res, 200, {
+                  pid: runningServer.pid,
+                  name: runningServer.name || runningServer.manifest.name,
+                  version: runningServer.version || runningServer.manifest.version,
+                  status: runningServer.status,
+                  logPath: runningServer.logPath || getLogPath(runningServer.pid),
+                  alreadyRunning: true
+              });
+            }
             // Then start the server
             const pid = await getProcessManager().start(serverNameOrUrl);
             const processInfo = await getProcessManager().get(pid);
@@ -176,7 +193,8 @@ export class DaemonServer {
                 name: processInfo.name || processInfo.manifest.name,
                 version: processInfo.version || processInfo.manifest.version,
                 status: processInfo.status,
-                logPath: processInfo.logPath || getLogPath(processInfo.pid)
+                logPath: processInfo.logPath || getLogPath(processInfo.pid),
+                alreadyRunning: false
             });
         } catch (error: any) {
             // Handle JSON parsing errors
@@ -348,6 +366,15 @@ export class DaemonServer {
                 });
             }
             
+            // Check if process is already stopped
+            if (processInfo.status === 'stopped') {
+                return this.sendJson(res, 200, { 
+                    success: true, 
+                    message: `Server with PID ${pid} is already stopped`,
+                    pid 
+                });
+            }
+            
             try {
                 await getProcessManager().stop(pid);
                 return this.sendJson(res, 200, { 
@@ -480,7 +507,7 @@ export class DaemonServer {
         return this.sendJson(res, 200, { success: true, results, totalSteps: results.length });
     }
 
-    // Unified execution endpoints (using CLI run command capabilities)
+    // Execution endpoints (using CLI run command capabilities)
     if ((path === '/api/execute/natural-language' || path === '/api/execute/naturalLanguage') && method === 'POST') {
         try {
             const { query, options } = JSON.parse(body);
@@ -494,14 +521,14 @@ export class DaemonServer {
             
             console.log(`[Daemon] Executing natural language query: "${query.substring(0, 100)}..."`);
             
-            // Get unified execution service
+            // Get execution service
             const executionService = getExecuteService();
             
             if (!executionService) {
-                console.error('[Daemon] Unified execution service is not available');
+                console.error('[Daemon] Execution service is not available');
                 return this.sendJson(res, 503, { 
                     success: false, 
-                    error: 'Unified execution service is not available. Please check service configuration.' 
+                    error: 'Execution service is not available. Please check service configuration.' 
                 });
             }
             
@@ -531,25 +558,25 @@ export class DaemonServer {
                 });
             }
             
-            console.log(`[Daemon] Parsing intent with unified service: "${intent.substring(0, 100)}..."`);
+            console.log(`[Daemon] Parsing intent: "${intent.substring(0, 100)}..."`);
             
-            // Get unified execution service
+            // Get execution service
             const executionService = getExecuteService();
             
             if (!executionService) {
-                console.error('[Daemon] Unified execution service is not available');
+                console.error('[Daemon] Execution service is not available');
                 return this.sendJson(res, 503, { 
                     success: false, 
-                    error: 'Unified execution service is not available. Please check service configuration.' 
+                    error: 'Execution service is not available. Please check service configuration.' 
                 });
             }
             
-            console.log('[Daemon] Unified execution service obtained, calling parseIntent...');
+            console.log('[Daemon] Execution service obtained, calling parseIntent...');
             
-            // Parse intent using unified service (same as CLI run command)
+            // Parse intent using execution service (same as CLI run command)
             const result = await executionService.parseIntent(intent, context);
             
-            console.log('[Daemon] Unified execution service parseIntent result:', result);
+            console.log('[Daemon] Execution service parseIntent result:', result);
             
             return this.sendJson(res, 200, {
                 success: true,
@@ -561,7 +588,7 @@ export class DaemonServer {
                 }
             });
         } catch (error: any) {
-            console.error('[Daemon] Error parsing intent with unified service:', error);
+            console.error('[Daemon] Error parsing intent:', error);
             console.error('[Daemon] Error stack:', error.stack);
             console.error('[Daemon] Error details:', JSON.stringify(error, null, 2));
             return this.sendJson(res, 500, { 
@@ -572,7 +599,7 @@ export class DaemonServer {
     }
 
     // Execute pre-parsed steps (for Web UI - no re-parsing)
-    if ((path === '/api/execute/execute-steps' || path === '/api/execute/executeSteps') && method === 'POST') {
+    if ((path === '/api/execute/steps' || path === '/api/execute/execute-steps' || path === '/api/execute/executeSteps') && method === 'POST') {
         try {
             const { steps, options } = JSON.parse(body);
             
@@ -585,14 +612,14 @@ export class DaemonServer {
             
             console.log(`[Daemon] Executing ${steps.length} pre-parsed steps`);
             
-            // Get unified execution service
+            // Get execution service
             const executionService = getExecuteService();
             
             if (!executionService) {
-                console.error('[Daemon] Unified execution service is not available');
+                console.error('[Daemon] Execution service is not available');
                 return this.sendJson(res, 503, { 
                     success: false, 
-                    error: 'Unified execution service is not available. Please check service configuration.' 
+                    error: 'Execution service is not available. Please check service configuration.' 
                 });
             }
             
@@ -626,14 +653,14 @@ export class DaemonServer {
             
             console.log(`[Daemon] Starting interactive session for query: "${query.substring(0, 100)}..."`);
             
-            // Get unified execution service
+            // Get execution service
             const executionService = getExecuteService();
             
             if (!executionService) {
-                console.error('[Daemon] Unified execution service is not available');
+                console.error('[Daemon] Execution service is not available');
                 return this.sendJson(res, 503, { 
                     success: false, 
-                    error: 'Unified execution service is not available. Please check service configuration.' 
+                    error: 'Execution service is not available. Please check service configuration.' 
                 });
             }
             
@@ -677,14 +704,14 @@ export class DaemonServer {
             
             console.log(`[Daemon] Processing feedback for session: ${sessionId}`);
             
-            // Get unified execution service
+            // Get execution service
             const executionService = getExecuteService();
             
             if (!executionService) {
-                console.error('[Daemon] Unified execution service is not available');
+                console.error('[Daemon] Execution service is not available');
                 return this.sendJson(res, 503, { 
                     success: false, 
-                    error: 'Unified execution service is not available. Please check service configuration.' 
+                    error: 'Execution service is not available. Please check service configuration.' 
                 });
             }
             
@@ -726,14 +753,14 @@ export class DaemonServer {
             
             console.log(`[Daemon] Executing interactive session: ${sessionId}`);
             
-            // Get unified execution service
+            // Get execution service
             const executionService = getExecuteService();
             
             if (!executionService) {
-                console.error('[Daemon] Unified execution service is not available');
+                console.error('[Daemon] Execution service is not available');
                 return this.sendJson(res, 503, { 
                     success: false, 
-                    error: 'Unified execution service is not available. Please check service configuration.' 
+                    error: 'Execution service is not available. Please check service configuration.' 
                 });
             }
             
@@ -766,7 +793,7 @@ export class DaemonServer {
                 if (!executionService) {
                     return this.sendJson(res, 503, { 
                         success: false, 
-                        error: 'Unified execution service is not available' 
+                        error: 'Execution service is not available' 
                     });
                 }
                 
@@ -779,14 +806,14 @@ export class DaemonServer {
             
             console.log(`[Daemon] Getting interactive session: ${sessionId}`);
             
-            // Get unified execution service
+            // Get execution service
             const executionService = getExecuteService();
             
             if (!executionService) {
-                console.error('[Daemon] Unified execution service is not available');
+                console.error('[Daemon] Execution service is not available');
                 return this.sendJson(res, 503, { 
                     success: false, 
-                    error: 'Unified execution service is not available. Please check service configuration.' 
+                    error: 'Execution service is not available. Please check service configuration.' 
                 });
             }
             
@@ -819,14 +846,14 @@ export class DaemonServer {
             
             console.log(`[Daemon] Cleaning up old interactive sessions (max age: ${maxAgeMs}ms)`);
             
-            // Get unified execution service
+            // Get execution service
             const executionService = getExecuteService();
             
             if (!executionService) {
-                console.error('[Daemon] Unified execution service is not available');
+                console.error('[Daemon] Execution service is not available');
                 return this.sendJson(res, 503, { 
                     success: false, 
-                    error: 'Unified execution service is not available. Please check service configuration.' 
+                    error: 'Execution service is not available. Please check service configuration.' 
                 });
             }
             

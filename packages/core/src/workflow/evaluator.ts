@@ -1,3 +1,4 @@
+import { logger } from "../core/logger";
 import { WorkflowContext } from './types';
 import lodash from 'lodash';
 import jexl from 'jexl';
@@ -74,7 +75,7 @@ export class ExpressionEvaluator {
     try {
       return await jexl.eval(expr, evalContext);
     } catch (e) {
-      console.warn(`Failed to evaluate condition "${expr}":`, e);
+      logger.warn(`Failed to evaluate condition "${expr}":`, e);
       return false;
     }
   }

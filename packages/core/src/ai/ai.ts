@@ -1,10 +1,11 @@
 /**
- * AI Core Service — Facade (Legacy)
+ * @deprecated AI Core Service — Use CloudIntentEngine + LLMClient directly instead.
  *
- * Kept for backward compatibility. New code should use CloudIntentEngine directly.
- * All functionality has been migrated to:
+ * Kept for backward compatibility only. New code should use:
  * - CloudIntentEngine: plan-then-execute pipeline
  * - LLMClient: LLM provider interface
+ *
+ * This file will be removed in a future major version.
  */
 
 import chalk from 'chalk';
@@ -52,7 +53,7 @@ export class AIError extends Error {
 }
 
 /**
- * AI Core Service — Facade (Legacy)
+ * @deprecated AI Core Service — Facade (Legacy)
  *
  * Kept for backward compatibility. New code should use CloudIntentEngine directly.
  */

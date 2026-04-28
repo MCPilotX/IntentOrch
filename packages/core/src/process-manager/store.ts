@@ -26,7 +26,22 @@ export class ProcessStoreManager {
     try {
       ensureInTorchDir();
       
-      // Simple file locking
+      // Simple file locking with stale lock cleanup
+      try {
+        // Check if existing lock is stale (older than 10 seconds)
+        try {
+          const lockStat = await fs.stat(lockPath);
+          const lockAge = Date.now() - lockStat.mtimeMs;
+          if (lockAge > 10000) {
+            // Lock is stale, remove it
+            await fs.unlink(lockPath);
+          }
+        } catch (e) {
+          // Lock file doesn't exist or can't be read, proceed
+        }
+      } catch (e) {
+        // Ignore errors during stale lock check
+      }
       await fs.writeFile(lockPath, process.pid.toString(), { flag: 'wx' });
       
       await fs.writeFile(this.storePath, JSON.stringify(store, null, 2), 'utf-8');

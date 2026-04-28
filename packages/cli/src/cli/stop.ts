@@ -25,22 +25,59 @@ export function stopCommand(): Command {
         if (!isNaN(parsedPid) && parsedPid.toString() === target) {
           pid = parsedPid;
         } else {
-          // It's a server name, find the PID
+          // It's a server name, find all matching running PIDs
           serverName = target;
           const processManager = getProcessManager();
           const runningServers = await processManager.listRunning();
-          const server = runningServers.find(s => s.serverName === serverName);
+          const matchingServers = runningServers.filter(s => s.serverName === serverName);
           
-          if (!server) {
-            console.error(`✗ MCP Server "${serverName}" is not running.`);
+          if (matchingServers.length === 0) {
+            // Check if there are any stopped processes with this name (for better error message)
+            const allProcesses = await processManager.list();
+            const stoppedProcesses = allProcesses.filter(s => s.serverName === serverName && s.status === 'stopped');
+            if (stoppedProcesses.length > 0) {
+              console.error(`✗ MCP Server "${serverName}" is not running. (${stoppedProcesses.length} stopped instance(s) found)`);
+            } else {
+              console.error(`✗ MCP Server "${serverName}" is not running.`);
+            }
             process.exit(1);
           }
-          pid = server.pid;
+          
+          if (matchingServers.length > 1) {
+            // Multiple instances found - stop all of them
+            console.log(`ℹ️  Found ${matchingServers.length} running instances of "${serverName}"`);
+            for (const server of matchingServers) {
+              if (!useDaemon) {
+                const pm = getProcessManager();
+                await pm.stop(server.pid);
+                console.log(`✓ Process ${server.pid} (${serverName}) stopped in local mode`);
+              } else {
+                const client = new DaemonClient();
+                const isDaemonRunning = await client.isDaemonRunning();
+                if (!isDaemonRunning) {
+                  handleDaemonError(new Error('Daemon is not running'));
+                }
+                const response = await client.stopServer(server.pid);
+                console.log(`✓ ${response.message} (${serverName})`);
+              }
+            }
+            return;
+          }
+          
+          pid = matchingServers[0].pid;
         }
 
         if (!useDaemon) {
           // User explicitly requested no daemon, use local mode
           const processManager = getProcessManager();
+          
+          // Check if process is already stopped before attempting to stop
+          const processInfo = await processManager.get(pid);
+          if (processInfo && processInfo.status === 'stopped') {
+            console.log(`ℹ️  Process ${pid} ${serverName ? `(${serverName}) ` : ''}is already stopped.`);
+            return;
+          }
+          
           await processManager.stop(pid);
           console.log(`✓ Process ${pid} ${serverName ? `(${serverName}) ` : ''}stopped in local mode`);
           console.log(`⚠️  Note: Process was not managed by daemon`);
@@ -54,9 +91,19 @@ export function stopCommand(): Command {
           handleDaemonError(new Error('Daemon is not running'));
         }
         
+        // Check if process is already stopped before attempting to stop via daemon
+        try {
+          const serverStatus = await client.getServerStatus(pid);
+          if (serverStatus && serverStatus.status === 'stopped') {
+            console.log(`ℹ️  Process ${pid} ${serverName ? `(${serverName}) ` : ''}is already stopped.`);
+            return;
+          }
+        } catch {
+          // If status check fails, proceed with stop anyway
+        }
+        
         const response = await client.stopServer(pid);
-        console.log(`✓ ${response.message}${serverName ? ` (${serverName})` : ''}`);
-      } catch (error) {
+        console.log(`✓ ${response.message}${serverName ? ` (${serverName})` : ''}`);      } catch (error) {
         console.error(`✗ Failed to stop "${target}":`, (error as Error).message);
         process.exit(1);
       }

@@ -3,12 +3,9 @@
  * Provides unified interface for AI functionality
  */
 
-// Export AI functionality (legacy facade, kept for backward compatibility)
-export { AI, AIError, type AskResult, type ToolCall } from './ai';
-export { AIConfigManager } from './config';
-
-// Export AIConfig from core types
-export type { AIConfig } from '../core/types';
+// Export LLM Client
+export { LLMClient, getLLMClient } from './llm-client';
+export type { ConnectionTestResult } from './llm-client';
 
 // Export Cloud LLM Intent Engine (recommended approach)
 export {
@@ -33,7 +30,7 @@ export {
  * Check AI capabilities
  * Simplified version without vector database
  */
-export async function checkAICapabilities(config?: any): Promise<{
+export async function checkAICapabilities(config?: Record<string, unknown>): Promise<{
   aiAvailable: boolean;
   mode: 'api' | 'none';
 }> {
@@ -56,7 +53,7 @@ export async function checkAICapabilities(config?: any): Promise<{
 /**
  * Get AI system status
  */
-export async function getAIStatus(config?: any) {
+export async function getAIStatus(config?: Record<string, unknown>) {
   const capabilities = await checkAICapabilities(config);
 
   return {

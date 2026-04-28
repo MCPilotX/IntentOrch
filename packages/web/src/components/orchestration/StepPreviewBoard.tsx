@@ -24,6 +24,7 @@ interface StepPreviewBoardProps {
   onPublish?: () => void;
   onClear: () => void;
   onDeleteStep: (id: string) => void;
+  onEditStep?: (step: WorkflowStep) => void;
   onAddStep?: () => void;
   actionSelection?: 'execute' | 'save' | 'edit';
   onActionChange?: (action: 'execute' | 'save' | 'edit') => void;
@@ -36,6 +37,7 @@ const StepPreviewBoard: React.FC<StepPreviewBoardProps> = ({
   status, 
   onClear, 
   onDeleteStep,
+  onEditStep,
   onAddStep,
   actionSelection = 'execute',
   onActionChange,
@@ -211,6 +213,7 @@ const StepPreviewBoard: React.FC<StepPreviewBoardProps> = ({
                   step={step} 
                   index={index} 
                   onDelete={onDeleteStep}
+                  onEdit={onEditStep}
                 />
               ))}
               

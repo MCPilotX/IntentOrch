@@ -1,3 +1,4 @@
+import { logger } from "../core/logger";
 import { RuntimeAdapter } from './adapter';
 import { ServiceConfig } from '../core/types';
 import { spawn, execSync, type ChildProcess } from 'child_process';
@@ -17,12 +18,12 @@ export class RustAdapter implements RuntimeAdapter {
   }
 
   async setup(config: ServiceConfig): Promise<void> {
-    console.log(`[Rust] Setting up service: ${config.name}`);
+    logger.info(`[Rust] Setting up service: ${config.name}`);
 
     // Check if Rust is installed
     try {
       execSync('cargo --version', { stdio: 'ignore' });
-      console.log('[Rust] Cargo is installed');
+      logger.info('[Rust] Cargo is installed');
     } catch (error) {
       throw new Error('Rust/Cargo is not installed or not in PATH. Please install Rust from https://rustup.rs/');
     }
@@ -32,27 +33,27 @@ export class RustAdapter implements RuntimeAdapter {
     // Check Cargo.toml file
     const cargoTomlPath = path.join(servicePath, 'Cargo.toml');
     if (!fs.existsSync(cargoTomlPath)) {
-      console.log('[Rust] Cargo.toml not found, checking if this is a binary crate');
+      logger.info('[Rust] Cargo.toml not found, checking if this is a binary crate');
 
       // Check if this is a single Rust file
       if (config.entry && config.entry.endsWith('.rs')) {
-        console.log(`[Rust] Single Rust file detected: ${config.entry}`);
+        logger.info(`[Rust] Single Rust file detected: ${config.entry}`);
         // For a single Rust file, we can compile directly using rustc
       } else {
-        console.log(`[Rust] Creating basic Cargo.toml for ${config.name}`);
+        logger.info(`[Rust] Creating basic Cargo.toml for ${config.name}`);
         try {
           execSync(`cargo init --name ${config.name} --bin`, {
             stdio: 'inherit',
             cwd: servicePath,
           });
         } catch (error: any) {
-          console.warn(`[Rust] Failed to create Cargo.toml: ${error.message}`);
+          logger.warn(`[Rust] Failed to create Cargo.toml: ${error.message}`);
         }
       }
     }
 
     // Build project
-    console.log('[Rust] Building project...');
+    logger.info('[Rust] Building project...');
     try {
       const rustConfig = config.runtimeConfig?.rust;
 
@@ -61,35 +62,35 @@ export class RustAdapter implements RuntimeAdapter {
           stdio: 'inherit',
           cwd: servicePath,
         });
-        console.log('[Rust] Release build completed');
+        logger.info('[Rust] Release build completed');
       } else {
         execSync('cargo build', {
           stdio: 'inherit',
           cwd: servicePath,
         });
-        console.log('[Rust] Debug build completed');
+        logger.info('[Rust] Debug build completed');
       }
     } catch (error: any) {
-      console.warn(`[Rust] Build failed: ${error.message}`);
+      logger.warn(`[Rust] Build failed: ${error.message}`);
       // Continue, might just be a warning
     }
 
     // Run tests (optional)
     const rustConfig = config.runtimeConfig?.rust;
     if (rustConfig?.test) {
-      console.log('[Rust] Running tests...');
+      logger.info('[Rust] Running tests...');
       try {
         execSync('cargo test', {
           stdio: 'inherit',
           cwd: servicePath,
         });
-        console.log('[Rust] Tests passed');
+        logger.info('[Rust] Tests passed');
       } catch (error: any) {
-        console.warn(`[Rust] Tests failed: ${error.message}`);
+        logger.warn(`[Rust] Tests failed: ${error.message}`);
       }
     }
 
-    console.log(`[Rust] Setup completed for service: ${config.name}`);
+    logger.info(`[Rust] Setup completed for service: ${config.name}`);
   }
 
   private findRustBinary(config: ServiceConfig): string {
@@ -124,7 +125,7 @@ export class RustAdapter implements RuntimeAdapter {
       const outputName = rustConfig?.output || config.name;
       const outputPath = path.join(servicePath, outputName);
 
-      console.log(`[Rust] Compiling single file: ${config.entry}`);
+      logger.info(`[Rust] Compiling single file: ${config.entry}`);
       try {
         execSync(`rustc ${config.entry} -o ${outputPath}`, {
           stdio: 'inherit',
@@ -135,7 +136,7 @@ export class RustAdapter implements RuntimeAdapter {
           return outputPath;
         }
       } catch (error: any) {
-        console.warn(`[Rust] Failed to compile single file: ${error.message}`);
+        logger.warn(`[Rust] Failed to compile single file: ${error.message}`);
       }
     }
 
@@ -155,8 +156,8 @@ export class RustAdapter implements RuntimeAdapter {
   async startService(config: ServiceConfig): Promise<ChildProcess> {
     const { command, args } = this.getSpawnArgs(config);
 
-    console.log(`[Rust] Starting service: ${config.name}`);
-    console.log(`[Rust] Command: ${command} ${args.join(' ')}`);
+    logger.info(`[Rust] Starting service: ${config.name}`);
+    logger.info(`[Rust] Command: ${command} ${args.join(' ')}`);
 
     const finalArgs = command === 'cargo' ? ['run', '--', ...args] : args;
     const finalCommand = command === 'cargo' ? 'cargo' : command;
@@ -173,19 +174,19 @@ export class RustAdapter implements RuntimeAdapter {
     });
 
     childProcess.stdout?.on('data', (data) => {
-      console.log(`[Rust:${config.name}] ${data.toString().trim()}`);
+      logger.info(`[Rust:${config.name}] ${data.toString().trim()}`);
     });
 
     childProcess.stderr?.on('data', (data) => {
-      console.error(`[Rust:${config.name}] ERR: ${data.toString().trim()}`);
+      logger.error(`[Rust:${config.name}] ERR: ${data.toString().trim()}`);
     });
 
     childProcess.on('error', (error) => {
-      console.error(`[Rust:${config.name}] Failed to start: ${error.message}`);
+      logger.error(`[Rust:${config.name}] Failed to start: ${error.message}`);
     });
 
     childProcess.on('exit', (code, signal) => {
-      console.log(`[Rust:${config.name}] Process exited with code ${code}, signal ${signal}`);
+      logger.info(`[Rust:${config.name}] Process exited with code ${code}, signal ${signal}`);
       this.process = null;
     });
 
@@ -195,7 +196,7 @@ export class RustAdapter implements RuntimeAdapter {
 
   async stopService(): Promise<void> {
     if (this.process) {
-      console.log('[Rust] Stopping service');
+      logger.info('[Rust] Stopping service');
       this.process.kill();
       this.process = null;
     }
@@ -221,7 +222,7 @@ export class RustAdapter implements RuntimeAdapter {
   }
 
   async compile(config: ServiceConfig): Promise<boolean> {
-    console.log(`[Rust] Compiling service: ${config.name}`);
+    logger.info(`[Rust] Compiling service: ${config.name}`);
 
     try {
       const rustConfig = config.runtimeConfig?.rust;
@@ -230,58 +231,58 @@ export class RustAdapter implements RuntimeAdapter {
         stdio: 'inherit',
         cwd: config.path || '.',
       });
-      console.log('[Rust] Successfully compiled');
+      logger.info('[Rust] Successfully compiled');
       return true;
     } catch (error: any) {
-      console.error(`[Rust] Compilation failed: ${error.message}`);
+      logger.error(`[Rust] Compilation failed: ${error.message}`);
       return false;
     }
   }
 
   async test(config: ServiceConfig): Promise<boolean> {
-    console.log(`[Rust] Running tests for service: ${config.name}`);
+    logger.info(`[Rust] Running tests for service: ${config.name}`);
 
     try {
       execSync('cargo test', {
         stdio: 'inherit',
         cwd: config.path || '.',
       });
-      console.log('[Rust] Tests passed');
+      logger.info('[Rust] Tests passed');
       return true;
     } catch (error: any) {
-      console.error(`[Rust] Tests failed: ${error.message}`);
+      logger.error(`[Rust] Tests failed: ${error.message}`);
       return false;
     }
   }
 
   async check(config: ServiceConfig): Promise<boolean> {
-    console.log(`[Rust] Running cargo check for service: ${config.name}`);
+    logger.info(`[Rust] Running cargo check for service: ${config.name}`);
 
     try {
       execSync('cargo check', {
         stdio: 'inherit',
         cwd: config.path || '.',
       });
-      console.log('[Rust] Check passed');
+      logger.info('[Rust] Check passed');
       return true;
     } catch (error: any) {
-      console.error(`[Rust] Check failed: ${error.message}`);
+      logger.error(`[Rust] Check failed: ${error.message}`);
       return false;
     }
   }
 
   async clippy(config: ServiceConfig): Promise<boolean> {
-    console.log(`[Rust] Running cargo clippy for service: ${config.name}`);
+    logger.info(`[Rust] Running cargo clippy for service: ${config.name}`);
 
     try {
       execSync('cargo clippy', {
         stdio: 'inherit',
         cwd: config.path || '.',
       });
-      console.log('[Rust] Clippy passed');
+      logger.info('[Rust] Clippy passed');
       return true;
     } catch (error: any) {
-      console.error(`[Rust] Clippy failed: ${error.message}`);
+      logger.error(`[Rust] Clippy failed: ${error.message}`);
       return false;
     }
   }

@@ -1,3 +1,4 @@
+import { logger } from "../core/logger";
 /**
  * Auto-start manager for MCP servers
  * Handles automatic pulling and starting of required servers
@@ -58,7 +59,7 @@ export class AutoStartManager {
         );
         
         if (isAlreadyRunning) {
-          console.log(`✓ ${displayName} is already running`);
+          logger.info(`✓ ${displayName} is already running`);
           result.success = true;
           result.alreadyRunning = true;
           results.push(result);
@@ -66,29 +67,29 @@ export class AutoStartManager {
         }
         
         // Step 1: Ensure manifest is pulled
-        console.log(`📥 Checking manifest for ${displayName}...`);
+        logger.info(`📥 Checking manifest for ${displayName}...`);
         const manifest = await this.registryClient.getCachedManifest(serverName);
         
         if (!manifest) {
-          console.log(`   Pulling manifest for ${displayName}...`);
+          logger.info(`   Pulling manifest for ${displayName}...`);
           try {
             await this.registryClient.fetchManifest(serverName);
-            console.log(`   ✓ Manifest pulled successfully`);
+            logger.info(`   ✓ Manifest pulled successfully`);
           } catch (pullError: any) {
-            console.error(`   ❌ Failed to pull manifest: ${pullError.message}`);
+            logger.error(`   ❌ Failed to pull manifest: ${pullError.message}`);
             result.error = `Failed to pull manifest: ${pullError.message}`;
             results.push(result);
             continue;
           }
         } else {
-          console.log(`   ✓ Manifest already cached`);
+          logger.info(`   ✓ Manifest already cached`);
         }
         
         // Step 2: Start the server
-        console.log(`   Starting ${displayName}...`);
+        logger.info(`   Starting ${displayName}...`);
         try {
           const pid = await this.processManager.start(serverName);
-          console.log(`   ✓ Started successfully (PID: ${pid})`);
+          logger.info(`   ✓ Started successfully (PID: ${pid})`);
           
           result.success = true;
           result.pid = pid;
@@ -97,12 +98,12 @@ export class AutoStartManager {
           await new Promise(resolve => setTimeout(resolve, 2000));
           
         } catch (startError: any) {
-          console.error(`   ❌ Failed to start server: ${startError.message}`);
+          logger.error(`   ❌ Failed to start server: ${startError.message}`);
           result.error = `Failed to start: ${startError.message}`;
         }
         
       } catch (error: any) {
-        console.error(`❌ Error processing ${displayName}: ${error.message}`);
+        logger.error(`❌ Error processing ${displayName}: ${error.message}`);
         result.error = error.message;
       }
       
@@ -135,46 +136,46 @@ export class AutoStartManager {
    * Print results in a user-friendly format
    */
   printResults(results: ServerStartResult[]): void {
-    console.log('\n' + '='.repeat(60));
-    console.log('AUTO-START RESULTS');
-    console.log('='.repeat(60));
+    logger.info('\n' + '='.repeat(60));
+    logger.info('AUTO-START RESULTS');
+    logger.info('='.repeat(60));
     
     const summary = this.getResultsSummary(results);
     
-    console.log(`\nSummary:`);
-    console.log(`  Total servers: ${summary.total}`);
-    console.log(`  Already running: ${summary.alreadyRunning}`);
-    console.log(`  Successfully started: ${summary.successful}`);
-    console.log(`  Failed: ${summary.failed}`);
+    logger.info(`\nSummary:`);
+    logger.info(`  Total servers: ${summary.total}`);
+    logger.info(`  Already running: ${summary.alreadyRunning}`);
+    logger.info(`  Successfully started: ${summary.successful}`);
+    logger.info(`  Failed: ${summary.failed}`);
     
     if (summary.failed > 0) {
-      console.log(`\nFailed servers:`);
+      logger.info(`\nFailed servers:`);
       results
         .filter(r => !r.success && !r.alreadyRunning)
         .forEach(r => {
-          console.log(`  ❌ ${r.displayName}: ${r.error}`);
+          logger.info(`  ❌ ${r.displayName}: ${r.error}`);
         });
     }
     
     if (summary.successful > 0) {
-      console.log(`\nSuccessfully started servers:`);
+      logger.info(`\nSuccessfully started servers:`);
       results
         .filter(r => r.success && !r.alreadyRunning)
         .forEach(r => {
-          console.log(`  ✅ ${r.displayName} (PID: ${r.pid})`);
+          logger.info(`  ✅ ${r.displayName} (PID: ${r.pid})`);
         });
     }
     
     if (summary.alreadyRunning > 0) {
-      console.log(`\nAlready running servers:`);
+      logger.info(`\nAlready running servers:`);
       results
         .filter(r => r.alreadyRunning)
         .forEach(r => {
-          console.log(`  ⚡ ${r.displayName} (already running)`);
+          logger.info(`  ⚡ ${r.displayName} (already running)`);
         });
     }
     
-    console.log('\n' + '='.repeat(60));
+    logger.info('\n' + '='.repeat(60));
   }
 
   /**

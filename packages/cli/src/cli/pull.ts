@@ -49,40 +49,44 @@ export function pullCommand(): Command {
           const lightweightManifest = toLightweightManifest(manifest);
           await registryClient.cacheManifest(server, lightweightManifest);
         } else {
-          console.log(`  Tool discovery: Using static tool definitions from manifest`);
+          // Check if manifest has valid tools (with name) or just empty/invalid entries
+          const hasValidTools = (tools: any[]) => tools && tools.length > 0 && tools.some(t => t.name);
           
-          // For backward compatibility, register tools from manifest
-          const toolRegistry = getToolRegistry();
-          await toolRegistry.registerToolsFromManifest(server, manifest);
+          const manifestTools = manifest.tools || [];
+          const capabilitiesTools = manifest.capabilities?.tools || [];
+          const hasValidStaticTools = hasValidTools(manifestTools) || hasValidTools(capabilitiesTools);
           
-          if (manifest.tools && manifest.tools.length > 0) {
-            console.log(`  Tools: ${manifest.tools.length} tools registered (static)`);
-            for (const tool of manifest.tools.slice(0, 3)) {
-              console.log(`    - ${tool.name}: ${tool.description}`);
+          if (hasValidStaticTools) {
+            console.log(`  Tool discovery: Using static tool definitions from manifest`);
+            
+            // Register tools from manifest
+            const toolRegistry = getToolRegistry();
+            await toolRegistry.registerToolsFromManifest(server, manifest);
+            
+            const validTools = manifestTools.filter((t: any) => t.name).length > 0 
+              ? manifestTools.filter((t: any) => t.name)
+              : capabilitiesTools.filter((t: any) => t.name);
+            console.log(`  Tools: ${validTools.length} tools registered (static)`);
+            for (const tool of validTools.slice(0, 3)) {
+              console.log(`    - ${tool.name}: ${tool.description || 'No description'}`);
             }
-            if (manifest.tools.length > 3) {
-              console.log(`    ... and ${manifest.tools.length - 3} more`);
-            }
-          } else if (manifest.capabilities?.tools && manifest.capabilities.tools.length > 0) {
-            console.log(`  Tools: ${manifest.capabilities.tools.length} tools registered (static)`);
-            for (const tool of manifest.capabilities.tools.slice(0, 3)) {
-              console.log(`    - ${tool.name}: ${tool.description}`);
-            }
-            if (manifest.capabilities.tools.length > 3) {
-              console.log(`    ... and ${manifest.capabilities.tools.length - 3} more`);
+            if (validTools.length > 3) {
+              console.log(`    ... and ${validTools.length - 3} more`);
             }
           } else {
-            console.log(`  Tools: No tools declared in manifest`);
+            // Manifest has no valid tools - will discover dynamically at start
+            console.log(`  Tool discovery: Will discover tools dynamically when server starts`);
+            
+            // Convert to lightweight manifest and cache it
+            const lightweightManifest = toLightweightManifest(manifest);
+            await registryClient.cacheManifest(server, lightweightManifest);
           }
         }
         
         console.log(`\n💡 Next steps:`);
         console.log(`   1. Set any required secrets: intorch secret set <name> <value>`);
         console.log(`   2. Start the server: intorch start ${displayName}`);
-        
-        if (supportsDynamic) {
-          console.log(`   3. Tools will be automatically discovered after server starts`);
-        }
+        console.log(`   3. Tools will be automatically discovered after server starts`);
       } catch (error) {
         console.error(`Failed to pull ${getDisplayName(server)}:`, (error as Error).message);
         process.exit(1);

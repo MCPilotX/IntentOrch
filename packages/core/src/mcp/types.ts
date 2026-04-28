@@ -40,12 +40,31 @@ export interface ToolExample {
   output?: any;
 }
 
+/**
+ * JSON Schema property definition for tool input schemas
+ */
+export interface JSONSchemaProperty {
+  type?: string;
+  description?: string;
+  properties?: Record<string, JSONSchemaProperty>;
+  items?: JSONSchemaProperty;
+  required?: string[];
+  enum?: string[];
+  default?: unknown;
+  minimum?: number;
+  maximum?: number;
+  minLength?: number;
+  maxLength?: number;
+  pattern?: string;
+  [key: string]: unknown;
+}
+
 export interface Tool {
   name: string;
   description: string;
   inputSchema: {
     type: 'object';
-    properties: Record<string, any>;
+    properties: Record<string, JSONSchemaProperty>;
     required?: string[];
     additionalProperties?: boolean;
   };
@@ -137,6 +156,9 @@ export interface TransportConfig {
   // Additional spawn options for stdio transport
   env?: Record<string, string>;
   cwd?: string;
+  // Optional existing child process to connect to (for dynamic tool discovery)
+  // When provided, the transport will use this process instead of spawning a new one
+  existingProcess?: import('child_process').ChildProcess;
 }
 
 // ==================== Client Configuration ====================

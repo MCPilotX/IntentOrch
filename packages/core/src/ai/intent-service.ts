@@ -1,3 +1,4 @@
+import { logger } from "../core/logger";
 /**
  * Uses local CloudIntentEngine for LLM-driven intent parsing
  */
@@ -68,7 +69,7 @@ export class IntentService {
         aiConfig: this.aiConfig
       });
       
-      console.log('[IntentService] CloudIntentEngine initialized');
+      logger.info('[IntentService] CloudIntentEngine initialized');
     }
   }
   
@@ -76,13 +77,13 @@ export class IntentService {
     const { intent, context } = request;
     
     try {
-      console.log(`[IntentService] Parsing intent: "${intent}"`);
+      logger.info(`[IntentService] Parsing intent: "${intent}"`);
       
       // Initialize if needed
       if (!this.initPromise) {
         this.initPromise = (async () => {
           if (this.aiConfig.apiKey) {
-            console.log(`[IntentService] Configuring AI with provider: ${this.aiConfig.provider || 'openai'}, model: ${this.aiConfig.model || 'gpt-3.5-turbo'}`);
+            logger.info(`[IntentService] Configuring AI with provider: ${this.aiConfig.provider || 'openai'}, model: ${this.aiConfig.model || 'gpt-3.5-turbo'}`);
           }
           await this.toolRegistry.load();
           
@@ -122,13 +123,13 @@ export class IntentService {
         };
       }
       
-      console.log(`[IntentService] Found ${tools.length} available tools`);
+      logger.info(`[IntentService] Found ${tools.length} available tools`);
       
       // Set available tools for the intent engine
       this.cloudIntentEngine.setAvailableTools(tools);
       
       // Parse and plan the intent using CloudIntentEngine (Plan → Confirm → Execute pipeline)
-      console.log('[IntentService] Calling planQuery...');
+      logger.info('[IntentService] Calling planQuery...');
       const plan = await this.cloudIntentEngine.planQuery(intent);
       
       // Convert the plan to workflow steps
@@ -145,7 +146,7 @@ export class IntentService {
       };
       
     } catch (error: any) {
-      console.error('[IntentService] Error parsing intent:', error);
+      logger.error('[IntentService] Error parsing intent:', error);
       return {
         success: false,
         error: `Failed to parse intent: ${error.message}`
@@ -224,7 +225,7 @@ export class IntentService {
         }
       }
     } catch (error) {
-      console.warn(`[IntentService] Failed to get server from registry for tool "${toolName}":`, error);
+      logger.warn(`[IntentService] Failed to get server from registry for tool "${toolName}":`, error);
     }
     
     if (context?.availableServers && context.availableServers.length > 0) {
@@ -294,7 +295,7 @@ export class IntentService {
         
         // Final post-processing with ParameterPostProcessor (Smart extraction)
         const processed = ParameterPostProcessor.process(adapted, { properties: actualSchema });
-        console.log(`[IntentService] Final adapted parameters for ${toolName}:`, JSON.stringify(processed.params));
+        logger.info(`[IntentService] Final adapted parameters for ${toolName}:`, JSON.stringify(processed.params));
         return processed.params;
         
       }
@@ -347,7 +348,7 @@ export class IntentService {
   private ensureRequiredParameters(adaptedParams: Record<string, any>, actualSchema: Record<string, any>, toolName: string): void {
     for (const [paramName, paramSchema] of Object.entries(actualSchema)) {
       if ((paramSchema as any).required && !adaptedParams[paramName]) {
-        console.warn(`[IntentService] Missing required parameter: "${paramName}" for tool "${toolName}"`);
+        logger.warn(`[IntentService] Missing required parameter: "${paramName}" for tool "${toolName}"`);
       }
     }
   }

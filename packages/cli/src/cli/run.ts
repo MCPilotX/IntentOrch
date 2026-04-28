@@ -210,7 +210,7 @@ export function runCommand(): Command {
         if (!options.silent) {
           console.log('🎯 Starting natural language workflow execution');
           console.log(`📝 Query: "${input}"`);
-          console.log('\n🔧 Initializing unified execution service...');
+          console.log('\n🔧 Initializing execution service...');
         }
         
         // Check AI configuration
@@ -227,7 +227,7 @@ export function runCommand(): Command {
 
         if (!options.silent) {
           console.log('   Configuring AI provider:', aiConfig.provider);
-          console.log('✓ Unified execution service initialized');
+          console.log('✓ Execution service initialized');
         }
 
         // Execute natural language query

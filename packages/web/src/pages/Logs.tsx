@@ -64,7 +64,7 @@ const Logs: React.FC = () => {
 
   // Mock log data (in real projects should come from API)
   const mockLogs: LogEntry[] = [
-    ...systemLogs.map((log, index) => ({
+    ...(Array.isArray(systemLogs) ? systemLogs : []).map((log, index) => ({
       id: `system-${index}`,
       timestamp: new Date(Date.now() - index * 60000).toISOString(),
       level: (['info', 'warning', 'error', 'debug'] as LogLevel[])[index % 4],

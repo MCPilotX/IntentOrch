@@ -1,3 +1,4 @@
+import { logger } from "../core/logger";
 /**
  * Owner/Project format unification utilities
  * Ensures consistent owner/project format throughout the system
@@ -344,16 +345,16 @@ export function exampleUsage(): void {
     'https://raw.githubusercontent.com/Joooook/12306-mcp/main/mcp.json'
   ];
   
-  console.log('Owner/Project format unification examples:');
-  console.log('='.repeat(60));
+  logger.info('Owner/Project format unification examples:');
+  logger.info('='.repeat(60));
   
   for (const example of examples) {
     const format = toOwnerProjectFormat(example);
-    console.log(`Input: ${example}`);
-    console.log(`  Display format: ${toDisplayString(example)}`);
-    console.log(`  Storage format: ${toStorageFormat(example)}`);
-    console.log(`  Friendly name: ${getFriendlyName(example)}`);
-    console.log(`  Components: owner=${format.owner}, project=${format.project}, branch=${format.branch || 'none'}, path=${format.path || 'none'}`);
-    console.log();
+    logger.info(`Input: ${example}`);
+    logger.info(`  Display format: ${toDisplayString(example)}`);
+    logger.info(`  Storage format: ${toStorageFormat(example)}`);
+    logger.info(`  Friendly name: ${getFriendlyName(example)}`);
+    logger.info(`  Components: owner=${format.owner}, project=${format.project}, branch=${format.branch || 'none'}, path=${format.path || 'none'}`);
+    logger.info('---');
   }
 }

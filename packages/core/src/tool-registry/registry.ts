@@ -1,3 +1,4 @@
+import { logger } from "../core/logger";
 import fs from 'fs/promises';
 import path from 'path';
 import { getInTorchDir } from '../utils/paths';
@@ -54,12 +55,12 @@ export class ToolRegistry {
       for (const tool of registry.tools || []) {
         // Skip tools with invalid serverName (e.g., "github:/" from old buggy URL parsing)
         if (tool.serverName && (tool.serverName.endsWith(':/') || tool.serverName.endsWith('://'))) {
-          console.warn(`[ToolRegistry] Skipping tool "${tool.name}" with invalid serverName: "${tool.serverName}"`);
+          logger.warn(`[ToolRegistry] Skipping tool "${tool.name}" with invalid serverName: "${tool.serverName}"`);
           continue;
         }
         // Skip tools where owner or project is empty (e.g., serverName is just "/")
         if (tool.serverName && tool.serverName.split(':').pop() === '/') {
-          console.warn(`[ToolRegistry] Skipping tool "${tool.name}" with empty owner/project: "${tool.serverName}"`);
+          logger.warn(`[ToolRegistry] Skipping tool "${tool.name}" with empty owner/project: "${tool.serverName}"`);
           continue;
         }
         
@@ -97,7 +98,7 @@ export class ToolRegistry {
     }
     
     if (!tools || tools.length === 0) {
-      console.warn(`No tools declared in manifest for ${displayName}`);
+      logger.warn(`No tools declared in manifest for ${displayName}`);
       return;
     }
 
@@ -116,7 +117,7 @@ export class ToolRegistry {
       const key = this.getToolKey(normalizedServerName, tool.name);
       this.tools.set(key, toolWithServer);
       
-      console.log(`Registered tool: ${tool.name} from ${displayName} (${normalizedServerName})${requiresPreprocessing ? ' [requires preprocessing]' : ''}`);
+      logger.info(`Registered tool: ${tool.name} from ${displayName} (${normalizedServerName})${requiresPreprocessing ? ' [requires preprocessing]' : ''}`);
     }
     
     await this.save();
@@ -127,7 +128,7 @@ export class ToolRegistry {
    */
   async registerDynamicTools(serverName: string, tools: any[]): Promise<void> {
     if (!tools || tools.length === 0) {
-      console.log(`No tools to register for ${serverName}`);
+      logger.info(`No tools to register for ${serverName}`);
       return;
     }
     
@@ -135,7 +136,7 @@ export class ToolRegistry {
     const normalizedServerName = normalizeServerName(serverName);
     const displayName = getDisplayName(serverName);
     
-    console.log(`[ToolRegistry] Registering ${tools.length} dynamic tools for ${displayName}`);
+    logger.info(`[ToolRegistry] Registering ${tools.length} dynamic tools for ${displayName}`);
     
     for (const tool of tools) {
       try {
@@ -166,22 +167,22 @@ export class ToolRegistry {
           
           if (!existingTool.isDynamic || existingTime < newTime) {
             this.tools.set(key, toolMetadata);
-            console.log(`[ToolRegistry] Updated dynamic tool: ${tool.name} from ${displayName}`);
+            logger.info(`[ToolRegistry] Updated dynamic tool: ${tool.name} from ${displayName}`);
           } else {
-            console.log(`[ToolRegistry] Skipping existing dynamic tool: ${tool.name}`);
+            logger.info(`[ToolRegistry] Skipping existing dynamic tool: ${tool.name}`);
           }
         } else {
           // Register new tool
           this.tools.set(key, toolMetadata);
-          console.log(`[ToolRegistry] Registered dynamic tool: ${tool.name} from ${displayName}`);
+          logger.info(`[ToolRegistry] Registered dynamic tool: ${tool.name} from ${displayName}`);
         }
       } catch (error) {
-        console.error(`[ToolRegistry] Failed to register dynamic tool ${tool.name}:`, error);
+        logger.error(`[ToolRegistry] Failed to register dynamic tool ${tool.name}:`, error);
       }
     }
     
     await this.save();
-    console.log(`[ToolRegistry] ✓ Dynamic tool registration completed for ${displayName}`);
+    logger.info(`[ToolRegistry] ✓ Dynamic tool registration completed for ${displayName}`);
   }
 
   async findToolsByKeyword(keyword: string): Promise<ToolMetadata[]> {
@@ -263,7 +264,7 @@ export function getToolRegistry(): ToolRegistry {
     toolRegistry = new ToolRegistry();
     // Async load, but don't wait
     toolRegistry.load().catch(err => {
-      console.warn('Failed to load tool registry:', err.message);
+      logger.warn('Failed to load tool registry:', err.message);
     });
   }
   return toolRegistry;

@@ -26,6 +26,7 @@ export interface StartServerResponse {
   version: string;
   status: string;
   logPath: string;
+  alreadyRunning?: boolean;
 }
 
 export interface StopServerRequest {

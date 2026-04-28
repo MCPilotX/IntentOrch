@@ -17,6 +17,8 @@ import { LLMClient, getLLMClient } from './llm-client';
 import type { AIConfig } from '../core/types';
 import type { Tool } from '../mcp/types';
 import { ParameterMapper, ValidationLevel } from '../mcp/parameter-mapper';
+import { Timeouts, LLMDefaults } from '../core/constants';
+import type { LLMMessage, LLMResponse as LLMClientResponse } from './llm-client';
 
 // ==================== Plan-then-Execute Types ====================
 
@@ -28,10 +30,12 @@ export interface PlanStep {
   id: string;
   /** Tool name to execute */
   toolName: string;
+  /** Server name that provides this tool */
+  serverName?: string;
   /** Human-readable description of what this step does */
   description: string;
   /** Parameters for the tool call */
-  arguments: Record<string, any>;
+  arguments: Record<string, unknown>;
   /** IDs of steps that this step depends on */
   dependsOn: string[];
 }
@@ -69,12 +73,12 @@ export interface PlanExecutionResult {
     stepId: string;
     toolName: string;
     success: boolean;
-    result?: any;
+    result?: unknown;
     error?: string;
     duration: number;
   }>;
   /** Final result (output of the last step) */
-  finalResult?: any;
+  finalResult?: unknown;
   /** Total execution duration */
   totalDuration: number;
 }
@@ -125,8 +129,8 @@ export interface CloudIntentEngineConfig {
 // ==================== Execution Context ====================
 
 interface ExecutionContext {
-  results: Map<string, any>;
-  variables: Map<string, any>;
+  results: Map<string, unknown>;
+  variables: Map<string, unknown>;
 }
 
 // ==================== Function Calling Result Type ====================
@@ -138,324 +142,59 @@ export interface FunctionCallingResult {
   hasToolCall: boolean;
   toolCalls: Array<{
     toolName: string;
-    arguments: Record<string, any>;
+    arguments: Record<string, unknown>;
   }>;
-  raw: any;
+  raw: unknown;
   provider: string;
-  model: string;
+  text?: string;
 }
 
-// ==================== Main Engine Class ====================
+// ==================== CloudIntentEngine ====================
 
 export class CloudIntentEngine {
   private llmClient: LLMClient;
   private config: CloudIntentEngineConfig;
   private availableTools: Tool[] = [];
-  private toolCache: Map<string, Tool> = new Map();
-  private initialized: boolean = false;
 
   constructor(config: CloudIntentEngineConfig) {
+    this.config = config;
     this.llmClient = getLLMClient();
-    this.config = {
-      llm: {
-        temperature: 0.1,
-        maxTokens: 2048,
-        timeout: 30000,
-        maxRetries: 3,
-        ...config.llm,
-        provider: config.llm.provider || 'openai',
-      },
-      execution: {
-        maxConcurrentTools: 10,
-        timeout: 60000,
-        retryAttempts: 2,
-        retryDelay: 1000,
-        ...config.execution,
-      },
-      fallback: {
-        enableKeywordMatching: true,
-        askUserOnFailure: false,
-        defaultTools: {},
-        ...config.fallback,
-      },
-      parameterMapping: config.parameterMapping,
-    };
-
-    // Auto-initialize LLM configuration
-    this.initialize().catch(error => {
-      logger.error(`[CloudIntentEngine] Auto-initialization failed: ${error}`);
-    });
+    this.llmClient.configure({
+      provider: config.llm.provider,
+      apiKey: config.llm.apiKey || '',
+      model: config.llm.model || LLMDefaults.MODEL,
+      temperature: config.llm.temperature ?? LLMDefaults.TEMPERATURE,
+      maxTokens: config.llm.maxTokens ?? LLMDefaults.MAX_TOKENS,
+      timeout: config.llm.timeout ?? Timeouts.LLM_REQUEST,
+    } as AIConfig);
   }
 
   /**
-   * Initialize the engine
-   */
-  async initialize(): Promise<void> {
-    try {
-      // Configure LLM client
-      this.llmClient.configure({
-        provider: this.config.llm.provider,
-        apiKey: this.config.llm.apiKey,
-        apiEndpoint: this.config.llm.endpoint,
-        model: this.config.llm.model || 'gpt-3.5-turbo',
-      });
-
-      // Configure ParameterMapper if configuration is provided
-      if (this.config.parameterMapping) {
-        const config: any = {};
-
-        if (this.config.parameterMapping.validationLevel !== undefined) {
-          config.validationLevel = this.config.parameterMapping.validationLevel;
-        }
-
-        if (this.config.parameterMapping.logWarnings !== undefined) {
-          config.logWarnings = this.config.parameterMapping.logWarnings;
-        }
-
-        if (this.config.parameterMapping.enforceRequired !== undefined) {
-          config.enforceRequired = this.config.parameterMapping.enforceRequired;
-        }
-
-        ParameterMapper.configure(config);
-        logger.debug('[CloudIntentEngine] ParameterMapper configured successfully');
-      }
-
-      this.initialized = true;
-      logger.debug('[CloudIntentEngine] Engine initialized successfully');
-    } catch (error) {
-      logger.error(`[CloudIntentEngine] Failed to initialize: ${error}`);
-      throw error;
-    }
-  }
-
-  /**
-   * Set available tools list
+   * Set available tools for the engine
    */
   setAvailableTools(tools: Tool[]): void {
     this.availableTools = tools;
-    this.toolCache.clear();
-
-    // Build tool cache
-    tools.forEach(tool => {
-      this.toolCache.set(tool.name, tool);
-    });
-
     logger.debug(`[CloudIntentEngine] Set ${tools.length} available tools`);
   }
 
-  // ==================== Helper: Convert MCP Tools to LLM Tools Format ====================
-
   /**
-   * Convert MCP Tool[] to LLM tools format
+   * Get available tools
    */
-  private toLLMTools(): Array<{
-    type: 'function';
-    function: {
-      name: string;
-      description: string;
-      parameters: Record<string, any>;
-    };
-  }> {
-    return this.availableTools.map(tool => ({
-      type: 'function' as const,
-      function: {
-        name: tool.name,
-        description: tool.description || '',
-        parameters: tool.inputSchema || { type: 'object', properties: {} },
-      },
-    }));
+  getAvailableTools(): Tool[] {
+    return [...this.availableTools];
   }
 
   /**
-   * Parse LLM response tool calls into our format
-   */
-  private parseToolCalls(response: any): Array<{
-    toolName: string;
-    arguments: Record<string, any>;
-  }> {
-    const toolCalls: Array<{
-      toolName: string;
-      arguments: Record<string, any>;
-    }> = [];
-
-    if (!response?.toolCalls || !Array.isArray(response.toolCalls)) {
-      return toolCalls;
-    }
-
-    for (const tc of response.toolCalls) {
-      try {
-        const args = typeof tc.function.arguments === 'string'
-          ? JSON.parse(tc.function.arguments)
-          : tc.function.arguments;
-        toolCalls.push({
-          toolName: tc.function.name,
-          arguments: args || {},
-        });
-      } catch (e) {
-        logger.warn(`[CloudIntentEngine] Failed to parse tool call arguments: ${e}`);
-      }
-    }
-
-    return toolCalls;
-  }
-
-  // ==================== LLM Function Calling (Single Query) ====================
-
-  /**
-   * Process a user query using LLM function calling.
+   * Step 1: Plan — Generate a tool execution plan from a user query.
    *
-   * This is the simplest entry point. It uses LLM's native function calling API
-   * to directly select the appropriate tool and extract parameters in a single call.
-   *
-   * Example:
-   *   const result = await engine.processQuery('search for files containing "test"');
-   *   // result.toolCalls[0] = { toolName: 'search_files', arguments: { pattern: 'test' } }
-   */
-  async processQuery(
-    query: string,
-    options?: {
-      systemPrompt?: string;
-      model?: string;
-      temperature?: number;
-      maxTokens?: number;
-      toolChoice?: 'auto' | 'none' | 'required';
-    },
-  ): Promise<FunctionCallingResult> {
-    logger.debug(`[CloudIntentEngine] processQuery called: "${query}"`);
-
-    if (this.availableTools.length === 0) {
-      logger.warn('[CloudIntentEngine] No tools available for processQuery');
-      return {
-        hasToolCall: false,
-        toolCalls: [],
-        raw: null,
-        provider: this.config.llm.provider,
-        model: this.config.llm.model || 'unknown',
-      };
-    }
-
-    try {
-      const response = await this.llmClient.chat({
-        messages: [
-          {
-            role: 'system',
-            content: options?.systemPrompt || 'You are a helpful assistant. Use the available tools to fulfill the user\'s request. Select the most appropriate tool and extract all parameters from the query.',
-          },
-          { role: 'user', content: query },
-        ],
-        tools: this.toLLMTools(),
-        toolChoice: options?.toolChoice || 'auto',
-        temperature: options?.temperature ?? 0.1,
-        maxTokens: options?.maxTokens ?? 2048,
-      });
-
-      const toolCalls = this.parseToolCalls(response);
-
-      logger.debug(`[CloudIntentEngine] processQuery result: ${toolCalls.length > 0 ? toolCalls.length + ' tool call(s)' : 'no tool call'}`);
-
-      return {
-        hasToolCall: toolCalls.length > 0,
-        toolCalls,
-        raw: response.raw,
-        provider: response.provider,
-        model: response.model,
-      };
-    } catch (error: any) {
-      logger.error(`[CloudIntentEngine] processQuery failed: ${error.message}`);
-      return {
-        hasToolCall: false,
-        toolCalls: [],
-        raw: null,
-        provider: this.config.llm.provider,
-        model: this.config.llm.model || 'unknown',
-      };
-    }
-  }
-
-  /**
-   * Process a conversation history using LLM function calling (multi-turn).
-   *
-   * This is used for multi-turn tool calling where the LLM can call tools,
-   * see results, and decide if more calls are needed.
-   *
-   * The conversation history should include system prompt, user messages,
-   * and assistant messages with tool results.
-   */
-  async processQueryWithHistory(
-    messages: Array<{ role: string; content: string }>,
-    options?: {
-      model?: string;
-      temperature?: number;
-      maxTokens?: number;
-      toolChoice?: 'auto' | 'none' | 'required';
-    },
-  ): Promise<FunctionCallingResult & { text?: string }> {
-    logger.debug(`[CloudIntentEngine] processQueryWithHistory called with ${messages.length} messages`);
-
-    if (this.availableTools.length === 0) {
-      logger.warn('[CloudIntentEngine] No tools available for processQueryWithHistory');
-      return {
-        hasToolCall: false,
-        toolCalls: [],
-        text: '',
-        raw: null,
-        provider: this.config.llm.provider,
-        model: this.config.llm.model || 'unknown',
-      };
-    }
-
-    try {
-      const response = await this.llmClient.chat({
-        messages: messages as any,
-        tools: this.toLLMTools(),
-        toolChoice: options?.toolChoice || 'auto',
-        temperature: options?.temperature ?? 0.1,
-        maxTokens: options?.maxTokens ?? 2048,
-      });
-
-      const toolCalls = this.parseToolCalls(response);
-
-      logger.debug(`[CloudIntentEngine] processQueryWithHistory result: ${toolCalls.length > 0 ? toolCalls.length + ' tool call(s)' : 'no tool call, text response'}`);
-
-      return {
-        hasToolCall: toolCalls.length > 0,
-        toolCalls,
-        text: response.text,
-        raw: response.raw,
-        provider: response.provider,
-        model: response.model,
-      };
-    } catch (error: any) {
-      logger.error(`[CloudIntentEngine] processQueryWithHistory failed: ${error.message}`);
-      return {
-        hasToolCall: false,
-        toolCalls: [],
-        text: '',
-        raw: null,
-        provider: this.config.llm.provider,
-        model: this.config.llm.model || 'unknown',
-      };
-    }
-  }
-
-  // ==================== Plan-then-Execute Methods ====================
-
-  /**
-   * Step 1: Plan — Generate a tool execution plan (DAG) from a user query.
-   *
-   * Uses LLM function calling to analyze the query against available MCP tools
-   * and generate a structured plan with multiple steps and their dependencies.
+   * Uses LLM function calling to generate a structured plan (DAG) with:
+   * - Tool selection based on available MCP tools
+   * - Parameter extraction from the query
+   * - Dependency ordering between steps
    *
    * The plan is returned WITHOUT executing any tools. The caller should:
    * 1. Present the plan to the user for confirmation
-   * 2. Call executePlan() with the confirmed plan
-   *
-   * Example:
-   *   const plan = await engine.planQuery('先查上海到北京的高铁，再截图保存');
-   *   // plan.steps = [
-   *   //   { id: 'step_1', toolName: 'get-tickets', arguments: { from: '上海', to: '北京' }, dependsOn: [] },
-   *   //   { id: 'step_2', toolName: 'screenshot', arguments: {}, dependsOn: ['step_1'] },
-   *   // ]
+   * 2. Execute the plan after confirmation
    */
   async planQuery(
     query: string,
@@ -463,139 +202,78 @@ export class CloudIntentEngine {
       systemPrompt?: string;
       model?: string;
       temperature?: number;
-      maxTokens?: number;
     },
   ): Promise<ToolExecutionPlan> {
-    logger.info(`[CloudIntentEngine] planQuery called: "${query}"`);
+    logger.info(`[CloudIntentEngine] planQuery called: "${query.substring(0, 100)}..."`);
 
-    const planId = `plan_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+    const startTime = Date.now();
 
-    if (this.availableTools.length === 0) {
-      logger.warn('[CloudIntentEngine] No tools available for planQuery');
-      return {
-        id: planId,
-        query,
-        steps: [],
-        confirmed: false,
-        createdAt: new Date(),
-        summary: 'No MCP tools available. Please install MCP services first.',
-      };
-    }
+    // Build the system prompt with available tools
+    const systemPrompt = options?.systemPrompt || this.buildSystemPrompt();
 
-    const systemPrompt = options?.systemPrompt || this.buildPlanSystemPrompt();
+    // Build the user message with the query
+    const userMessage = this.buildUserMessage(query);
 
     try {
-      // First attempt: try with toolChoice 'auto' (allows LLM to decide)
-      let response = await this.llmClient.chat({
+      // Call LLM with function calling
+      const response = await this.llmClient.chat({
         messages: [
           { role: 'system', content: systemPrompt },
-          { role: 'user', content: query },
+          { role: 'user', content: userMessage },
         ],
-        tools: this.toLLMTools(),
+        temperature: options?.temperature,
+        tools: this.availableTools.map(tool => ({
+          type: 'function' as const,
+          function: {
+            name: tool.name,
+            description: tool.description || '',
+            parameters: tool.inputSchema || { type: 'object', properties: {} },
+          },
+        })),
         toolChoice: 'auto',
-        temperature: options?.temperature ?? 0.2,
-        maxTokens: options?.maxTokens ?? 4096,
       });
 
-      let toolCalls = this.parseToolCalls(response);
+      // Parse the response into a plan
+      const plan = this.parseResponseToPlan(query, response);
 
-      // If no tool calls were made, retry with toolChoice 'auto' and lower temperature
-      if (toolCalls.length === 0) {
-        logger.debug('[CloudIntentEngine] No tool calls in first attempt, retrying with lower temperature');
-        response = await this.llmClient.chat({
-          messages: [
-            { role: 'system', content: systemPrompt },
-            { role: 'user', content: query },
-          ],
-          tools: this.toLLMTools(),
-          toolChoice: 'auto',
-          temperature: 0.1,
-          maxTokens: options?.maxTokens ?? 4096,
-        });
-        toolCalls = this.parseToolCalls(response);
-      }
-      
-      // If still no tool calls, try with a more explicit prompt
-      if (toolCalls.length === 0) {
-        logger.debug('[CloudIntentEngine] No tool calls in second attempt, retrying with explicit prompt');
-        response = await this.llmClient.chat({
-          messages: [
-            { role: 'system', content: systemPrompt + '\n\nYou MUST select one of the available tools above to fulfill the user\'s request. Pick the tool that directly produces the answer.' },
-            { role: 'user', content: query },
-          ],
-          tools: this.toLLMTools(),
-          toolChoice: 'auto',
-          temperature: 0.1,
-          maxTokens: options?.maxTokens ?? 4096,
-        });
-        toolCalls = this.parseToolCalls(response);
-      }
-      
-      // Convert LLM tool calls into a plan
-      // Note: No post-processing needed — LLM function calling already selects the correct tool
-      // and extracts the right parameters. We fully trust the LLM's tool selection.
-      const steps: PlanStep[] = toolCalls.map((tc, index) => ({
-        id: `step_${index + 1}`,
-        toolName: tc.toolName,
-        description: this.describeToolCall(tc.toolName, tc.arguments),
-        arguments: tc.arguments,
-        dependsOn: index > 0 ? [`step_${index}`] : [],
-      }));
+      const duration = Date.now() - startTime;
+      logger.info(`[CloudIntentEngine] Plan generated in ${duration}ms with ${plan.steps.length} steps`);
 
-      // Build summary
-      const summary = this.buildPlanSummary(query, steps);
-
-      const plan: ToolExecutionPlan = {
-        id: planId,
-        query,
-        steps,
-        confirmed: false,
-        createdAt: new Date(),
-        summary,
-      };
-
-      logger.info(`[CloudIntentEngine] planQuery generated ${steps.length} steps: ${summary}`);
       return plan;
-    } catch (error: any) {
-      logger.error(`[CloudIntentEngine] planQuery failed: ${error.message}`);
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      logger.error(`[CloudIntentEngine] planQuery failed: ${errorMessage}`);
+
+      // Return a fallback plan
       return {
-        id: planId,
+        id: `plan_${Date.now()}`,
         query,
         steps: [],
         confirmed: false,
         createdAt: new Date(),
-        summary: `Failed to generate plan: ${error.message}`,
+        summary: `Failed to generate plan: ${errorMessage}`,
       };
     }
   }
 
   /**
-   * Step 2: Confirm — Validate and confirm a tool execution plan.
+   * Step 2: Confirm — Validate and confirm a plan with user interaction.
    *
-   * This method:
-   * 1. Validates the plan structure (no circular deps, valid tool names, etc.)
-   * 2. Calls the confirmation callback for user interaction
-   * 3. Returns the confirmed (or modified) plan
+   * Calls the confirmation callback to get user feedback on the plan.
+   * The callback can:
+   * - Confirm the plan as-is
+   * - Modify the plan (e.g., reorder steps, change parameters)
+   * - Reject the plan with feedback
    */
   async confirmPlan(
     plan: ToolExecutionPlan,
-    confirmationCallback?: PlanConfirmationCallback,
+    confirmationCallback: PlanConfirmationCallback,
   ): Promise<ToolExecutionPlan> {
     logger.info(`[CloudIntentEngine] confirmPlan called for plan ${plan.id}`);
 
-    // Validate plan structure
-    const validationErrors = this.validatePlan(plan);
-    if (validationErrors.length > 0) {
-      logger.warn(`[CloudIntentEngine] Plan validation failed: ${validationErrors.join('; ')}`);
-      return {
-        ...plan,
-        summary: `Plan validation failed: ${validationErrors.join('; ')}`,
-      };
-    }
-
-    // If no callback provided, auto-confirm
-    if (!confirmationCallback) {
-      logger.info('[CloudIntentEngine] No confirmation callback, auto-confirming plan');
+    // If the plan has no steps, auto-confirm
+    if (plan.steps.length === 0) {
+      logger.info('[CloudIntentEngine] Plan has no steps, auto-confirming');
       return {
         ...plan,
         confirmed: true,
@@ -623,12 +301,13 @@ export class CloudIntentEngine {
           summary: `User cancelled the plan: ${response.feedback || 'User did not provide feedback'}`,
         };
       }
-    } catch (error: any) {
-      logger.error(`[CloudIntentEngine] Confirmation callback failed: ${error.message}`);
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      logger.error(`[CloudIntentEngine] Confirmation callback failed: ${errorMessage}`);
       return {
         ...plan,
         confirmed: false,
-        summary: `Confirmation process error: ${error.message}`,
+        summary: `Confirmation process error: ${errorMessage}`,
       };
     }
   }
@@ -643,7 +322,7 @@ export class CloudIntentEngine {
    */
   async executePlan(
     plan: ToolExecutionPlan,
-    toolExecutor: (toolName: string, params: Record<string, any>) => Promise<any>,
+    toolExecutor: (toolName: string, params: Record<string, unknown>) => Promise<unknown>,
   ): Promise<PlanExecutionResult> {
     logger.info(`[CloudIntentEngine] executePlan called for plan ${plan.id} with ${plan.steps.length} steps`);
 
@@ -729,9 +408,9 @@ export class CloudIntentEngine {
         });
 
         logger.info(`[CloudIntentEngine] Step ${step.id} (${step.toolName}) completed in ${duration}ms`);
-      } catch (error: any) {
+      } catch (error: unknown) {
         const duration = Date.now() - stepStartTime;
-        const errorMessage = error.message || String(error);
+        const errorMessage = error instanceof Error ? error.message : String(error);
 
         stepResults.push({
           stepId: step.id,
@@ -771,7 +450,7 @@ export class CloudIntentEngine {
   async planAndExecute(
     query: string,
     confirmationCallback: PlanConfirmationCallback,
-    toolExecutor: (toolName: string, params: Record<string, any>) => Promise<any>,
+    toolExecutor: (toolName: string, params: Record<string, unknown>) => Promise<unknown>,
     options?: {
       systemPrompt?: string;
       model?: string;
@@ -805,169 +484,288 @@ export class CloudIntentEngine {
     }
 
     // Step 3: Execute
-    return await this.executePlan(confirmedPlan, toolExecutor);
-  }
-
-  // ==================== Plan-then-Execute Private Helpers ====================
-
-  /**
-   * Build the system prompt for plan generation
-   */
-  private buildPlanSystemPrompt(): string {
-    return `You are an intelligent tool orchestration planner. Your job is to select the EXACT tool that fulfills the user's request.
-
-AVAILABLE TOOLS:
-${this.availableTools.map(t => `- ${t.name}: ${t.description || 'No description'}`).join('\n')}
-
-RULES:
-1. Select the tool that DIRECTLY produces the answer the user wants — the tool whose description best matches the user's intent
-2. Extract ALL parameters from the user's query and pass them to the tool
-3. For simple queries (a single action), use EXACTLY ONE tool call
-4. DO NOT call helper/intermediate tools unless the user explicitly asks for them — pick the tool that directly fulfills the request
-5. If the user asks for data or information, pick the tool that retrieves that data directly
-6. When a user asks to "query" or "search" for something, look for a tool whose name or description contains words like "query", "search", "get", "list", "find" that match the subject of the query
-
-IMPORTANT: Call the tool that directly fulfills the user's request. Each tool call becomes a step in the execution plan.
-
-CRITICAL: Some tools are "helper" or "intermediate" tools that only prepare data for other tools. For example:
-- A tool that looks up codes or IDs is a helper tool — it does NOT produce the final answer
-- A tool that retrieves the actual data (tickets, files, weather, etc.) is the FINAL tool
-- If you need a helper tool AND a final tool, you MUST call BOTH in sequence
-- NEVER select a helper tool as the only tool — it won't produce the answer the user wants`;
+    return this.executePlan(confirmedPlan, toolExecutor);
   }
 
   /**
-   * Build a human-readable summary of the plan
+   * Process a query with multi-turn conversation history support.
+   * This is used by the ExecuteService for the multi-turn LLM function calling flow.
    */
-  private buildPlanSummary(query: string, steps: PlanStep[]): string {
-    if (steps.length === 0) {
-      return 'No execution steps were generated.';
-    }
+  async processQueryWithHistory(
+    conversationHistory: Array<{ role: string; content: string }>,
+    options?: {
+      toolChoice?: 'auto' | 'none';
+      model?: string;
+      temperature?: number;
+    },
+  ): Promise<FunctionCallingResult> {
+    logger.debug(`[CloudIntentEngine] processQueryWithHistory called with ${conversationHistory.length} messages`);
 
-    const stepDescriptions = steps.map((step, i) => {
-      const deps = step.dependsOn.length > 0
-        ? ` (depends on: ${step.dependsOn.join(', ')})`
-        : '';
-      return `${i + 1}. ${step.description}${deps}`;
-    });
-
-    return `Will execute ${steps.length} steps:\n${stepDescriptions.join('\n')}`;
-  }
-
-  /**
-   * Describe a tool call in human-readable form
-   */
-  private describeToolCall(toolName: string, args: Record<string, any>): string {
-    const tool = this.toolCache.get(toolName);
-    const toolDesc = tool?.description || toolName;
-
-    // Try to extract key parameters for a more descriptive summary
-    const keyParams = Object.entries(args)
-      .filter(([key]) => !['query', 'text', 'input'].includes(key))
-      .slice(0, 3)
-      .map(([key, value]) => {
-        const strValue = typeof value === 'string' ? value : JSON.stringify(value);
-        return `${key}=${strValue}`;
+    try {
+      const response = await this.llmClient.chat({
+        messages: conversationHistory as LLMMessage[],
+        temperature: options?.temperature,
+        tools: this.availableTools.map(tool => ({
+          type: 'function' as const,
+          function: {
+            name: tool.name,
+            description: tool.description || '',
+            parameters: tool.inputSchema || { type: 'object', properties: {} },
+          },
+        })),
+        toolChoice: options?.toolChoice,
       });
 
-    if (keyParams.length > 0) {
-      return `${toolDesc} (${keyParams.join(', ')})`;
+      return this.parseFunctionCallingResponse(response);
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      logger.error(`[CloudIntentEngine] processQueryWithHistory failed: ${errorMessage}`);
+      return {
+        hasToolCall: false,
+        toolCalls: [],
+        raw: null,
+        provider: this.config.llm.provider,
+        text: `Error: ${errorMessage}`,
+      };
     }
+  }
 
-    return toolDesc;
+  // ==================== Private Methods ====================
+
+  /**
+   * Build the system prompt with available tools
+   */
+  private buildSystemPrompt(): string {
+    const toolsDescription = this.availableTools
+      .map(tool => {
+        const params = tool.inputSchema?.properties
+          ? Object.entries(tool.inputSchema.properties)
+              .map(([key, value]) => {
+                const prop = value as Record<string, unknown>;
+                return `  - ${key} (${(prop.type as string) || 'string'}): ${(prop.description as string) || ''}`;
+              })
+              .join('\n')
+          : '  No parameters';
+
+        return `Tool: ${tool.name}
+Description: ${tool.description || 'No description'}
+Parameters:
+${params}`;
+      })
+      .join('\n\n');
+
+    return `You are an intelligent assistant that generates structured execution plans.
+
+You have access to the following MCP tools:
+
+${toolsDescription}
+
+Your task is to analyze the user's request and generate a plan that:
+1. Selects the appropriate tools to fulfill the request
+2. Extracts parameters from the user's query
+3. Orders steps correctly (dependencies first)
+4. Provides clear descriptions for each step
+
+IMPORTANT: Return your response as a structured plan with steps. Each step must specify:
+- The tool to use
+- The parameters to pass
+- Any dependencies on previous steps`;
   }
 
   /**
-   * Validate a plan's structure
+   * Build the user message with the query
    */
-  private validatePlan(plan: ToolExecutionPlan): string[] {
-    const errors: string[] = [];
+  private buildUserMessage(query: string): string {
+    return `User request: ${query}
 
-    if (!plan.id) errors.push('Plan ID is required');
-    if (!plan.query) errors.push('Plan query is required');
+Please generate a structured execution plan to fulfill this request.`;
+  }
 
-    // Validate each step
-    const stepIds = new Set<string>();
-    for (const step of plan.steps) {
-      if (!step.id) errors.push('Step ID is required');
-      if (stepIds.has(step.id)) errors.push(`Duplicate step ID: ${step.id}`);
-      stepIds.add(step.id);
+  /**
+   * Parse LLM response into a ToolExecutionPlan
+   *
+   * Handles both the LLMClientResponse format (with toolCalls containing
+   * {id, type, function: {name, arguments}}) and text-based JSON responses.
+   */
+  private parseResponseToPlan(query: string, response: LLMClientResponse): ToolExecutionPlan {
+    const plan: ToolExecutionPlan = {
+      id: `plan_${Date.now()}`,
+      query,
+      steps: [],
+      confirmed: false,
+      createdAt: new Date(),
+      summary: '',
+    };
 
-      if (!step.toolName) errors.push(`Step ${step.id}: toolName is required`);
-
-      // Validate dependencies reference existing steps
-      for (const dep of step.dependsOn) {
-        if (!plan.steps.find(s => s.id === dep)) {
-          errors.push(`Step ${step.id}: dependency ${dep} not found`);
-        }
+    // Build a tool name -> server name lookup from available tools
+    const toolServerMap = new Map<string, string>();
+    for (const tool of this.availableTools) {
+      const serverName = (tool as unknown as Record<string, unknown>).serverName as string | undefined;
+      if (serverName && !toolServerMap.has(tool.name)) {
+        toolServerMap.set(tool.name, serverName);
       }
     }
 
-    return errors;
+    // Try to extract tool calls from the LLMClientResponse format
+    if (response.toolCalls && response.toolCalls.length > 0) {
+      plan.steps = response.toolCalls.map((tc, index) => {
+        let args: Record<string, unknown> = {};
+        try {
+          args = JSON.parse(tc.function.arguments);
+        } catch {
+          args = {};
+        }
+
+        return {
+          id: `step_${index + 1}`,
+          toolName: tc.function.name,
+          serverName: toolServerMap.get(tc.function.name),
+          description: `Execute ${tc.function.name} with provided parameters`,
+          arguments: args,
+          dependsOn: index > 0 ? [`step_${index}`] : [],
+        };
+      });
+
+      plan.summary = `Plan with ${plan.steps.length} steps using ${plan.steps.map(s => s.toolName).join(', ')}`;
+    } else if (response.text) {
+      // Try to parse JSON from the response text
+      try {
+        const parsed = JSON.parse(response.text);
+        if (parsed.steps && Array.isArray(parsed.steps)) {
+          plan.steps = parsed.steps.map((step: Record<string, unknown>, index: number) => ({
+            id: (step.id as string) || `step_${index + 1}`,
+            toolName: step.toolName as string,
+            serverName: (step.serverName as string) || toolServerMap.get(step.toolName as string),
+            description: (step.description as string) || `Step ${index + 1}`,
+            arguments: (step.arguments as Record<string, unknown>) || {},
+            dependsOn: (step.dependsOn as string[]) || [],
+          }));
+          plan.summary = (parsed.summary as string) || `Plan with ${plan.steps.length} steps`;
+        } else {
+          plan.summary = response.text.substring(0, 200);
+        }
+      } catch {
+        // Not JSON, use text as summary
+        plan.summary = response.text.substring(0, 200);
+      }
+    }
+
+    return plan;
+  }
+
+  /**
+   * Parse function calling response from LLMClientResponse format
+   */
+  private parseFunctionCallingResponse(response: LLMClientResponse): FunctionCallingResult {
+    const result: FunctionCallingResult = {
+      hasToolCall: false,
+      toolCalls: [],
+      raw: response.raw || null,
+      provider: response.provider,
+    };
+
+    if (response.toolCalls && response.toolCalls.length > 0) {
+      result.hasToolCall = true;
+      result.toolCalls = response.toolCalls.map(tc => {
+        let args: Record<string, unknown> = {};
+        try {
+          args = JSON.parse(tc.function.arguments);
+        } catch {
+          args = {};
+        }
+
+        return {
+          toolName: tc.function.name,
+          arguments: args,
+        };
+      });
+    }
+
+    if (response.text) {
+      result.text = response.text;
+    }
+
+    return result;
   }
 
   /**
    * Topological sort of plan steps
+   * Returns ordered step IDs or null if circular dependency detected
    */
   private topologicalSortPlan(steps: PlanStep[]): string[] | null {
-    const visited = new Set<string>();
-    const visiting = new Set<string>();
-    const order: string[] = [];
+    const graph = new Map<string, string[]>();
+    const inDegree = new Map<string, number>();
 
-    function visit(stepId: string, stepMap: Map<string, PlanStep>): boolean {
-      if (visited.has(stepId)) return true;
-      if (visiting.has(stepId)) return false; // Circular dependency
+    // Initialize graph
+    for (const step of steps) {
+      graph.set(step.id, step.dependsOn || []);
+      inDegree.set(step.id, 0);
+    }
 
-      visiting.add(stepId);
+    // Calculate in-degrees: count of dependencies for each node
+    // A node with 0 dependencies can be executed first
+    for (const [nodeId, deps] of graph) {
+      inDegree.set(nodeId, deps.length);
+    }
 
-      const step = stepMap.get(stepId);
-      if (step) {
-        for (const dep of step.dependsOn) {
-          if (!visit(dep, stepMap)) return false;
+    // Kahn's algorithm: start with nodes that have no dependencies
+    const queue: string[] = [];
+    for (const [id, degree] of inDegree) {
+      if (degree === 0) {
+        queue.push(id);
+      }
+    }
+
+    const sorted: string[] = [];
+    while (queue.length > 0) {
+      const node = queue.shift()!;
+      sorted.push(node);
+
+      // Find all nodes that depend on 'node' and decrement their in-degree
+      for (const [otherNode, deps] of graph) {
+        if (deps.includes(node)) {
+          const newDegree = (inDegree.get(otherNode) || 0) - 1;
+          inDegree.set(otherNode, newDegree);
+          if (newDegree === 0) {
+            queue.push(otherNode);
+          }
         }
       }
-
-      visiting.delete(stepId);
-      visited.add(stepId);
-      order.push(stepId);
-      return true;
     }
 
-    const stepMap = new Map(steps.map(s => [s.id, s]));
-
-    for (const step of steps) {
-      if (!visit(step.id, stepMap)) return null; // Circular dependency
+    // Check for circular dependency
+    if (sorted.length !== steps.length) {
+      return null;
     }
 
-    return order;
+    return sorted;
   }
 
   /**
    * Resolve plan parameters with variable substitution
+   * Supports {{step_X.result}} and {{step_X.result.field}} syntax
    */
   private resolvePlanParameters(
-    args: Record<string, any>,
+    args: Record<string, unknown>,
     context: ExecutionContext,
-  ): Record<string, any> {
-    const resolved: Record<string, any> = {};
+  ): Record<string, unknown> {
+    const resolved: Record<string, unknown> = {};
 
     for (const [key, value] of Object.entries(args)) {
-      if (typeof value === 'string') {
-        // Replace {{step_X.result}} or {{step_X.result.field}} patterns
-        resolved[key] = value.replace(/\{\{step_(\d+)\.result(?:(?:\.(\w+)))?\}\}/g, (match, stepNum, field) => {
-          const stepId = `step_${stepNum}`;
-          const result = context.results.get(stepId);
-          if (result === undefined) return match;
-          if (field && result && typeof result === 'object') return result[field] ?? match;
-          return result ?? match;
-        });
+      if (typeof value === 'string' && value.includes('{{')) {
+        resolved[key] = this.resolveTemplateString(value, context);
+      } else if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+        resolved[key] = this.resolvePlanParameters(value as Record<string, unknown>, context);
       } else if (Array.isArray(value)) {
-        resolved[key] = value.map(v =>
-          typeof v === 'string' ? this.resolvePlanParameters({ _: v }, context)._
-            : v
-        );
-      } else if (value && typeof value === 'object') {
-        resolved[key] = this.resolvePlanParameters(value, context);
+        resolved[key] = value.map(item => {
+          if (typeof item === 'string' && item.includes('{{')) {
+            return this.resolveTemplateString(item, context);
+          }
+          if (typeof item === 'object' && item !== null) {
+            return this.resolvePlanParameters(item as Record<string, unknown>, context);
+          }
+          return item;
+        });
       } else {
         resolved[key] = value;
       }
@@ -976,4 +774,84 @@ CRITICAL: Some tools are "helper" or "intermediate" tools that only prepare data
     return resolved;
   }
 
+  /**
+   * Resolve a template string with variable substitution
+   */
+  private resolveTemplateString(template: string, context: ExecutionContext): string {
+    return template.replace(/\{\{(.+?)\}\}/g, (match, expression) => {
+      const expr = (expression as string).trim();
+
+      // Check for step result reference: step_X.result or step_X.result.field
+      const stepResultMatch = expr.match(/^step_(\d+)\.result(?:\.(.+))?$/);
+      if (stepResultMatch) {
+        const stepId = `step_${stepResultMatch[1]}`;
+        const fieldPath = stepResultMatch[2];
+        const result = context.results.get(stepId);
+
+        if (result === undefined) {
+          logger.warn(`[CloudIntentEngine] Template variable ${match} not found in context`);
+          return match;
+        }
+
+        if (fieldPath) {
+          // Navigate nested object path
+          const value = this.getNestedValue(result, fieldPath);
+          return value !== undefined ? String(value) : match;
+        }
+
+        return typeof result === 'object' ? JSON.stringify(result) : String(result);
+      }
+
+      // Check for variable reference: var.name
+      const varMatch = expr.match(/^var\.(.+)$/);
+      if (varMatch) {
+        const varName = varMatch[1];
+        const value = context.variables.get(varName);
+        if (value === undefined) {
+          logger.warn(`[CloudIntentEngine] Variable ${varName} not found in context`);
+          return match;
+        }
+        return String(value);
+      }
+
+      // Unknown expression, return as-is
+      logger.warn(`[CloudIntentEngine] Unknown template expression: ${expr}`);
+      return match;
+    });
+  }
+
+  /**
+   * Get a nested value from an object using dot notation
+   */
+  private getNestedValue(obj: unknown, path: string): unknown {
+    const keys = path.split('.');
+    let current: unknown = obj;
+
+    for (const key of keys) {
+      if (current === null || current === undefined) {
+        return undefined;
+      }
+      if (typeof current === 'object' && key in (current as Record<string, unknown>)) {
+        current = (current as Record<string, unknown>)[key];
+      } else {
+        return undefined;
+      }
+    }
+
+    return current;
+  }
+
+  /**
+   * Describe a tool call for logging
+   */
+  private describeToolCall(toolName: string, args: Record<string, unknown>): string {
+    const paramSummary = Object.entries(args)
+      .map(([key, value]) => {
+        const valueStr = typeof value === 'string' ? `"${value.substring(0, 50)}"` : String(value);
+        return `${key}=${valueStr}`;
+      })
+      .join(', ');
+
+    return `${toolName}(${paramSummary})`;
+  }
 }

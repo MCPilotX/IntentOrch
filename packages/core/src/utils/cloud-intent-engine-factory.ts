@@ -1,3 +1,4 @@
+import { logger } from "../core/logger";
 /**
  * CloudIntentEngine Factory
  * Creates properly configured CloudIntentEngine instances using OrchApp configuration system
@@ -60,7 +61,7 @@ export async function createCloudIntentEngine(
     try {
       aiConfig = await getAIConfig();
     } catch (error) {
-      console.warn('Failed to load AI configuration from system, using environment variables as fallback');
+      logger.warn('Failed to load AI configuration from system, using environment variables as fallback');
       
       // Fallback to environment variables
       aiConfig = {
@@ -117,10 +118,7 @@ export async function createCloudIntentEngine(
   // Create the engine
   const engine = new CloudIntentEngine(config);
   
-  // Initialize the engine - this is required to set up the AI client
-  // Based on the type definition, CloudIntentEngine has an initialize() method
-  await engine.initialize();
-  
+  // The engine is initialized in the constructor - no separate initialize() call needed
   return engine;
 }
 

@@ -181,8 +181,10 @@ export class IntentorchAdapter {
       const tools = await this.getAvailableTools();
       this.cloudIntentEngine.setAvailableTools(tools);
 
-      // Use the new processQuery method (LLM function calling)
-      const result = await this.cloudIntentEngine.processQuery(query);
+      // Use processQueryWithHistory for LLM function calling
+      const result = await this.cloudIntentEngine.processQueryWithHistory([
+        { role: 'user', content: query },
+      ]);
 
       if (result.hasToolCall && result.toolCalls.length > 0) {
         return {
@@ -203,6 +205,62 @@ export class IntentorchAdapter {
       return {
         success: false,
         error: error.message,
+      };
+    }
+  }
+
+  /**
+   * Parse a natural language query and generate a workflow plan.
+   * Backward compatibility method for CLI.
+   */
+  async parseAndPlanWorkflow(query: string): Promise<{
+    success: boolean;
+    plan?: {
+      toolSelections: Array<{
+        intentId: string;
+        toolName: string;
+        serverName?: string;
+        parameters: Record<string, any>;
+      }>;
+    };
+    error?: string;
+  }> {
+    logger.info(`[IntentorchAdapter] parseAndPlanWorkflow called: "${query.substring(0, 100)}..."`);
+
+    if (!this.cloudIntentEngine) {
+      throw new Error('Cloud Intent Engine must be initialized before planning');
+    }
+
+    try {
+      const tools = await this.getAvailableTools();
+      this.cloudIntentEngine.setAvailableTools(tools);
+
+      // Map to the new planQuery method of CloudIntentEngine
+      const plan = await this.cloudIntentEngine.planQuery(query);
+
+      if (plan && plan.steps) {
+        return {
+          success: true,
+          plan: {
+            toolSelections: plan.steps.map((step: any, idx: number) => ({
+              intentId: step.id || `step-${idx}`,
+              toolName: step.toolName,
+              serverName: (step as any).serverName, // Some steps might have serverName
+              parameters: step.arguments
+            }))
+          }
+        };
+      }
+
+      return {
+        success: false,
+        error: 'Failed to generate plan'
+      };
+    } catch (error: any) {
+      logger.error('[IntentorchAdapter] parseAndPlanWorkflow failed:', error.message);
+      return {
+        success: false,
+        error: error.message
       };
     }
   }

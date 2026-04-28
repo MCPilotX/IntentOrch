@@ -1,15 +1,15 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import AIChatPanel from '../components/orchestration/AIChatPanel';
 import StepPreviewBoard from '../components/orchestration/StepPreviewBoard';
+import ExecutionResultPanel from '../components/orchestration/ExecutionResultPanel';
+import StepEditorModal from '../components/orchestration/StepEditorModal';
 import { Toast } from '../components/ui';
-import { aiService } from '../services/ai-service'; // Use enhanced AI service
 import { apiService } from '../services/api';
-
-import { useOutputFormatting, useAuthHeaders } from '../hooks';
-
+import { useChatHistory } from '../hooks/useChatHistory';
+import { useOutputFormatting } from '../hooks';
 import { useLanguage } from '../contexts/LanguageContext';
-import type { WorkflowStep, Workflow, UserGuidanceMessage, UserFeedbackResponse, InteractiveSession } from '../types';
+import type { WorkflowStep, Workflow } from '../types';
 
 interface Message {
   id: string;
@@ -17,16 +17,22 @@ interface Message {
   content: string;
   timestamp?: string;
   metadata?: {
-    isInteractive?: boolean;
-    guidance?: any;
-    requiresResponse?: boolean;
-    interactiveType?: 'server_selection' | 'tool_selection';
-    servers?: any[];
-    tools?: any[];
-    query?: string;
-    selectedServer?: any;
-    initialResult?: any;
+    isStreaming?: boolean;
+    isResult?: boolean;
+    executionSteps?: StepResult[];
+    totalDuration?: number;
   };
+}
+
+interface StepResult {
+  name?: string;
+  toolName?: string;
+  serverName?: string;
+  success: boolean;
+  error?: string;
+  duration?: number;
+  output?: string;
+  result?: unknown;
 }
 
 const Orchestration: React.FC = () => {
@@ -40,8 +46,6 @@ const Orchestration: React.FC = () => {
   const [status, setStatus] = useState<'idle' | 'success' | 'capability_missing' | 'partial' | 'error'>('idle');
   const [executionStatus, setExecutionStatus] = useState<'idle' | 'executing' | 'success' | 'error'>('idle');
   const [actionSelection, setActionSelection] = useState<'execute' | 'save' | 'edit'>('execute');
-  const [autoExecute, setAutoExecute] = useState(true);
-  const [hasUserChangedAction, setHasUserChangedAction] = useState(false);
   const [toast, setToast] = useState<{
     show: boolean;
     message: string;
@@ -52,16 +56,16 @@ const Orchestration: React.FC = () => {
     type: 'success'
   });
 
-  // Interactive session state
-  const [interactiveSession, setInteractiveSession] = useState<{
-    sessionId: string | null;
-    guidance: UserGuidanceMessage | null;
-    isActive: boolean;
-  }>({
-    sessionId: null,
-    guidance: null,
-    isActive: false,
-  });
+  // Execution results state
+  const [executionResults, setExecutionResults] = useState<StepResult[] | null>(null);
+  const [executionTotalDuration, setExecutionTotalDuration] = useState(0);
+
+  // Step editor state
+  const [editingStep, setEditingStep] = useState<{ step: WorkflowStep; index: number } | null>(null);
+
+  // Chat history persistence
+  const { addMessages: persistMessages, createSession } = useChatHistory();
+  const hasInitialized = useRef(false);
 
   // Output formatting hook
   const { formatExecutionResult: formatWithNewSystem } = useOutputFormatting({
@@ -73,41 +77,42 @@ const Orchestration: React.FC = () => {
     }
   });
 
-  // Authentication headers hook
-  const { getAuthHeaders } = useAuthHeaders();
+  // Initialize chat session
+  useEffect(() => {
+    if (!hasInitialized.current) {
+      hasInitialized.current = true;
+      createSession();
+    }
+  }, [createSession]);
+
+  // Persist messages to localStorage whenever they change
+  useEffect(() => {
+    if (messages.length > 0) {
+      persistMessages(messages);
+    }
+  }, [messages, persistMessages]);
 
   // Mutation to save the generated workflow
   const saveWorkflowMutation = useMutation({
     mutationFn: (workflowData: any) => apiService.saveWorkflow(workflowData),
     onSuccess: (savedWorkflow: Workflow) => {
-      console.log('Workflow saved successfully:', savedWorkflow);
-      console.log('Workflow ID:', savedWorkflow.id);
       queryClient.invalidateQueries({ queryKey: ['workflows'] });
       showToast(`Workflow "${savedWorkflow.name}" saved successfully!`, 'success');
       return savedWorkflow;
     },
     onError: (error) => {
-      console.error('Failed to save workflow:', error);
       showToast(`Failed to save workflow: ${error instanceof Error ? error.message : 'Unknown error'}`, 'error');
     },
   });
 
   const handleSendMessage = async (content: string) => {
-    // Start analysis
     setIsAnalyzing(true);
     setAnalysisStatus(t('orchestration.analyzing'));
     setStatus('idle');
+    setExecutionResults(null);
     
     try {
-      // Check if we're in an interactive session
-      if (interactiveSession.isActive && interactiveSession.sessionId) {
-        // Process as feedback in existing interactive session
-        // Note: handleInteractiveFeedback will add the user message
-        await handleInteractiveFeedback(content);
-        return;
-      }
-      
-      // Add user message for non-interactive sessions
+      // Add user message
       const userMessage: Message = {
         id: Date.now().toString(),
         role: 'user',
@@ -116,128 +121,184 @@ const Orchestration: React.FC = () => {
       };
       setMessages(prev => [...prev, userMessage]);
       
-      // Try traditional intent parsing first
-      const result = await aiService.parseIntent(content);
-
-      // Check if we should show steps directly (even if confidence is not perfect)
-      const hasValidSteps = result.status === 'success' && result.steps && result.steps.length > 0;
-      const confidence = result.confidence || 0;
-
-      // New strategy: if we have steps and reasonable confidence, show them!
-      // This matches CLI behavior where we prioritize results over nagging questions
-      if (hasValidSteps && confidence >= 0.55) {
-        console.log(`[Orchestration] Result confidence ${confidence} is good enough, showing steps directly`);
-        setDraftSteps(result.steps);
-        setStatus(result.status);
-
-        // Add helpful assistant message
-        const assistantMessage: Message = {
-          id: Date.now().toString(),
-          role: 'assistant',
-          content: `I've analyzed your request and prepared a workflow with ${result.steps.length} steps. You can review and execute it from the right panel.`,
-          timestamp: new Date().toISOString()
-        };
-        setMessages(prev => [...prev, assistantMessage]);
-        return;
-      }
-
-      // If no steps or very low confidence, use interactive mode
-      const shouldUseInteractive =
-        confidence < 0.55 || // Very low confidence
-        result.status === 'partial' || // Partial success
-        result.status === 'capability_missing'; // Capability missing
-      if (shouldUseInteractive) {
-        // Start IMPROVED interactive session for low confidence, partial success, or capability missing
-        // User's suggestion: list relevant services for user to choose
-        await startImprovedInteractiveSession(content, result);
-        return;
-      }
-      
-      // Use traditional parsing result
-      setAnalysisStatus(t('orchestration.generatingWorkflow'));
-      
-      const assistantMessage: Message = {
-        id: (Date.now() + 1).toString(),
+      // Add a streaming/loading assistant message
+      const loadingMessageId = (Date.now() + 1).toString();
+      const loadingMessage: Message = {
+        id: loadingMessageId,
         role: 'assistant',
-        content: result.status === 'success' 
-          ? t('orchestration.workflowGenerated', { count: result.steps.length })
-          : t('orchestration.capabilityMissingDesc'),
+        content: '',
+        metadata: { isStreaming: true },
         timestamp: new Date().toISOString()
       };
+      setMessages(prev => [...prev, loadingMessage]);
       
-      setMessages(prev => [...prev, assistantMessage]);
-      setDraftSteps(result.steps);
-      setStatus(result.status);
+      // Use the same executeNaturalLanguage endpoint as CLI
+      // This does multi-turn LLM function calling: plan → execute → return results
+      setAnalysisStatus('Executing query via natural language engine...');
       
-      // Smart auto-execute logic
-      // Only auto-execute if:
-      // 1. User hasn't manually changed the action (first time or default)
-      // 2. Auto-execute is enabled (true by default for "execute")
-      // 3. Steps were successfully generated
-      // 4. The selected action is "execute"
-      const shouldAutoExecute = 
-        !hasUserChangedAction && 
-        autoExecute && 
-        result.status === 'success' && 
-        result.steps.length > 0 &&
-        actionSelection === 'execute';
+      const result = await apiService.executeNaturalLanguage(content, {
+        autoStart: true,
+        silent: true,
+      });
       
-      if (shouldAutoExecute) {
-        console.log('🔄 Auto-executing workflow...');
-        setTimeout(() => {
-          handleAction(actionSelection);
-        }, 800); // Slightly longer delay to let user see the steps
-      } else if (result.status === 'success' && result.steps.length > 0) {
-        // Show a toast message if steps were generated but not auto-executed
-        if (actionSelection !== 'execute') {
-          showToast(`Workflow generated with ${result.steps.length} steps. Select "${actionSelection}" action to proceed.`, 'info');
-        } else if (hasUserChangedAction) {
-          showToast(`Workflow generated. Click "Execute Now" to run it.`, 'info');
+      if (result.success) {
+        setStatus('success');
+        
+        // Extract step results from execution result
+        const stepResults: StepResult[] = extractStepResults(result);
+        const totalDuration = result.statistics?.totalDuration || 
+          stepResults.reduce((sum, s) => sum + (s.duration || 0), 0);
+        
+        setExecutionResults(stepResults);
+        setExecutionTotalDuration(totalDuration);
+        
+        // Format the result for display
+        const formattedResult = formatResultForDisplay(result, content);
+        
+        // Update the loading message in-place instead of deleting and re-adding
+        setMessages(prev => prev.map(m => 
+          m.id === loadingMessageId ? {
+            ...m,
+            content: formattedResult,
+            metadata: {
+              isResult: true,
+              executionSteps: stepResults,
+              totalDuration,
+            },
+          } : m
+        ));
+        
+        // Also create draft steps from execution steps for re-execution
+        const workflowSteps = createWorkflowStepsFromResult(result);
+        if (workflowSteps.length > 0) {
+          setDraftSteps(workflowSteps);
+        }
+        
+        showToast('Query executed successfully!', 'success');
+      } else {
+        setStatus('error');
+        
+        // Update the loading message with error content instead of deleting and re-adding
+        setMessages(prev => prev.map(m => 
+          m.id === loadingMessageId ? {
+            ...m,
+            content: `❌ **Execution Failed**\n\n${result.error || 'Unknown error occurred'}\n\n💡 **Suggestions:**\n1. Make sure AI configuration is set (provider & API key)\n2. Make sure required MCP servers are running\n3. Try rephrasing your query`,
+          } : m
+        ));
+        
+        // Extract any partial results
+        const stepResults: StepResult[] = extractStepResults(result);
+        if (stepResults.length > 0) {
+          setExecutionResults(stepResults);
+          setExecutionTotalDuration(result.statistics?.totalDuration || 0);
         }
       }
     } catch (error) {
-      console.error('Failed to parse intent:', error);
       setStatus('error');
       
-      // Provide more helpful error messages based on error type
-      let errorContent = "I encountered an error while trying to process your request. ";
+      const errorContent = getErrorMessage(error);
       
-      if (error instanceof Error) {
-        const errorMsg = error.message.toLowerCase();
-        
-        if (errorMsg.includes('network') || errorMsg.includes('fetch') || errorMsg.includes('connection')) {
-          errorContent += "It seems there's a network issue. Please check your connection and try again.";
-        } else if (errorMsg.includes('auth') || errorMsg.includes('401') || errorMsg.includes('token')) {
-          errorContent += "Authentication issue detected. The system will try to use fallback mode.";
-          
-          // Try fallback parsing
-          try {
-            const fallbackResult = await aiService.parseIntent(content);
-            if (fallbackResult.status === 'success' && fallbackResult.steps.length > 0) {
-              errorContent = "Using fallback mode: I've generated a workflow for you. Review the steps on the right.";
-              setDraftSteps(fallbackResult.steps);
-              setStatus(fallbackResult.status);
-            }
-          } catch (fallbackError) {
-            console.warn('Fallback also failed:', fallbackError);
-          }
-        } else if (errorMsg.includes('server') || errorMsg.includes('mcp') || errorMsg.includes('missing')) {
-          errorContent += "Required MCP server may not be available. Please ensure the necessary servers are installed and running.";
-        } else {
-          errorContent += "Please try again or rephrase your request.";
-        }
-      }
-      
-      const errorMessage: Message = {
-        id: (Date.now() + 1).toString(),
-        role: 'assistant',
-        content: errorContent,
-        timestamp: new Date().toISOString()
-      };
-      setMessages(prev => [...prev, errorMessage]);
+      // Update the loading message with error content instead of deleting and re-adding
+      setMessages(prev => prev.map(m => 
+        m.metadata?.isStreaming ? {
+          ...m,
+          content: errorContent,
+        } : m
+      ));
     } finally {
       setIsAnalyzing(false);
     }
+  };
+
+  // Format result for display in chat
+  const formatResultForDisplay = (result: any, query: string): string => {
+    // The LLM already returns a beautifully formatted Markdown result in result.result
+    // This is the same output that CLI displays to users
+    if (result.result && typeof result.result === 'string') {
+      return result.result;
+    }
+    
+    // Fallback: use the output formatting system
+    try {
+      const formatted = formatWithNewSystem(result, query);
+      if (formatted && formatted.length > 0) {
+        return formatted;
+      }
+    } catch {
+      // Fall through to default formatting
+    }
+    
+    // Last resort: build a simple summary from execution steps
+    const steps = result.executionSteps || [];
+    const successfulSteps = steps.filter((s: any) => s.success).length;
+    const totalSteps = steps.length;
+    
+    if (totalSteps > 0) {
+      let output = `✅ **Execution Complete** (${successfulSteps}/${totalSteps} steps successful)\n\n`;
+      for (const step of steps) {
+        const status = step.success ? '✅' : '❌';
+        const stepName = step.toolName || step.name || 'Unknown step';
+        output += `${status} **${stepName}**`;
+        if (step.duration) {
+          output += ` _(${step.duration}ms)_`;
+        }
+        output += '\n';
+        if (step.success && step.result) {
+          const resultText = extractResultText(step.result);
+          if (resultText) {
+            output += `  > ${resultText}\n`;
+          }
+        }
+        if (step.error) {
+          output += `  > Error: ${step.error}\n`;
+        }
+      }
+      return output;
+    }
+    
+    return '✅ Execution completed successfully.';
+  };
+
+  // Extract readable text from result
+  const extractResultText = (result: any): string => {
+    if (!result) return '';
+    
+    // MCP response format: { content: [{ type: "text", text: "..." }] }
+    if (result.content && Array.isArray(result.content)) {
+      return result.content
+        .filter((item: any) => item.type === 'text')
+        .map((item: any) => item.text)
+        .join('\n');
+    }
+    
+    // Direct text
+    if (typeof result === 'string') return result;
+    
+    // Nested result
+    if (result.result) return extractResultText(result.result);
+    
+    // JSON object - truncate if too long
+    const json = JSON.stringify(result, null, 2);
+    return json.length > 2000 ? json.substring(0, 2000) + '\n... (truncated)' : json;
+  };
+
+  // Simplified error message generation
+  const getErrorMessage = (error: unknown): string => {
+    if (!(error instanceof Error)) {
+      return t('orchestration.errorGeneric');
+    }
+    
+    const msg = error.message.toLowerCase();
+    if (msg.includes('network') || msg.includes('fetch') || msg.includes('connection')) {
+      return t('orchestration.errorNetwork');
+    }
+    if (msg.includes('auth') || msg.includes('401') || msg.includes('token')) {
+      return t('orchestration.errorAuth');
+    }
+    if (msg.includes('server') || msg.includes('mcp')) {
+      return t('orchestration.errorServer');
+    }
+    return `❌ **Error:** ${error.message}`;
   };
 
   // Handle the selected action
@@ -258,93 +319,164 @@ const Orchestration: React.FC = () => {
     switch (action) {
       case 'execute':
         setExecutionStatus('executing');
+        setExecutionResults(null);
         
-        // Execute the already-parsed steps directly (no re-parsing)
-        // This ensures the executed steps are exactly what the user saw in preview
-        // and produces the same result format as CLI run command
         try {
-          console.log('🔄 Executing pre-parsed steps directly (no re-parsing)...');
-          const result = await aiService.executeSteps(draftSteps, {
+          // Re-execute using natural language with the original query
+          const result = await apiService.executeNaturalLanguage(userQuery, {
             autoStart: true,
             silent: true,
           });
-          
-          console.log('✅ Steps execution result:', result);
           
           if (result.success) {
             setExecutionStatus('success');
             showToast('Workflow executed successfully!', 'success');
             
-            // Format and display the execution result
-            const formattedResult = formatExecutionResult(result);
+            const stepResults: StepResult[] = extractStepResults(result);
+            const totalDuration = result.statistics?.totalDuration || 
+              stepResults.reduce((sum, s) => sum + (s.duration || 0), 0);
             
-            const executionMessage: Message = {
-              id: `execution-${Date.now()}`,
-              role: 'assistant',
-              content: formattedResult,
-              timestamp: new Date().toISOString()
-            };
-            setMessages(prev => [...prev, executionMessage]);
+            setExecutionResults(stepResults);
+            setExecutionTotalDuration(totalDuration);
+            
+            updateStepsWithResults(stepResults);
           } else {
             setExecutionStatus('error');
             showToast(`Workflow execution failed: ${result.error || 'Unknown error'}`, 'error');
             
-            const errorMessage: Message = {
-              id: `execution-error-${Date.now()}`,
-              role: 'assistant',
-              content: `❌ Execution failed: ${result.error || 'Unknown error'}`,
-              timestamp: new Date().toISOString()
-            };
-            setMessages(prev => [...prev, errorMessage]);
+            const stepResults: StepResult[] = extractStepResults(result);
+            setExecutionResults(stepResults);
+            setExecutionTotalDuration(result.statistics?.totalDuration || 0);
           }
         } catch (error: any) {
-          console.error('❌ Steps execution failed:', error);
           setExecutionStatus('error');
           showToast(`Workflow execution error: ${error.message || 'Unknown error'}`, 'error');
         }
 
-        
-        // Also save the workflow for future reference (don't block on this)
+        // Save workflow for future reference
         saveWorkflowMutation.mutate(workflowData, {
-          onError: (saveError) => {
-            console.warn('Failed to save workflow (non-critical):', saveError);
-          }
+          onError: () => {}
         });
         break;
         
       case 'save':
-        // Save only
         saveWorkflowMutation.mutate(workflowData);
         break;
         
       case 'edit':
-        // Just keep the steps for editing, no action needed
         showToast('Workflow steps ready for editing', 'info');
         break;
     }
   };
 
-  // Handle action selection change
+  // Extract step results from execution result
+  const extractStepResults = (result: any): StepResult[] => {
+    const steps = result.executionSteps || result.steps || [];
+    if (Array.isArray(steps)) {
+      return steps.map((step: any) => ({
+        name: step.name || step.toolName,
+        toolName: step.toolName || step.name,
+        serverName: step.serverName,
+        success: step.success,
+        error: step.error,
+        duration: step.duration,
+        output: step.output || extractResultText(step.result),
+        result: step.result,
+      }));
+    }
+    return [];
+  };
+
+  // Create workflow steps from execution result for re-execution
+  const createWorkflowStepsFromResult = (result: any): WorkflowStep[] => {
+    const steps = result.executionSteps || [];
+    if (!Array.isArray(steps) || steps.length === 0) return [];
+    
+    return steps.map((step: any, index: number) => {
+      // Extract actual arguments from the step
+      const args = step.arguments || {};
+      // Build a human-readable description of the parameters
+      const paramDescription = Object.keys(args).length > 0
+        ? Object.entries(args)
+            .map(([key, value]) => {
+              const val = typeof value === 'string' ? value : JSON.stringify(value);
+              return `${key}: ${val}`;
+            })
+            .join(', ')
+        : '';
+      
+      return {
+        id: `step_${Date.now()}_${index}`,
+        type: 'tool' as const,
+        serverName: step.serverName || '',
+        toolName: step.toolName || step.name || '',
+        parameters: {
+          // Include the actual arguments that were passed to the tool
+          ...args,
+          _metadata: {
+            name: `Execute: ${step.toolName || step.name || 'Unknown'}`,
+            description: `Step ${index + 1}: ${step.toolName || step.name || 'Unknown'}`,
+            status: step.success ? 'success' : 'failed',
+            parameters: paramDescription,
+          }
+        },
+      };
+    });
+  };
+
+  // Update draft steps with execution results
+  const updateStepsWithResults = (stepResults: StepResult[]) => {
+    setDraftSteps(prev => prev.map((step, index) => {
+      const result = stepResults[index];
+      if (!result) return step;
+      return {
+        ...step,
+        parameters: {
+          ...step.parameters,
+          _executionResult: {
+            success: result.success,
+            error: result.error,
+            duration: result.duration,
+          }
+        }
+      };
+    }));
+  };
+
+  // Retry failed steps
+  const handleRetry = () => {
+    setExecutionResults(null);
+    handleAction('execute');
+  };
 
   const handleActionChange = (action: 'execute' | 'save' | 'edit') => {
     setActionSelection(action);
-    setHasUserChangedAction(true);
-    
-    // Update auto-execute preference based on selection
-    if (action === 'execute') {
-      setAutoExecute(true);
-    } else {
-      setAutoExecute(false);
-    }
   };
 
   const handleClear = () => {
     setDraftSteps([]);
     setStatus('idle');
+    setExecutionResults(null);
   };
 
   const handleDeleteStep = (id: string) => {
     setDraftSteps(prev => prev.filter(step => step.id !== id));
+  };
+
+  // Step editing
+  const handleEditStep = (step: WorkflowStep) => {
+    const index = draftSteps.findIndex(s => s.id === step.id);
+    if (index >= 0) {
+      setEditingStep({ step, index });
+    }
+  };
+
+  const handleSaveEditedStep = (editedStep: WorkflowStep) => {
+    setDraftSteps(prev => prev.map((s, i) => 
+      i === editingStep?.index ? editedStep : s
+    ));
+    setEditingStep(null);
+    showToast('Step updated successfully', 'success');
   };
 
   const showToast = (message: string, type: 'success' | 'error' | 'info' | 'warning' = 'success') => {
@@ -355,709 +487,82 @@ const Orchestration: React.FC = () => {
     setToast(prev => ({ ...prev, show: false }));
   };
 
-  // Improved interactive session functions
-  const startImprovedInteractiveSession = async (query: string, initialResult?: any) => {
-    try {
-      setAnalysisStatus('Starting improved interactive session...');
-      
-      // Step 1: Get available MCP servers for user selection
-      const headers = await getAuthHeaders();
-      
-      // Get available servers - handle different response formats
-      const serversResponse = await fetch('http://localhost:9658/api/servers', {
-        method: 'GET',
-        headers,
-      });
-      
-      if (!serversResponse.ok) {
-        throw new Error(`Failed to get servers: ${serversResponse.status}`);
-      }
-      
-      const serversData = await serversResponse.json();
-      console.log('Servers API response:', serversData);
-      
-      // Handle different response formats
-      let servers = [];
-      if (Array.isArray(serversData)) {
-        servers = serversData;
-      } else if (serversData && Array.isArray(serversData.data)) {
-        servers = serversData.data;
-      } else if (serversData && serversData.servers && Array.isArray(serversData.servers)) {
-        servers = serversData.servers;
-      } else {
-        console.warn('Unexpected servers response format:', serversData);
-        // Try to extract servers from the response object
-        servers = Object.values(serversData).filter((item: any) => 
-          item && typeof item === 'object' && item.name
-        );
-      }
-      
-      console.log('Available servers for user selection:', servers);
-      
-      // Filter relevant servers based on query keywords
-      // Universal platform approach: no service-specific logic
-      // Use generic keyword matching that works for ANY MCP service
-      const queryLower = query.toLowerCase();
-      const queryWords = queryLower.split(/[\s,，、]+/).filter(w => w.length > 0);
-      
-      // Extract meaningful keywords from query (skip common stop words)
-      const stopWords = ['的', '了', '是', '在', '有', '和', '就', '不', '人', '都', '一', '一个', '上', '也', '很', '到', '说', '要', '去', '你', '会', '着', '没有', '看', '好', '自己', '这', '他', '她', '它', '们', 'the', 'a', 'an', 'is', 'are', 'was', 'were', 'be', 'been', 'being', 'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'can', 'could', 'may', 'might', 'shall', 'should', 'to', 'of', 'in', 'for', 'on', 'with', 'at', 'by', 'from', 'as', 'into', 'through', 'during', 'before', 'after', 'above', 'below', 'between', 'out', 'off', 'over', 'under', 'again', 'further', 'then', 'once', 'here', 'there', 'when', 'where', 'why', 'how', 'all', 'each', 'every', 'both', 'few', 'more', 'most', 'other', 'some', 'such', 'no', 'nor', 'not', 'only', 'own', 'same', 'so', 'than', 'too', 'very', 'just', 'because', 'but', 'and', 'or', 'if', 'while', 'about', 'up', 'what', 'which', 'who', 'whom', 'this', 'that', 'these', 'those', 'then', 'it', 'its'];
-      const keywords = queryWords.filter(w => w.length > 1 && !stopWords.includes(w));
-      
-      // Score each server based on keyword matching against name, type, description, and tags
-      const scoredServers = servers.map((server: any) => {
-        let score = 0;
-        const serverName = (server.name || '').toLowerCase();
-        const serverType = (server.type || '').toLowerCase();
-        const serverDesc = (server.description || '').toLowerCase();
-        const serverTags = (server.tags || []).map((t: string) => t.toLowerCase());
-        const serverCapabilities = (server.capabilities || []).map((c: string) => c.toLowerCase());
-        
-        // Combine all server text for matching
-        const serverText = [serverName, serverType, serverDesc, ...serverTags, ...serverCapabilities].join(' ');
-        
-        // Score each keyword
-        for (const keyword of keywords) {
-          if (serverText.includes(keyword)) {
-            score += 2; // Direct keyword match
-          }
-          // Check if keyword is a substring of any server text part
-          if (serverName.includes(keyword) || serverType.includes(keyword)) {
-            score += 3; // Name/type match is more important
-          }
-        }
-        
-        // Also check if query words partially match server capabilities
-        for (const word of queryWords) {
-          if (word.length > 2 && serverText.includes(word)) {
-            score += 1;
-          }
-        }
-        
-        return { server, score };
-      });
-      
-      // Sort by score descending, include all servers but highlight relevant ones
-      scoredServers.sort((a: any, b: any) => b.score - a.score);
-      
-      // Include all servers (user can choose any), but mark relevance
-      const relevantServers = scoredServers.map((item: any) => ({
-        ...item.server,
-        _relevanceScore: item.score,
-        _isRelevant: item.score > 0
-      }));
-      
-      console.log('Server relevance scores:', scoredServers.map((s: any) => ({ name: s.server.name, score: s.score })));
-
-      
-      // Create interactive message with server options
-      const confidencePercent = initialResult?.confidence ? `${Math.round(initialResult.confidence * 100)}%` : 'Low';
-      let serverOptionsMessage = `🔍 **Improved Interactive Session**
-
-      **Your Query:** "${query}"
-      **Initial Confidence:** ${confidencePercent}
-
-      📋 **Step 1: Select Relevant MCP Server**
-
-      I need your help to select the right MCP server for your request. Please choose one:`;
-
-      relevantServers.forEach((server: any, index: number) => {
-        const description = server.description || server.type || 'Standard MCP Server';
-        serverOptionsMessage += `\n${index + 1}. **${server.name}** (${description}) - ${server.status}`;
-      });
-
-      serverOptionsMessage += `\n\n**Or type:** "skip" to let the system choose automatically`;
-      // Add the interactive message to chat
-      const serverSelectionMessage: Message = {
-        id: `server-selection-${Date.now()}`,
-        role: 'assistant',
-        content: serverOptionsMessage,
-        metadata: {
-          isInteractive: true,
-          interactiveType: 'server_selection',
-          servers: relevantServers,
-          query: query,
-          initialResult: initialResult,
-        },
-        timestamp: new Date().toISOString(),
-      };
-      
-      setMessages(prev => [...prev, serverSelectionMessage]);
-      
-      // Update interactive session state
-      setInteractiveSession({
-        sessionId: `server-selection-${Date.now()}`,
-        guidance: {
-          type: 'clarification_request', // Required by UserGuidanceMessage
-          message: serverOptionsMessage,
-          requiresResponse: true,
-          timestamp: new Date(), // Required by UserGuidanceMessage
-          // Store interactiveType in options
-          options: [{
-            id: 'interactive_type',
-            label: 'server_selection',
-            value: 'server_selection'
-          }]
-        },
-        isActive: true,
-      });
-      
-    } catch (error) {
-      console.error('Failed to start improved interactive session:', error);
-      showToast('Failed to start interactive session. Using traditional mode.', 'error');
-      
-      // Fallback to traditional parsing
-      try {
-        console.log('Attempting fallback to traditional parsing for query:', query);
-        const fallbackResult = await aiService.parseIntent(query);
-        console.log('Fallback parsing result:', fallbackResult);
-        handleTraditionalParsingResult(fallbackResult);
-      } catch (fallbackError) {
-        console.error('Fallback parsing also failed:', fallbackError);
-        showToast('Both interactive and traditional parsing failed. Please try again.', 'error');
-        
-        const errorMessage: Message = {
-          id: `error-${Date.now()}`,
-          role: 'assistant',
-          content: `I encountered an error while processing your request. Please try again or rephrase your query. Error: ${fallbackError instanceof Error ? fallbackError.message : 'Unknown error'}`,
-          timestamp: new Date().toISOString(),
-        };
-        setMessages(prev => [...prev, errorMessage]);
-      }
-    }
-  };
-
-  const handleInteractiveFeedback = async (userResponse: string) => {
-    if (!interactiveSession.sessionId) return;
-    
-    try {
-      setIsAnalyzing(true);
-      setAnalysisStatus('Processing your response...');
-      
-      // Get the last interactive message to understand context
-      const lastMessage = messages[messages.length - 1];
-      const interactiveType = lastMessage.metadata?.interactiveType;
-      
-      // Add user response to chat
-      const userMessage: Message = {
-        id: `feedback-${Date.now()}`,
-        role: 'user',
-        content: userResponse,
-        timestamp: new Date().toISOString(),
-      };
-      setMessages(prev => [...prev, userMessage]);
-      
-      // Handle different interactive types
-      if (interactiveType === 'server_selection') {
-        await handleServerSelectionResponse(userResponse, lastMessage);
-      } else if (interactiveType === 'tool_selection') {
-        await handleToolSelectionResponse(userResponse, lastMessage);
-      } else {
-        // Legacy interactive session handling
-        await handleLegacyInteractiveFeedback(userResponse);
-      }
-      
-    } catch (error) {
-      console.error('Failed to process interactive feedback:', error);
-      showToast('Failed to process your response. Please try again.', 'error');
-    } finally {
-      setIsAnalyzing(false);
-    }
-  };
-  
-  // Handle server selection response
-  const handleServerSelectionResponse = async (userResponse: string, lastMessage: Message) => {
-    const servers = lastMessage.metadata?.servers || [];
-    const query = lastMessage.metadata?.query;
-    const initialResult = lastMessage.metadata?.initialResult;
-    
-    let selectedServer = null;
-    
-    // Parse user response
-    const responseLower = userResponse.toLowerCase().trim();
-    
-    if (responseLower === 'skip') {
-      // User wants system to choose automatically
-      selectedServer = servers[0]; // Choose first server as default
-    } else {
-      // Try to parse server number or name
-      const serverNumber = parseInt(responseLower);
-      if (!isNaN(serverNumber) && serverNumber >= 1 && serverNumber <= servers.length) {
-        selectedServer = servers[serverNumber - 1];
-      } else {
-        // Try to match by server name
-        selectedServer = servers.find(server => 
-          server.name.toLowerCase().includes(responseLower) ||
-          server.type.toLowerCase().includes(responseLower)
-        );
-      }
-    }
-    
-    if (!selectedServer) {
-      // No valid server selected, ask again
-      const errorMessage: Message = {
-        id: `error-${Date.now()}`,
-        role: 'assistant',
-        content: `I couldn't identify which server you selected. Please choose a number (1-${servers.length}) or type the server name.`,
-        timestamp: new Date().toISOString(),
-      };
-      setMessages(prev => [...prev, errorMessage]);
-      return;
-    }
-    
-    // Show server selection confirmation
-    const confirmationMessage: Message = {
-      id: `confirmation-${Date.now()}`,
-      role: 'assistant',
-      content: `✅ **Server Selected:** ${selectedServer.name} (${selectedServer.type})
-
-Now I'll parse your query again with this server context and show you the available tools.`,
-      timestamp: new Date().toISOString(),
-    };
-    setMessages(prev => [...prev, confirmationMessage]);
-    
-    // Step 2: Get tools for selected server and show tool selection
-    await showToolSelection(query, selectedServer, initialResult);
-  };
-  
-  // Show tool selection after server is selected
-  const showToolSelection = async (query: string, selectedServer: any, initialResult?: any) => {
-    try {
-      const headers = await getAuthHeaders();
-      
-      // Get tools for the selected server - handle different ID field names
-      const serverId = selectedServer.id || selectedServer._id || selectedServer.serverId || selectedServer.name;
-      if (!serverId) {
-        throw new Error('Server ID not found in server object');
-      }
-      
-      const toolsResponse = await fetch(`http://localhost:9658/api/servers/${serverId}/tools`, {
-        method: 'GET',
-        headers,
-      });
-      
-      if (!toolsResponse.ok) {
-        throw new Error(`Failed to get tools: ${toolsResponse.status}`);
-      }
-      
-      const tools = await toolsResponse.json();
-      console.log('Available tools for server:', tools);
-      
-      if (!tools || tools.length === 0) {
-        const noToolsMessage: Message = {
-          id: `no-tools-${Date.now()}`,
-          role: 'assistant',
-          content: `The selected server "${selectedServer.name}" doesn't have any available tools. Please select a different server.`,
-          timestamp: new Date().toISOString(),
-        };
-        setMessages(prev => [...prev, noToolsMessage]);
-        return;
-      }
-      
-      // Create tool selection message
-      let toolOptionsMessage = `🔧 **Step 2: Select Tool for "${selectedServer.name}"**
-
-Available tools for this server:`;
-      
-      tools.forEach((tool: any, index: number) => {
-        toolOptionsMessage += `\n${index + 1}. **${tool.name}** - ${tool.description || 'No description'}`;
-        if (tool.parameters) {
-          toolOptionsMessage += `\n   Parameters: ${JSON.stringify(tool.parameters)}`;
-        }
-      });
-      
-      toolOptionsMessage += `\n\n**Please choose a tool number or type "auto" to let the system choose automatically.**`;
-      
-      const toolSelectionMessage: Message = {
-        id: `tool-selection-${Date.now()}`,
-        role: 'assistant',
-        content: toolOptionsMessage,
-        metadata: {
-          isInteractive: true,
-          interactiveType: 'tool_selection',
-          tools: tools,
-          query: query,
-          selectedServer: selectedServer,
-          initialResult: initialResult,
-        },
-        timestamp: new Date().toISOString(),
-      };
-      
-      setMessages(prev => [...prev, toolSelectionMessage]);
-      
-      // Update interactive session state
-      setInteractiveSession(prev => ({
-        ...prev,
-        guidance: {
-          type: 'clarification_request',
-          message: toolOptionsMessage,
-          requiresResponse: true,
-          timestamp: new Date(),
-          options: [{
-            id: 'interactive_type',
-            label: 'tool_selection',
-            value: 'tool_selection'
-          }]
-        },
-      }));
-      
-    } catch (error) {
-      console.error('Failed to get tools:', error);
-      const errorMessage: Message = {
-        id: `error-${Date.now()}`,
-        role: 'assistant',
-        content: `Failed to get tools for server "${selectedServer.name}". Error: ${error instanceof Error ? error.message : 'Unknown error'}`,
-        timestamp: new Date().toISOString(),
-      };
-      setMessages(prev => [...prev, errorMessage]);
-    }
-  };
-  
-  // Handle tool selection response
-  const handleToolSelectionResponse = async (userResponse: string, lastMessage: Message) => {
-    const tools = lastMessage.metadata?.tools || [];
-    const query = lastMessage.metadata?.query;
-    const selectedServer = lastMessage.metadata?.selectedServer;
-    const initialResult = lastMessage.metadata?.initialResult;
-    
-    let selectedTool = null;
-    
-    // Parse user response
-    const responseLower = userResponse.toLowerCase().trim();
-    
-    if (responseLower === 'auto') {
-      // User wants system to choose automatically
-      selectedTool = tools[0]; // Choose first tool as default
-    } else {
-      // Try to parse tool number
-      const toolNumber = parseInt(responseLower);
-      if (!isNaN(toolNumber) && toolNumber >= 1 && toolNumber <= tools.length) {
-        selectedTool = tools[toolNumber - 1];
-      } else {
-        // Try to match by tool name
-        selectedTool = tools.find(tool => 
-          tool.name.toLowerCase().includes(responseLower)
-        );
-      }
-    }
-    
-    if (!selectedTool) {
-      // No valid tool selected, ask again
-      const errorMessage: Message = {
-        id: `error-${Date.now()}`,
-        role: 'assistant',
-        content: `I couldn't identify which tool you selected. Please choose a number (1-${tools.length}) or type the tool name.`,
-        timestamp: new Date().toISOString(),
-      };
-      setMessages(prev => [...prev, errorMessage]);
-      return;
-    }
-    
-    // Show tool selection confirmation
-    const confirmationMessage: Message = {
-      id: `confirmation-${Date.now()}`,
-      role: 'assistant',
-      content: `✅ **Tool Selected:** ${selectedTool.name}
-✅ **Server:** ${selectedServer.name}
-
-Now I'll execute your query with high confidence!`,
-      timestamp: new Date().toISOString(),
-    };
-    setMessages(prev => [...prev, confirmationMessage]);
-    
-    // Step 3: Execute with high confidence
-    await executeWithHighConfidence(query, selectedServer, selectedTool, initialResult);
-  };
-  
-  // Execute with high confidence after user selections
-  const executeWithHighConfidence = async (query: string, selectedServer: any, selectedTool: any, initialResult?: any) => {
-    try {
-      setAnalysisStatus('Preparing high confidence execution...');
-      
-      // Create a workflow step based on user selections
-      // Note: WorkflowStep interface doesn't have 'name', 'description', 'tool', or 'status' properties
-      // We need to adapt to the actual interface
-      const workflowStep: WorkflowStep = {
-        id: `step-${Date.now()}`,
-        type: 'tool', // Use 'tool' type since we're executing a tool
-        serverName: selectedServer.name,
-        toolName: selectedTool.name,
-        parameters: {}, // Would need to collect parameters in a real implementation
-        // Note: 'name', 'description', and 'status' are not part of WorkflowStep interface
-        // We'll store them in parameters for now
-      };
-      
-      // Store additional metadata in parameters since WorkflowStep interface is limited
-      (workflowStep.parameters as any) = {
-        ...workflowStep.parameters,
-        _metadata: {
-          name: `Execute: ${selectedTool.name}`,
-          description: `Execute "${selectedTool.name}" on "${selectedServer.name}" for query: "${query}"`,
-          status: 'pending',
-          originalTool: selectedTool.name,
-        }
-      };
-      
-      setDraftSteps([workflowStep]);
-      setStatus('success');
-      
-      // Show success message
-      const successMessage: Message = {
-        id: `success-${Date.now()}`,
-        role: 'assistant',
-        content: `🎯 **High Confidence Execution Ready**
-
-Your query has been successfully configured with:
-- **Server:** ${selectedServer.name}
-- **Tool:** ${selectedTool.name}
-- **Confidence:** High (user-guided selection)
-
-✅ **Auto-executing now** (confidence is fully normal after user guidance)`,
-        timestamp: new Date().toISOString(),
-      };
-      setMessages(prev => [...prev, successMessage]);
-      
-      // Reset interactive session
-      setInteractiveSession({
-        sessionId: null,
-        guidance: null,
-        isActive: false,
-      });
-      
-      showToast('Interactive configuration complete! Auto-executing with high confidence.', 'success');
-      
-      // User's suggestion: "直到置信度完全正常后直接执行"
-      // Since user has manually selected both server and tool, confidence is now high
-      // Auto-execute immediately
-      setTimeout(() => {
-        console.log('🔄 Auto-executing with high confidence after user guidance...');
-        handleAction('execute');
-      }, 1500); // Give user time to read the message
-      
-    } catch (error) {
-      console.error('Failed to execute with high confidence:', error);
-      const errorMessage: Message = {
-        id: `error-${Date.now()}`,
-        role: 'assistant',
-        content: `Failed to prepare execution: ${error instanceof Error ? error.message : 'Unknown error'}`,
-        timestamp: new Date().toISOString(),
-      };
-      setMessages(prev => [...prev, errorMessage]);
-    }
-  };
-  
-  // Legacy interactive session handling (for backward compatibility)
-  const handleLegacyInteractiveFeedback = async (userResponse: string) => {
-    const headers = await getAuthHeaders();
-    
-    // Create feedback response
-    const feedbackResponse: UserFeedbackResponse = {
-      type: 'parameter_value',
-      parameterName: 'user_input',
-      value: userResponse,
-      timestamp: new Date(),
-    };
-    
-    // Send feedback to API
-    const response = await fetch(`http://localhost:9658/api/execute/interactive/respond`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({
-        sessionId: interactiveSession.sessionId,
-        response: feedbackResponse,
-      }),
-    });
-    
-    if (!response.ok) {
-      throw new Error(`Failed to process feedback: ${response.status}`);
-    }
-    
-    const result = await response.json();
-    
-    if (result.success) {
-      console.log('Feedback processed successfully:', result);
-      
-      // Update session state
-      setInteractiveSession(prev => ({
-        ...prev,
-        guidance: result.guidance || null,
-      }));
-      
-      // Add guidance message if available
-      if (result.guidance) {
-        console.log('Adding guidance message:', result.guidance);
-        const guidanceMessage: Message = {
-          id: `guidance-${Date.now() + 1}`,
-          role: 'assistant',
-          content: result.guidance.message,
-          timestamp: new Date().toISOString(),
-        };
-        setMessages(prev => [...prev, guidanceMessage]);
-      }
-      
-      // Check if ready for execution
-      if (result.readyForExecution && result.session) {
-        console.log('Session ready for execution:', result.session);
-        await executeInteractiveSession(result.session);
-      }
-    } else {
-      console.error('Feedback processing failed:', result.error);
-      throw new Error(result.error || 'Failed to process feedback');
-    }
-  };
-
-  const executeInteractiveSession = async (session: InteractiveSession) => {
-    try {
-      setAnalysisStatus('Executing workflow...');
-      
-      // Get authentication headers
-      const headers = await getAuthHeaders();
-      
-      const response = await fetch(`http://localhost:9658/api/execute/interactive/execute`, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({
-          sessionId: session.sessionId,
-          options: {
-            simulate: false,
-            autoStart: true,
-          },
-        }),
-      });
-      
-      if (!response.ok) {
-        throw new Error(`Failed to execute session: ${response.status}`);
-      }
-      
-      const result = await response.json();
-      
-      if (result.success) {
-        // Add execution result to chat
-        const executionMessage: Message = {
-          id: `execution-${Date.now()}`,
-          role: 'assistant',
-          content: `Workflow executed successfully! Result: ${JSON.stringify(result.result, null, 2)}`,
-          timestamp: new Date().toISOString(),
-        };
-        setMessages(prev => [...prev, executionMessage]);
-        
-        // Reset interactive session
-        setInteractiveSession({
-          sessionId: null,
-          guidance: null,
-          isActive: false,
-        });
-        
-        showToast('Interactive workflow executed successfully!', 'success');
-      } else {
-        throw new Error(result.error || 'Failed to execute session');
-      }
-    } catch (error) {
-      console.error('Failed to execute interactive session:', error);
-      showToast('Failed to execute workflow. Please try again.', 'error');
-    }
-  };
-
-  const handleTraditionalParsingResult = (result: any) => {
-    setAnalysisStatus(t('orchestration.generatingWorkflow'));
-    
-    const assistantMessage: Message = {
-      id: (Date.now() + 1).toString(),
-      role: 'assistant',
-      content: result.status === 'success' 
-        ? t('orchestration.workflowGenerated', { count: result.steps.length })
-        : t('orchestration.capabilityMissingDesc'),
-      timestamp: new Date().toISOString()
-    };
-    
-    setMessages(prev => [...prev, assistantMessage]);
-    setDraftSteps(result.steps);
-    setStatus(result.status);
-    
-    // Smart auto-execute logic
-    const shouldAutoExecute = 
-      !hasUserChangedAction && 
-      autoExecute && 
-      result.status === 'success' && 
-      result.steps.length > 0 &&
-      actionSelection === 'execute';
-    
-    if (shouldAutoExecute) {
-      console.log('🔄 Auto-executing workflow...');
-      setTimeout(() => {
-        handleAction(actionSelection);
-      }, 800);
-    } else if (result.status === 'success' && result.steps.length > 0) {
-      if (actionSelection !== 'execute') {
-        showToast(`Workflow generated with ${result.steps.length} steps. Select "${actionSelection}" action to proceed.`, 'info');
-      } else if (hasUserChangedAction) {
-        showToast(`Workflow generated. Click "Execute Now" to run it.`, 'info');
-      }
-    }
-  };
-
-  // Format execution result for display in chat
   const formatExecutionResult = (executionResult: any): string => {
     if (!executionResult) return t('orchestration.executionComplete');
     
-    // Extract user query from messages
     const userQuery = messages.find(m => m.role === 'user')?.content;
     
-    // Use the new output formatting system
     try {
       return formatWithNewSystem(executionResult, userQuery);
     } catch (error) {
-      console.error('Failed to format execution result with new system:', error);
       return t('orchestration.formattingFailed');
     }
   };
 
   return (
     <div className="flex flex-col h-[calc(100vh-130px)] -m-6 overflow-hidden">
-      <div className="flex flex-1 h-full overflow-hidden">
-        {/* Left Side: Chat */}
-        <div className="w-1/3 min-w-[350px] flex-shrink-0 border-r border-gray-200 dark:border-gray-700">
+      {/* Main content area */}
+      <div className="flex flex-1 overflow-hidden">
+        {/* Left: AI Chat Panel - 60% width */}
+        <div className="flex-[6] min-w-0">
           <AIChatPanel 
-            onSendMessage={handleSendMessage} 
-            messages={messages} 
+            onSendMessage={handleSendMessage}
+            messages={messages}
             isAnalyzing={isAnalyzing}
             statusMessage={analysisStatus}
           />
         </div>
-        
-        {/* Right Side: Preview */}
-        <div className="flex-1 min-w-0">
+
+        {/* Right: Step Preview Board - 40% width */}
+        <div className="flex-[4] flex flex-col min-w-0 overflow-hidden">
           <StepPreviewBoard 
-            steps={draftSteps} 
+            steps={draftSteps}
             status={status}
             onClear={handleClear}
             onDeleteStep={handleDeleteStep}
+            onEditStep={handleEditStep}
+            onAddStep={() => {
+              const newStep: WorkflowStep = {
+                id: `step-${Date.now()}`,
+                type: 'tool',
+                toolName: '',
+                serverName: '',
+                parameters: {},
+              };
+              setDraftSteps(prev => [...prev, newStep]);
+              setEditingStep({ step: newStep, index: draftSteps.length });
+            }}
             actionSelection={actionSelection}
             onActionChange={handleActionChange}
             onActionExecute={() => handleAction(actionSelection)}
             isExecuting={executionStatus === 'executing'}
           />
+
+          {/* Execution Results Panel */}
+          {executionResults && executionResults.length > 0 && (
+            <div className="p-4 border-t border-gray-200 dark:border-gray-700 overflow-y-auto max-h-[40vh]">
+              <ExecutionResultPanel
+                results={executionResults}
+                totalDuration={executionTotalDuration}
+                onClose={() => setExecutionResults(null)}
+                onRetry={handleRetry}
+              />
+            </div>
+          )}
         </div>
       </div>
 
-      {/* Execution Status Overlay - Only show for executing, not for success/error */}
-      {executionStatus === 'executing' && (
-        <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50 p-4">
-          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl w-full max-w-md">
-            <div className="p-6 text-center">
-              <div className="inline-flex items-center justify-center w-16 h-16 bg-primary-100 dark:bg-primary-900/30 rounded-full mb-4">
-                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-500"></div>
-              </div>
-               <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-2">{t('orchestration.executingWorkflow')}</h3>
-               <p className="text-gray-600 dark:text-gray-400">
-                 {t('orchestration.pleaseWaitWorkflow')}
-               </p>
-            </div>
-          </div>
-        </div>
+      {/* Step Editor Modal */}
+      {editingStep && (
+        <StepEditorModal
+          step={editingStep.step}
+          index={editingStep.index}
+          onSave={handleSaveEditedStep}
+          onClose={() => setEditingStep(null)}
+        />
       )}
 
-      {/* Toast Notification */}
+      {/* Toast */}
       {toast.show && (
         <Toast
           message={toast.message}

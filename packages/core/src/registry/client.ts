@@ -1,3 +1,4 @@
+import { logger } from "../core/logger";
 import { Manifest, RegistrySource, ServiceInfo, SearchOptions, SearchResult } from './types';
 import { createRegistrySource } from './sources';
 import { ManifestCache } from './cache';
@@ -19,15 +20,15 @@ export class RegistryClient {
   }
 
   async fetchManifest(serverNameOrUrl: string): Promise<Manifest> {
-    console.log(`[RegistryClient] Fetching manifest for: ${serverNameOrUrl}`);
+    logger.info(`[RegistryClient] Fetching manifest for: ${serverNameOrUrl}`);
     // Generate cache key (for URLs, extract meaningful name)
     const cacheKey = this.generateCacheKey(serverNameOrUrl);
-    console.log(`[RegistryClient] Generated cache key: ${cacheKey}`);
+    logger.info(`[RegistryClient] Generated cache key: ${cacheKey}`);
     
     // Check cache first
     const cached = await this.cache.get(cacheKey);
     if (cached) {
-      console.log(`[RegistryClient] Found in cache: ${cacheKey}`);
+      logger.info(`[RegistryClient] Found in cache: ${cacheKey}`);
       return cached;
     }
 
@@ -36,10 +37,10 @@ export class RegistryClient {
         serverNameOrUrl.startsWith('https://') ||
         serverNameOrUrl.startsWith('file://') ||
         serverNameOrUrl.endsWith('.json')) {
-      console.log(`[RegistryClient] Using DirectSource for URL/path`);
+      logger.info(`[RegistryClient] Using DirectSource for URL/path`);
       const directSource = this.sources.get('direct')!;
       const manifest = await directSource.fetchManifest(serverNameOrUrl);
-      console.log(`[RegistryClient] Fetched manifest from DirectSource:`, JSON.stringify(manifest).substring(0, 100));
+      logger.info(`[RegistryClient] Fetched manifest from DirectSource:`, JSON.stringify(manifest).substring(0, 100));
       // Cache the result
       await this.cache.set(cacheKey, manifest);
       return manifest;
@@ -120,18 +121,18 @@ export class RegistryClient {
       
       if (!manifest) {
         // Try alternative cache key formats
-        console.warn(`⚠️  Manifest not found for cache key: ${cacheKey}`);
-        console.warn(`   Trying alternative formats...`);
+        logger.warn(`⚠️  Manifest not found for cache key: ${cacheKey}`);
+        logger.warn(`   Trying alternative formats...`);
         
         // Try without owner prefix (just the server name)
         const parts = serverName.split('/');
         if (parts.length > 1) {
           const serverNameOnly = parts[parts.length - 1];
           const alternativeKey = this.generateCacheKey(serverNameOnly);
-          console.warn(`   Trying alternative key: ${alternativeKey}`);
+          logger.warn(`   Trying alternative key: ${alternativeKey}`);
           const altManifest = await this.cache.get(alternativeKey);
           if (altManifest) {
-            console.warn(`   ✓ Found manifest with alternative key`);
+            logger.warn(`   ✓ Found manifest with alternative key`);
             return altManifest;
           }
         }
@@ -140,20 +141,20 @@ export class RegistryClient {
         if (!serverName.startsWith('@')) {
           const withAtPrefix = `@${serverName}`;
           const alternativeKey = this.generateCacheKey(withAtPrefix);
-          console.warn(`   Trying alternative key: ${alternativeKey}`);
+          logger.warn(`   Trying alternative key: ${alternativeKey}`);
           const altManifest = await this.cache.get(alternativeKey);
           if (altManifest) {
-            console.warn(`   ✓ Found manifest with @ prefix`);
+            logger.warn(`   ✓ Found manifest with @ prefix`);
             return altManifest;
           }
         }
         
-        console.warn(`   ✗ No manifest found with any alternative key`);
+        logger.warn(`   ✗ No manifest found with any alternative key`);
       }
       
       return manifest;
     } catch (error) {
-      console.error(`❌ Error getting cached manifest for ${serverName}:`, error);
+      logger.error(`❌ Error getting cached manifest for ${serverName}:`, error);
       return null;
     }
   }
@@ -165,11 +166,11 @@ export class RegistryClient {
   async cacheManifest(serverName: string, manifest: Manifest): Promise<void> {
     try {
       const cacheKey = this.generateCacheKey(serverName);
-      console.log(`[RegistryClient] Caching manifest for ${serverName} with key: ${cacheKey}`);
+      logger.info(`[RegistryClient] Caching manifest for ${serverName} with key: ${cacheKey}`);
       await this.cache.set(cacheKey, manifest);
-      console.log(`[RegistryClient] ✓ Manifest cached successfully`);
+      logger.info(`[RegistryClient] ✓ Manifest cached successfully`);
     } catch (error) {
-      console.error(`[RegistryClient] ❌ Failed to cache manifest for ${serverName}:`, error);
+      logger.error(`[RegistryClient] ❌ Failed to cache manifest for ${serverName}:`, error);
       throw error;
     }
   }
@@ -255,7 +256,7 @@ export class RegistryClient {
         hasMore: offset + limit < total
       };
     } catch (error) {
-      console.error('Error searching services:', error);
+      logger.error('Error searching services:', error);
       return {
         services: [],
         total: 0,
@@ -426,7 +427,7 @@ export class RegistryClient {
           return segments[0];
         }
       } catch (error) {
-        console.warn('Failed to parse URL for cache key generation:', error);
+        logger.warn('Failed to parse URL for cache key generation:', error);
       }
     }
     

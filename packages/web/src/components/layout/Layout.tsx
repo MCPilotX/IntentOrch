@@ -84,7 +84,7 @@ const Layout: React.FC = () => {
         queryKey: ['systemLogs'],
         queryFn: () => apiService.getSystemLogs(),
       });
-      const filteredLogs = (systemLogs as string[]).filter((log: string) =>
+      const filteredLogs = (Array.isArray(systemLogs) ? systemLogs : []).filter((log: string) =>
         log.toLowerCase().includes(query.toLowerCase())
       ).slice(0, 10); // Limit to 10 log entries
 

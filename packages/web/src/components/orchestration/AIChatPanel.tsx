@@ -13,7 +13,22 @@ interface Message {
     guidance?: any;
     requiresResponse?: boolean;
     parameterName?: string;
+    isStreaming?: boolean;
+    isResult?: boolean;
+    executionSteps?: StepResult[];
+    totalDuration?: number;
   };
+}
+
+interface StepResult {
+  name?: string;
+  toolName?: string;
+  serverName?: string;
+  success: boolean;
+  error?: string;
+  duration?: number;
+  output?: string;
+  result?: unknown;
 }
 
 interface AIChatPanelProps {
@@ -88,9 +103,7 @@ const AIChatPanel: React.FC<AIChatPanelProps> = ({ onSendMessage, messages, isAn
                   <InteractiveMessageRenderer 
                     guidance={message.metadata.guidance}
                     onResponse={(response) => {
-                      // Handle interactive response
-                      console.log('Interactive response:', response);
-                      // For now, just send as regular message
+                      // Send interactive response as structured message
                       onSendMessage(JSON.stringify(response));
                     }}
                   />

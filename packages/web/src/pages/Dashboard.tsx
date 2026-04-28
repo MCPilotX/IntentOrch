@@ -17,6 +17,13 @@ const Dashboard: React.FC = () => {
   const { t } = useLanguage();
   const queryClient = useQueryClient();
   
+  // Health check
+  const { data: isAlive } = useQuery({
+    queryKey: ['healthCheck'],
+    queryFn: () => apiService.healthCheck(),
+    refetchInterval: 10000,
+  });
+
   // 获取数据
   const { data: stats, isLoading: statsLoading } = useQuery({
     queryKey: ['systemStats'],
@@ -68,7 +75,8 @@ const Dashboard: React.FC = () => {
 
     // 检查系统日志是否包含真实数据（不是默认的模拟日志）
     // 如果日志都是默认的模拟消息，也返回空数组
-    const hasRealLogs = systemLogs.some(log => {
+    const logs = Array.isArray(systemLogs) ? systemLogs : [];
+    const hasRealLogs = logs.some(log => {
       // 检查是否是默认的模拟日志消息
       const isDefaultLog = log.includes('System is running normally') || 
                           log.includes('Daemon started successfully') ||
@@ -82,7 +90,7 @@ const Dashboard: React.FC = () => {
     }
 
     // 解析系统日志为活动记录
-    const activities = systemLogs.slice(-6).reverse().map((log, index) => {
+    const activities = logs.slice(-6).reverse().map((log, index) => {
       // 改进的日志解析逻辑
       let action = 'System Operation';
       let target = '';
@@ -184,11 +192,18 @@ const Dashboard: React.FC = () => {
   return (
     <div className="space-y-6">
       {/* 欢迎标题 */}
-      <div>
-        <h1 className="text-3xl font-bold text-gray-900 dark:text-white">{t('dashboard.title')}</h1>
-        <p className="mt-2 text-gray-600 dark:text-gray-400">
-          {t('dashboard.welcome')}
-        </p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-bold text-gray-900 dark:text-white">{t('dashboard.title')}</h1>
+          <p className="mt-2 text-gray-600 dark:text-gray-400">
+            {t('dashboard.welcome')}
+          </p>
+        </div>
+        
+        <div className={`flex items-center space-x-2 px-3 py-1.5 rounded-full border ${isAlive ? 'bg-green-50 border-green-200 text-green-700' : 'bg-red-50 border-red-200 text-red-700'}`}>
+          <div className={`w-2.5 h-2.5 rounded-full ${isAlive ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`}></div>
+          <span className="text-sm font-medium">{isAlive ? 'Daemon Online' : 'Daemon Offline'}</span>
+        </div>
       </div>
 
       {/* 统计卡片 */}

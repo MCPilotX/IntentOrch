@@ -1,3 +1,4 @@
+import { logger } from "../core/logger";
 /**
  * Enhanced Runtime Adapter Interface
  * Balances minimalist style with functional robustness
@@ -333,6 +334,6 @@ export abstract class BaseRuntimeAdapter implements EnhancedRuntimeAdapter {
   }
 
   async onError(error: Error, context: any): Promise<void> {
-    console.error('Runtime adapter error:', error, context);
+    logger.error(`Runtime adapter error: ${error.message}`, { context });
   }
 }

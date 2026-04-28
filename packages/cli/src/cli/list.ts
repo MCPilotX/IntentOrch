@@ -1,5 +1,5 @@
 import { Command } from 'commander';
-import { getRegistryClient } from '@intentorch/core';
+import { getRegistryClient, getProcessManager } from '@intentorch/core';
 
 export function listCommand(): Command {
   const command = new Command('list')
@@ -19,11 +19,27 @@ export function listCommand(): Command {
           return;
         }
         
+        // Get running processes to show status alongside cached manifests
+        let runningServers: any[] = [];
+        try {
+          const processManager = getProcessManager();
+          runningServers = await processManager.listRunning();
+        } catch (err) {
+          // Ignore errors when getting running servers
+        }
+        
         console.log(`Found ${cachedManifests.length} cached manifest(s):`);
-        console.log('='.repeat(50));
+        console.log('='.repeat(60));
         
         for (const serverName of cachedManifests) {
-          console.log(`• ${serverName}`);
+          // Check if this server is currently running
+          const runningInstance = runningServers.find(s => 
+            s.serverName === serverName || 
+            (s.manifest && s.manifest.name === serverName)
+          );
+          
+          const statusIcon = runningInstance ? '🟢' : '⚪';
+          console.log(`${statusIcon} ${serverName}`);
           
           // Try to get manifest details
           try {
@@ -34,6 +50,11 @@ export function listCommand(): Command {
               if (manifest.runtime.env && manifest.runtime.env.length > 0) {
                 console.log(`  Env vars: ${manifest.runtime.env.join(', ')}`);
               }
+              if (runningInstance) {
+                console.log(`  Status: ✅ Running (PID: ${runningInstance.pid})`);
+              } else {
+                console.log(`  Status: ⏹️  Stopped`);
+              }
             }
           } catch (err) {
             // Ignore errors when reading manifest
@@ -42,8 +63,9 @@ export function listCommand(): Command {
           console.log('');
         }
         
-        console.log('='.repeat(50));
+        console.log('='.repeat(60));
         console.log(`Total: ${cachedManifests.length} cached manifest(s)`);
+        console.log(`Running: ${runningServers.length} server(s)`);
         
       } catch (error) {
         console.error('✗ Failed to list cached manifests:', (error as Error).message);

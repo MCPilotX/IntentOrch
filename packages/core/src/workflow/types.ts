@@ -12,6 +12,7 @@ export interface Workflow {
   createdAt?: string; // ISO timestamp
   updatedAt?: string; // ISO timestamp
   originalName?: string; // Original name for reference (when using UUID as filename)
+  lastExecutedAt?: string; // Added for frontend compatibility
 }
 
 export interface WorkflowInput {

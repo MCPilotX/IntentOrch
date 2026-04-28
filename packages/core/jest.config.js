@@ -3,6 +3,10 @@ const config = {
   preset: 'ts-jest',
   testEnvironment: 'node',
   testMatch: ['**/__tests__/**/*.test.ts'],
+  testPathIgnorePatterns: [
+    '/node_modules/',
+    '/kernel/__tests__/',
+  ],
   transform: {
     '^.+\\.tsx?$': ['ts-jest', {
       tsconfig: {
@@ -12,13 +16,6 @@ const config = {
       },
     }],
   },
-  moduleNameMapper: {
-    '^sqlite-vss$': '<rootDir>/src/__mocks__/sqlite-vss.ts',
-    '^better-sqlite3$': '<rootDir>/src/__mocks__/better-sqlite3.ts',
-  },
-  transformIgnorePatterns: [
-    'node_modules/(?!(sqlite-vss|better-sqlite3)/)',
-  ],
   cache: false,
 };
 

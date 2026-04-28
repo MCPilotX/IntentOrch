@@ -1,3 +1,4 @@
+import { logger } from "../core/logger";
 import { spawn, type ChildProcess } from 'child_process';
 
 export interface AdapterOptions {
@@ -15,7 +16,7 @@ export class DockerAdapter {
 
   async start(): Promise<void> {
     return new Promise((resolve, reject) => {
-      console.log(`[RAL] Starting Docker service: ${this.options.name} (${this.options.image})`);
+      logger.info(`[RAL] Starting Docker service: ${this.options.name} (${this.options.image})`);
 
       // Core command: docker run -i (interactive mode) --rm (remove after running)
       // Map container stdio to host process
@@ -44,12 +45,12 @@ export class DockerAdapter {
             this.pendingRequests.delete(json.id);
           }
         } catch (e) {
-          console.log(`[Docker:${this.options.name}] ${raw}`);
+          logger.info(`[Docker:${this.options.name}] ${raw}`);
         }
       });
 
       this.process.stderr?.on('data', (data) => {
-        console.error(`[Docker:${this.options.name}] ERR: ${data.toString()}`);
+        logger.error(`[Docker:${this.options.name}] ERR: ${data.toString()}`);
       });
 
       // Listen for successful startup

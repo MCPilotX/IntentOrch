@@ -1,3 +1,4 @@
+import { logger } from "../core/logger";
 import { spawn, type ChildProcess } from 'child_process';
 import * as path from 'path';
 import * as fs from 'fs';
@@ -17,7 +18,7 @@ export class PythonAdapter {
 
   async start(): Promise<void> {
     return new Promise((resolve, reject) => {
-      console.log(`[RAL] Starting Python service: ${this.options.name}`);
+      logger.info(`[RAL] Starting Python service: ${this.options.name}`);
 
       // Automatically find python interpreter in virtual environment
       const venvPath = path.join(this.options.cwd, 'venv', 'bin', 'python');
@@ -41,12 +42,12 @@ export class PythonAdapter {
             this.pendingRequests.delete(json.id);
           }
         } catch (e) {
-          console.log(`[Python:${this.options.name}] ${raw}`);
+          logger.info(`[Python:${this.options.name}] ${raw}`);
         }
       });
 
       this.process.stderr?.on('data', (data) => {
-        console.error(`[Python:${this.options.name}] ERR: ${data.toString()}`);
+        logger.error(`[Python:${this.options.name}] ERR: ${data.toString()}`);
       });
 
       this.process.on('spawn', () => resolve());

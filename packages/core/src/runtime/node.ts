@@ -1,3 +1,4 @@
+import { logger } from "../core/logger";
 import { spawn, type ChildProcess, execSync } from 'child_process';
 
 export interface AdapterOptions {
@@ -33,7 +34,7 @@ export class NodeAdapter {
 
   async start(): Promise<void> {
     return new Promise((resolve, reject) => {
-      console.log(`[RAL] Starting Node.js service: ${this.options.name} (using ${this.runtime})`);
+      logger.info(`[RAL] Starting Node.js service: ${this.options.name} (using ${this.runtime})`);
 
       const command = this.runtime === 'bun' ? 'bun' : 'node';
       const args = this.runtime === 'bun' ? ['run', 'index.js'] : ['index.js'];
@@ -55,12 +56,12 @@ export class NodeAdapter {
           }
         } catch (e) {
           // Ignore non-JSON output (such as regular logs)
-          console.log(`[${this.options.name}] ${raw}`);
+          logger.info(`[${this.options.name}] ${raw}`);
         }
       });
 
       this.process.stderr?.on('data', (data) => {
-        console.error(`[${this.options.name}] ERR: ${data.toString()}`);
+        logger.error(`[${this.options.name}] ERR: ${data.toString()}`);
       });
 
       this.process.on('spawn', () => resolve());

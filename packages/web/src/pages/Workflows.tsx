@@ -27,6 +27,7 @@ import { formatRelativeTime } from '../utils/format';
 import { useLanguage } from '../contexts/LanguageContext';
 import type { Workflow, WorkflowStep } from '../types';
 import toast from 'react-hot-toast';
+import WorkflowVisualizer from '../components/workflows/WorkflowVisualizer';
 
 const Workflows: React.FC = () => {
   const { t } = useLanguage();
@@ -66,7 +67,12 @@ const Workflows: React.FC = () => {
     mutationFn: () => apiService.saveWorkflow({
       id: '',
       name: newWorkflow.name,
+      version: '1.0.0',
       description: newWorkflow.description,
+      requirements: {
+        servers: []
+      },
+      inputs: [],
       steps: [],
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
@@ -757,9 +763,16 @@ const Workflows: React.FC = () => {
                 </div>
 
                 {/* Steps editor */}
-                <div className="lg:col-span-2">
-                  <div className="flex items-center justify-between mb-4">
-                    <h4 className="text-lg font-medium text-gray-900 dark:text-white">Workflow Steps</h4>
+                <div className="lg:col-span-2 space-y-6">
+                  {/* Workflow Graph Visualization */}
+                  <div>
+                    <h4 className="text-lg font-medium text-gray-900 dark:text-white mb-4">Workflow Visualization</h4>
+                    <WorkflowVisualizer workflow={selectedWorkflow} />
+                  </div>
+
+                  <div>
+                    <div className="flex items-center justify-between mb-4">
+                      <h4 className="text-lg font-medium text-gray-900 dark:text-white">Workflow Steps</h4>
                     <button
                       onClick={() => {
                         // Add a new step
@@ -970,6 +983,7 @@ const Workflows: React.FC = () => {
                       <p className="text-sm text-gray-500 dark:text-gray-500 mt-1">Add steps to create an automation workflow</p>
                     </div>
                   )}
+                  </div>
                 </div>
               </div>
             </div>
