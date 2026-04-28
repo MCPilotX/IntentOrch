@@ -26,6 +26,7 @@
     "@tanstack/react-query": "^5.99.0",
     "@tanstack/react-query-devtools": "^5.99.0",
     "axios": "^1.15.0",
+    "d3-selection": "^3.0.0",
     "d3-transition": "^3.0.1",
     "json-beautiful-render": "^2.1.7",
     "lucide-react": "^1.8.0",

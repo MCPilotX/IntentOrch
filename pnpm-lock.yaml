@@ -173,6 +173,9 @@ importers:
       axios:
         specifier: ^1.15.0
         version: 1.15.1
+      d3-selection:
+        specifier: ^3.0.0
+        version: 3.0.0
       d3-transition:
         specifier: ^3.0.1
         version: 3.0.1(d3-selection@3.0.0)

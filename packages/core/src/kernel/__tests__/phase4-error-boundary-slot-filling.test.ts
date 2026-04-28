@@ -1,5 +1,5 @@
 /**
- * Phase 4 - 全局错误边界 + 交互式补全 集成测试
+ * Phase 4 - Global Error Boundary + Interactive Slot Filling Integration Test
  *
  * NOTE: This test file is for planned future modules (SlotFillingAgent).
  * The SlotFillingAgent module is not yet implemented. This file is skipped until it is available.
@@ -87,7 +87,7 @@ const mockTools: Tool[] = [
 
 // ==================== Test Suite ====================
 
-describe('Phase 4 - 全局错误边界 + 交互式补全 集成测试', () => {
+describe('Phase 4 - Global Error Boundary + Interactive Slot Filling Integration Test', () => {
   let errorBoundary: ErrorBoundary;
   let slotFillingAgent: SlotFillingAgent;
 
@@ -274,7 +274,7 @@ describe('Phase 4 - 全局错误边界 + 交互式补全 集成测试', () => {
 
       const responses = {
         date: '2026-06-15',
-        seatType: '二等座',
+        seatType: 'Second Class',
         passengerName: 'Zhang San',
         passengerId: '110101199001011234',
       };
@@ -286,7 +286,7 @@ describe('Phase 4 - 全局错误边界 + 交互式补全 集成测试', () => {
       console.log(`Filled: ${JSON.stringify(filledParams)}`);
 
       expect(filledParams.date).toBe('2026-06-15');
-      expect(filledParams.seatType).toBe('二等座');
+      expect(filledParams.seatType).toBe('Second Class');
       expect(filledParams.passengerName).toBe('Zhang San');
       expect(filledParams.passengerId).toBe('110101199001011234');
     });
@@ -294,14 +294,14 @@ describe('Phase 4 - 全局错误边界 + 交互式补全 集成测试', () => {
     test('2.4 should handle fuzzy matching for enum values', async () => {
       const matched = slotFillingAgent.fuzzyMatch(
         'er deng zuo',
-        ['一等座', '二等座', '商务座', '特等座'],
+        ['First Class', 'Second Class', 'Business Class', 'Premium Class'],
       );
 
       console.log(`\n=== SlotFillingAgent: Fuzzy Match ===`);
       console.log(`Input: "er deng zuo"`);
       console.log(`Matched: "${matched}"`);
 
-      expect(matched).toBe('二等座');
+      expect(matched).toBe('Second Class');
     });
 
     test('2.5 should use default values when available', async () => {
@@ -346,7 +346,7 @@ describe('Phase 4 - 全局错误边界 + 交互式补全 集成测试', () => {
       // Simulate user responses
       const userResponses: Record<string, string> = {
         date: '2026-06-15',
-        seatType: '二等座',
+        seatType: 'Second Class',
         passengerName: 'Zhang San',
         passengerId: '110101199001011234',
       };
@@ -365,7 +365,7 @@ describe('Phase 4 - 全局错误边界 + 交互式补全 集成测试', () => {
 
       expect(remainingMissing.length).toBe(0);
       expect(filledParams.date).toBe('2026-06-15');
-      expect(filledParams.seatType).toBe('二等座');
+      expect(filledParams.seatType).toBe('Second Class');
       expect(filledParams.passengerName).toBe('Zhang San');
       expect(filledParams.passengerId).toBe('110101199001011234');
     });

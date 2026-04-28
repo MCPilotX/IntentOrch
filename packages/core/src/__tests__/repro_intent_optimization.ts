@@ -1,7 +1,7 @@
 import { intentorch } from '../ai/intentorch-adapter';
 
 async function testIntentExtraction() {
-  console.log('Testing intent extraction for: "查询2026年5月3日广州去南宁的高铁票"');
+  console.log('Testing intent extraction for: "query 2026-05-03 Guangzhou to Nanning high-speed train tickets"');
   
   console.log('Checking available methods on intentorch:');
   console.log('- parseAndPlanWorkflow:', typeof (intentorch as any).parseAndPlanWorkflow);

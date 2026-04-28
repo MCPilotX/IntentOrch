@@ -51,12 +51,12 @@ describe('Intelligent Orchestration System Integration', () => {
     renderOrchestration();
 
     // 2. Input intent
-    const input = screen.getByPlaceholderText(/Type your intent|输入您的自动化需求/i);
+    const input = screen.getByPlaceholderText(/Type your intent|Enter your automation needs/i);
     fireEvent.change(input, { target: { value: 'Sync GitHub' } });
     fireEvent.keyDown(input, { key: 'Enter', code: 'Enter' });
 
     // 3. Verify analyzing state
-    expect(screen.getByText(/Analyzing intent|正在解析意图/i)).toBeInTheDocument();
+    expect(screen.getByText(/Analyzing intent|Analyzing intent/i)).toBeInTheDocument();
 
     // 4. Verify draft steps appear
     await waitFor(() => {
@@ -73,13 +73,13 @@ describe('Intelligent Orchestration System Integration', () => {
 
     renderOrchestration();
 
-    const input = screen.getByPlaceholderText(/Type your intent|输入您的自动化需求/i);
+    const input = screen.getByPlaceholderText(/Type your intent|Enter your automation needs/i);
     fireEvent.change(input, { target: { value: 'unknown intent' } });
     fireEvent.submit(screen.getByRole('button', { name: '' })); // The send button
 
     await waitFor(() => {
-      expect(screen.getByText(/Capability Not Found|未找到匹配能力/i)).toBeInTheDocument();
-      expect(screen.getByText(/Submit Tool Request|提交工具请求/i)).toBeInTheDocument();
+      expect(screen.getByText(/Capability Not Found|No matching capability found/i)).toBeInTheDocument();
+      expect(screen.getByText(/Submit Tool Request|Submit tool request/i)).toBeInTheDocument();
     });
   });
 });

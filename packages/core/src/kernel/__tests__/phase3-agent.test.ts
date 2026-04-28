@@ -1,5 +1,5 @@
 /**
- * Phase 3 - Agent化 集成测试
+ * Phase 3 - AgentAgent Integration Test
  *
  * NOTE: This test file is for planned future modules (ReActAgent, ErrorSelfDiagnosis, AutoDependencyInferrer).
  * These modules are not yet implemented. This file is skipped until those modules are available.
@@ -87,7 +87,7 @@ const mockTools: Tool[] = [
 
 // ==================== Test Suite ====================
 
-describe('Phase 3 - Agent化 集成测试', () => {
+describe('Phase 3 - Agent Integration Test', () => {
   let agent: ReActAgent;
   let diagnosis: ErrorSelfDiagnosis;
   let inferrer: AutoDependencyInferrer;
@@ -154,8 +154,8 @@ describe('Phase 3 - Agent化 集成测试', () => {
         async (toolName, params) => {
           if (toolName === 'query-station-code') {
             const codes: Record<string, string> = {
-              '北京': 'BJP',
-              '上海': 'SHH',
+              'Beijing': 'BJP',
+              'Shanghai': 'SHH',
             };
             return { stationCode: codes[params.city] || 'UNKNOWN' };
           }
@@ -298,7 +298,7 @@ describe('Phase 3 - Agent化 集成测试', () => {
           from: 'BJP',
           to: 'SHH',
           date: '2026-06-15',
-          seatType: '二等座',
+          seatType: 'Second Class',
           passengerName: 'Zhang San',
           passengerId: '110101199001011234',
         },

@@ -128,8 +128,8 @@ export class TicketDataFormatter extends BaseFormatter {
       'ticket', 'train', 'rail', 'schedule', 'departure', 'arrival',
       'station', 'journey', 'travel', 'book', 'reservation',
       'seat', 'coach', 'compartment', 'fare', 'price',
-      '车票', '火车', '高铁', '动车', '班次', '出发', '到达',
-      '车站', '旅程', '预订', '座位', '票价', '余票'
+      'ticket', 'train', 'high-speed', 'bullet', 'schedule', 'departure', 'arrival',
+      'station', 'journey', 'booking', 'seat', 'fare', 'available'
     ];
     
     const lowerQuery = query.toLowerCase();
@@ -175,7 +175,7 @@ export class TicketDataFormatter extends BaseFormatter {
       'train', 'ticket', 'station', 'departure', 'arrival', 'duration',
       'seat', 'price', 'yuan', '¥', '￥', 'G', 'D', 'Z', 'T', 'K', // Train types
       'business', 'first', 'second', 'hard', 'soft', 'sleeper', // Seat types
-      '车次', '出发', '到达', '历时', '余票', '商务座', '一等座', '二等座', '硬座', '软座', '硬卧', '软卧'
+      'Train', 'departure', 'arrival', 'Duration', 'available', 'Business Class', 'First Class', 'Second Class', 'HardSeat', 'SoftSeat', 'HardSleeper', 'SoftSleeper'
     ];
     
     const lowerText = text.toLowerCase();
@@ -226,8 +226,8 @@ export class TicketDataFormatter extends BaseFormatter {
     }
     
     // For get-tickets format, we need to parse the special format
-    // Format: "车次|出发站 -> 到达站|出发时间 -> 到达时间|历时"
-    // Then data lines like: "G9610 广州(telecode:GZQ) -> 长沙南(telecode:CWQ) 00:10 -> 02:31 历时：02:21"
+    // Format: "Train|departureStation -> arrivalStation|departureTime -> arrivalTime|Duration"
+    // Then data lines like: "G9610 Guangzhou(telecode:GZQ) -> ChangshaSouth(telecode:CWQ) 00:10 -> 02:31 Duration：02:21"
     
     // Parse header to understand column structure
     const headerLine = lines[0].trim();
@@ -258,14 +258,14 @@ export class TicketDataFormatter extends BaseFormatter {
         currentTicket = {};
         
         // Parse train info from line
-        // Format: "G9610 广州(telecode:GZQ) -> 长沙南(telecode:CWQ) 00:10 -> 02:31 历时：02:21"
+        // Format: "G9610 Guangzhou(telecode:GZQ) -> ChangshaSouth(telecode:CWQ) 00:10 -> 02:31 Duration：02:21"
         const trainParts = line.split(/\s+/);
         if (trainParts.length >= 1) {
           currentTicket.trainNo = trainParts[0];
         }
         
         // Try to extract from/to stations
-        // Format: "G9610 广州(telecode:GZQ) -> 长沙南(telecode:CWQ) 00:10 -> 02:31"
+        // Format: "G9610 Guangzhou(telecode:GZQ) -> ChangshaSouth(telecode:CWQ) 00:10 -> 02:31"
         // We need to skip the train number at the beginning
         const stationMatch = line.match(/^[A-Z0-9]+\s+(.+?)\s*->\s*(.+?)\s+(\d{2}:\d{2})\s*->\s*(\d{2}:\d{2})/);
         if (stationMatch) {
@@ -291,7 +291,7 @@ export class TicketDataFormatter extends BaseFormatter {
         }
         
         // Also try Chinese duration pattern (for compatibility)
-        const chineseDurationMatch = line.match(/历时[：:]\s*(\d{2}:\d{2})/);
+        const chineseDurationMatch = line.match(/Duration[：:]\s*(\d{2}:\d{2})/);
         if (chineseDurationMatch && !currentTicket.duration) {
           currentTicket.duration = chineseDurationMatch[1];
         }
@@ -301,7 +301,7 @@ export class TicketDataFormatter extends BaseFormatter {
       } 
       // Check if this is a seat line (starts with dash)
       else if (line.startsWith('-') && currentTicket) {
-        // Format: "- 商务座: 剩余14张票 1083元"
+        // Format: "- Business Class: Remaining14tickets 1083CNY"
         const seatMatch = line.match(/-\s*([^:]+):\s*(.+)/);
         if (seatMatch) {
           const seatType = seatMatch[1].trim();
@@ -309,7 +309,7 @@ export class TicketDataFormatter extends BaseFormatter {
           currentTicket.seats[seatType] = seatInfo;
           
           // Try to extract price from seat info
-          const priceMatch = seatInfo.match(/(\d+(?:\.\d{2})?)元/);
+          const priceMatch = seatInfo.match(/(\d+(?:\.\d{2})?)CNY/);
           if (priceMatch && !currentTicket.price) {
             currentTicket.price = priceMatch[1];
           }
@@ -433,14 +433,14 @@ private extractDate(ticket: any): string {
    */
   private createTicketTable(tickets: any[], isChinese: boolean = false): string {
     if (tickets.length === 0) {
-      return isChinese ? '该日期无车票。\n' : 'No tickets for this date.\n';
+      return isChinese ? 'This dateNoneticket。\n' : 'No tickets for this date.\n';
     }
     
     // Limit for readability, but more than 10 if there are many
     const displayTickets = tickets.slice(0, 50);
     
     let table = isChinese 
-      ? '| 车次 | 出发 → 到达 | 出发时间 | 到达时间 | 历时 | 余票 | 票价 |\n'
+      ? '| Train | departure → arrival | departureTime | arrivalTime | Duration | available | fare |\n'
       : '| Train | From → To | Departure | Arrival | Duration | Seats | Price |\n';
     
     table += '|-------|-----------|-----------|---------|----------|-------|-------|\n';
@@ -460,7 +460,7 @@ private extractDate(ticket: any): string {
     
     if (tickets.length > 50) {
       table += isChinese 
-        ? `| ... | ... 还有 ${tickets.length - 50} 个车次 | ... | ... | ... | ... | ... |\n`
+        ? `| ... | ... There are ${tickets.length - 50} Train | ... | ... | ... | ... | ... |\n`
         : `| ... | ... and ${tickets.length - 50} more tickets | ... | ... | ... | ... | ... |\n`;
     }
     
@@ -518,21 +518,21 @@ private extractDate(ticket: any): string {
    */
   private formatSeatAvailability(seats: Record<string, any>, isChinese: boolean = false): string {
     if (!seats || Object.keys(seats).length === 0) {
-      return isChinese ? '暂无信息' : 'N/A';
+      return isChinese ? 'No information' : 'N/A';
     }
     
     const availableSeats: string[] = [];
     
     for (const [seatType, availability] of Object.entries(seats)) {
       if (availability && availability !== 'no' && availability !== '0' && availability !== 'N/A' && 
-          availability !== '无' && availability !== '无票' &&
+          availability !== 'None' && availability !== 'NoneTicket' &&
           !availability.toLowerCase().includes('sold out') && !availability.toLowerCase().includes('unavailable')) {
         availableSeats.push(`${seatType}: ${availability}`);
       }
     }
     
     if (availableSeats.length === 0) {
-      return isChinese ? '❌ 无票' : '❌ Sold out';
+      return isChinese ? '❌ NoneTicket' : '❌ Sold out';
     }
     
     return availableSeats.slice(0, 2).join(', ');
@@ -564,7 +564,7 @@ private extractDate(ticket: any): string {
    * Create ticket summary
    */
   private createTicketSummary(tickets: any[], isChinese: boolean = false): string {
-    let summary = isChinese ? '### 📊 总结\n\n' : '### 📊 Summary\n\n';
+    let summary = isChinese ? '### 📊 Summary\n\n' : '### 📊 Summary\n\n';
     
     // Count by train type
     const trainTypes: Record<string, number> = {};
@@ -581,7 +581,7 @@ private extractDate(ticket: any): string {
       // Check if any seat is available
       const seats = ticket.seats || ticket.seat_info || {};
       const hasSeats = Object.values(seats).some(a => 
-        a && a !== '无' && a !== '无票' && a !== '0' && a !== 'no' && 
+        a && a !== 'None' && a !== 'NoneTicket' && a !== '0' && a !== 'no' && 
         !String(a).toLowerCase().includes('sold out')
       );
       if (hasSeats) availableCount++;
@@ -599,37 +599,37 @@ private extractDate(ticket: any): string {
     }
     
     // Train type breakdown
-    summary += isChinese ? '**车型统计:**\n' : '**Train Types:**\n';
+    summary += isChinese ? '**Train Type Statistics:**\n' : '**Train Types:**\n';
     for (const [type, count] of Object.entries(trainTypes)) {
-      const localizedType = isChinese ? type.replace('High-speed', '高铁').replace('Bullet', '动车').replace('Direct Express', '直达特快').replace('Express', '特快').replace('Fast', '快速').replace('Regular', '普通') : type;
-      summary += `• ${localizedType}: ${count} ${isChinese ? '趟' : 'train'}${!isChinese && count > 1 ? 's' : ''}\n`;
+      const localizedType = isChinese ? type.replace('High-speed', 'high-speed').replace('Bullet', 'bullet').replace('Direct Express', 'DirectExpress').replace('Express', 'Express').replace('Fast', 'Fast').replace('Regular', 'Regular') : type;
+      summary += `• ${localizedType}: ${count} ${isChinese ? 'trains' : 'train'}${!isChinese && count > 1 ? 's' : ''}\n`;
     }
     
-    summary += isChinese ? `\n**可用性:** 有票车次 ${availableCount} / 总车次 ${tickets.length}\n` : `\n**Availability:** ${availableCount} / ${tickets.length} trains have seats\n`;
+    summary += isChinese ? `\n**Availability:** AvailableTicketTrain ${availableCount} / TotalTrain ${tickets.length}\n` : `\n**Availability:** ${availableCount} / ${tickets.length} trains have seats\n`;
 
     // Price summary
     if (priceCount > 0) {
       const avgPrice = totalPrice / priceCount;
-      summary += isChinese ? `\n**平均票价:** ¥${avgPrice.toFixed(2)}\n` : `\n**Average Price:** ¥${avgPrice.toFixed(2)}\n`;
-      summary += isChinese ? `**价格区间:** ${this.getPriceRange(tickets)}\n` : `**Price Range:** ${this.getPriceRange(tickets)}\n`;
+      summary += isChinese ? `\n**Averagefare:** ¥${avgPrice.toFixed(2)}\n` : `\n**Average Price:** ¥${avgPrice.toFixed(2)}\n`;
+      summary += isChinese ? `**Price Range:** ${this.getPriceRange(tickets)}\n` : `**Price Range:** ${this.getPriceRange(tickets)}\n`;
     }
     
     // Time range
     const timeRange = this.getTimeRange(tickets);
     if (timeRange) {
-      summary += isChinese ? `\n**出发时间范围:** ${timeRange}\n` : `\n**Departure Times:** ${timeRange}\n`;
+      summary += isChinese ? `\n**departureTimeRange:** ${timeRange}\n` : `\n**Departure Times:** ${timeRange}\n`;
     }
     
     // Recommendations
-    summary += isChinese ? '\n**💡 建议:**\n' : '\n**💡 Recommendations:**\n';
+    summary += isChinese ? '\n**💡 Suggestions:**\n' : '\n**💡 Recommendations:**\n';
     if (availableCount === 0) {
-      summary += isChinese ? '• 抱歉，所选车次目前似乎都已售罄。建议尝试其他日期或开启候补。\n' : '• Sorry, all trains appear to be sold out. Try another date or join waitlist.\n';
+      summary += isChinese ? '• Sorry，SelectedTrainappear to be sold out。SuggestionsTryother dates or enable waitlist。\n' : '• Sorry, all trains appear to be sold out. Try another date or join waitlist.\n';
     } else {
       if (tickets.length > 5) {
-        summary += isChinese ? '• 选项丰富，建议优先选择时间最早或票价最优惠的班次。\n' : '• Many options available, consider earliest or cheapest.\n';
+        summary += isChinese ? '• Plenty of options，SuggestionsChooseTimeearliest orfarebest fareschedule。\n' : '• Many options available, consider earliest or cheapest.\n';
       }
       if (this.hasHighSpeedTrains(tickets)) {
-        summary += isChinese ? '• 推荐选择高铁班次，出行更快捷。\n' : '• High-speed trains available for faster travel.\n';
+        summary += isChinese ? '• Recommendedhigh-speedschedule，for faster travel。\n' : '• High-speed trains available for faster travel.\n';
       }
     }
     

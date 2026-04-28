@@ -39,16 +39,16 @@ const renderOrchestration = () => {
   );
 };
 
-describe('意图编排页面全面场景测试', () => {
+describe('Orchestration page comprehensive scenario test', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     (apiService.saveWorkflow as any).mockResolvedValue({ id: 'new-wf-123' });
     (apiService.searchServices as any).mockResolvedValue({ total: 0, services: [] });
   });
 
-  describe('场景1: 完整工作流生成与发布', () => {
-    it('用户输入意图 -> AI解析成功 -> 生成步骤 -> 发布工作流', async () => {
-      // 模拟AI解析成功
+  describe('Scenario1: Complete workflow generation and publishing', () => {
+    it('User input intent -> AIParse success -> Generate steps -> Publish workflow', async () => {
+      // MockAIParse success
       (aiService.parseIntent as any).mockResolvedValue({
         status: 'success',
         steps: [
@@ -71,15 +71,15 @@ describe('意图编排页面全面场景测试', () => {
 
       renderOrchestration();
 
-      // 1. 用户输入意图
-      const input = screen.getByPlaceholderText(/Type your intent|输入您的自动化需求/i);
+      // 1. User input intent
+      const input = screen.getByPlaceholderText(/Type your intent|Enter your automation needs/i);
       fireEvent.change(input, { target: { value: 'Sync GitHub stars to Notion' } });
       fireEvent.keyDown(input, { key: 'Enter', code: 'Enter' });
 
-      // 2. 验证分析状态
-      expect(screen.getByText(/Analyzing intent|正在解析意图/i)).toBeInTheDocument();
+      // 2. Verify analysis status
+      expect(screen.getByText(/Analyzing intent|Analyzing intent/i)).toBeInTheDocument();
 
-      // 3. 验证步骤生成
+      // 3. Verify step generation
       await waitFor(() => {
         expect(screen.getByText('github')).toBeInTheDocument();
         expect(screen.getByText('list_stars')).toBeInTheDocument();
@@ -87,14 +87,14 @@ describe('意图编排页面全面场景测试', () => {
         expect(screen.getByText('create_page')).toBeInTheDocument();
       });
 
-      // 4. 验证步骤数量显示
+      // 4. Verify step count display
       expect(screen.getByText(/2 steps generated/i)).toBeInTheDocument();
 
-      // 5. 发布工作流 - 使用更精确的选择器
-      const publishButton = screen.getByRole('button', { name: /Publish|发布/i });
+      // 5. Publish workflow - Usemore precise selector
+      const publishButton = screen.getByRole('button', { name: /Publish|Publish/i });
       fireEvent.click(publishButton);
 
-      // 6. 验证API调用
+      // 6. VerifyAPIcall
       await waitFor(() => {
         expect(apiService.saveWorkflow).toHaveBeenCalledWith(
           expect.objectContaining({
@@ -109,9 +109,9 @@ describe('意图编排页面全面场景测试', () => {
     });
   });
 
-  describe('场景2: 能力缺失处理', () => {
-    it('用户输入未知意图 -> AI返回能力缺失 -> 显示能力缺失页面', async () => {
-      // 模拟能力缺失
+  describe('Scenario2: Capability missing handling', () => {
+    it('User inputs unknown intent -> AIReturns capability missing -> Shows capability missing page', async () => {
+      // MockCapability missing
       (aiService.parseIntent as any).mockResolvedValue({
         status: 'capability_missing',
         steps: []
@@ -119,51 +119,51 @@ describe('意图编排页面全面场景测试', () => {
 
       renderOrchestration();
 
-      // 输入未知意图
-      const input = screen.getByPlaceholderText(/Type your intent|输入您的自动化需求/i);
+      // Input unknown intent
+      const input = screen.getByPlaceholderText(/Type your intent|Enter your automation needs/i);
       fireEvent.change(input, { target: { value: 'Unknown intent that cannot be satisfied' } });
       fireEvent.keyDown(input, { key: 'Enter', code: 'Enter' });
 
-      // 验证能力缺失页面显示
+      // VerifyCapability missingpagedisplay
       await waitFor(() => {
-        expect(screen.getByText(/Capability Not Found|未找到匹配能力/i)).toBeInTheDocument();
-        expect(screen.getByText(/Submit Tool Request|提交工具请求/i)).toBeInTheDocument();
+        expect(screen.getByText(/Capability Not Found|No matching capability found/i)).toBeInTheDocument();
+        expect(screen.getByText(/Submit Tool Request|Submit tool request/i)).toBeInTheDocument();
       });
 
-      // 验证没有步骤生成（但可能有"0 steps generated"文本）
-      // 所以我们需要检查是否有实际的步骤卡片
+      // VerifyNo steps generated（butMay have"0 steps generated"text）
+      // So we need to check if there are actual step cards
       expect(screen.queryByText('github')).not.toBeInTheDocument();
       expect(screen.queryByText('list_stars')).not.toBeInTheDocument();
     });
   });
 
-  describe('场景3: 错误处理', () => {
-    it('AI服务异常 -> 显示错误信息 -> 用户可以重试', async () => {
-      // 模拟AI服务异常
+  describe('Scenario3: Error handling', () => {
+    it('AIService exception -> Display error message -> User can retry', async () => {
+      // MockAIService exception
       (aiService.parseIntent as any).mockRejectedValue(new Error('AI service unavailable'));
 
       renderOrchestration();
 
-      // 输入意图
-      const input = screen.getByPlaceholderText(/Type your intent|输入您的自动化需求/i);
+      // Input intent
+      const input = screen.getByPlaceholderText(/Type your intent|Enter your automation needs/i);
       fireEvent.change(input, { target: { value: 'Test intent' } });
       fireEvent.keyDown(input, { key: 'Enter', code: 'Enter' });
 
-      // 验证错误信息显示
+      // VerifyErrorinformation display
       await waitFor(() => {
-        expect(screen.getByText(/Failed to generate workflow|生成工作流失败/i)).toBeInTheDocument();
+        expect(screen.getByText(/Failed to generate workflow|Failed to generate workflow/i)).toBeInTheDocument();
       });
 
-      // 验证用户可以重新输入
+      // VerifyUsercan re-enter
       await waitFor(() => {
         expect(input).not.toBeDisabled();
       });
     });
   });
 
-  describe('场景4: 步骤管理', () => {
-    it('生成步骤后 -> 清空所有步骤', async () => {
-      // 模拟生成多个步骤
+  describe('Scenario4: Step management', () => {
+    it('Generate steps -> Clear all steps', async () => {
+      // MockGenerate multiple steps
       (aiService.parseIntent as any).mockResolvedValue({
         status: 'success',
         steps: [
@@ -175,8 +175,8 @@ describe('意图编排页面全面场景测试', () => {
 
       renderOrchestration();
 
-      // 生成步骤
-      const input = screen.getByPlaceholderText(/Type your intent|输入您的自动化需求/i);
+      // Generate steps
+      const input = screen.getByPlaceholderText(/Type your intent|Enter your automation needs/i);
       fireEvent.change(input, { target: { value: 'Multi-step workflow' } });
       fireEvent.keyDown(input, { key: 'Enter', code: 'Enter' });
 
@@ -184,18 +184,18 @@ describe('意图编排页面全面场景测试', () => {
         expect(screen.getByText(/3 steps generated/i)).toBeInTheDocument();
       });
 
-      // 清空所有步骤 - 通过title属性查找
+      // Clear all steps - viatitleproperty lookup
       const clearButtons = screen.getAllByRole('button');
       const clearButton = clearButtons.find(button => 
         button.getAttribute('title')?.includes('Clear all steps') ||
-        button.getAttribute('title')?.includes('清空所有步骤')
+        button.getAttribute('title')?.includes('Clear all steps')
       );
       
       if (clearButton) {
         fireEvent.click(clearButton);
       }
 
-      // 验证所有步骤被清除
+      // VerifyAll steps cleared
       await waitFor(() => {
         expect(screen.queryByText('github')).not.toBeInTheDocument();
         expect(screen.queryByText('slack')).not.toBeInTheDocument();
@@ -204,27 +204,27 @@ describe('意图编排页面全面场景测试', () => {
     });
   });
 
-  describe('场景5: 边界条件测试', () => {
-    it('空输入 -> 发送按钮禁用', () => {
+  describe('Scenario5: Boundary condition test', () => {
+    it('Empty input -> Send button disabled', () => {
       renderOrchestration();
 
-      const input = screen.getByPlaceholderText(/Type your intent|输入您的自动化需求/i);
-      const sendButton = screen.getByRole('button', { name: '' }); // 发送按钮
+      const input = screen.getByPlaceholderText(/Type your intent|Enter your automation needs/i);
+      const sendButton = screen.getByRole('button', { name: '' }); // Send button
 
-      // 初始状态应为禁用
+      // Initial state should be disabled
       expect(sendButton).toBeDisabled();
 
-      // 输入空格后仍应禁用
+      // Should still be disabled after entering spaces
       fireEvent.change(input, { target: { value: '   ' } });
       expect(sendButton).toBeDisabled();
 
-      // 输入有效内容后启用
+      // Enabled after entering valid content
       fireEvent.change(input, { target: { value: 'Valid intent' } });
       expect(sendButton).not.toBeDisabled();
     });
 
-    it('分析过程中 -> 发送按钮禁用', async () => {
-      // 模拟长时间分析
+    it('During analysis -> Send button disabled', async () => {
+      // Mocklong analysis
       let resolvePromise: (value: any) => void;
       const promise = new Promise(resolve => {
         resolvePromise = resolve;
@@ -234,66 +234,66 @@ describe('意图编排页面全面场景测试', () => {
 
       renderOrchestration();
 
-      const input = screen.getByPlaceholderText(/Type your intent|输入您的自动化需求/i);
+      const input = screen.getByPlaceholderText(/Type your intent|Enter your automation needs/i);
       const sendButton = screen.getByRole('button', { name: '' });
 
-      // 开始分析
+      // Start analysis
       fireEvent.change(input, { target: { value: 'Test intent' } });
       fireEvent.keyDown(input, { key: 'Enter', code: 'Enter' });
 
-      // 验证分析过程中发送按钮禁用
+      // VerifyDuring analysisSend button disabled
       expect(sendButton).toBeDisabled();
 
-      // 完成分析
+      // Complete analysis
       await act(async () => {
         resolvePromise!({
           status: 'success',
           steps: [{ id: 'step_1', type: 'tool', serverName: 'test', toolName: 'test_tool' }]
         });
-        // 等待微任务队列清空
+        // Wait for microtask queue to clear
         await Promise.resolve();
       });
 
-      // 验证分析完成后，如果输入框有内容，按钮应该启用
-      // 首先模拟用户输入新内容
+      // VerifyAnalysis complete，If input has content，button should be enabled
+      // FirstMockUserenter new content
       fireEvent.change(input, { target: { value: 'New intent' } });
       
-      // 验证按钮启用
+      // Verifybutton enabled
       await waitFor(() => {
         expect(sendButton).not.toBeDisabled();
       }, { timeout: 2000 });
     });
 
-    it('无步骤时 -> 发布按钮禁用', () => {
+    it('When no steps -> Publishbutton disabled', () => {
       renderOrchestration();
 
-      // 使用更可靠的选择器：通过按钮文本和角色
-      const publishButton = screen.getByRole('button', { name: /Publish|发布/i });
+      // Use more reliable selector：viabuttontextandrole
+      const publishButton = screen.getByRole('button', { name: /Publish|Publish/i });
       
-      // 验证发布按钮禁用
+      // VerifyPublishbutton disabled
       expect(publishButton).toBeDisabled();
     });
   });
 
-  describe('场景6: 多语言支持', () => {
-    it('界面文本支持多语言', () => {
+  describe('Scenario6: Multi-language support', () => {
+    it('UItextsupports multiple languages', () => {
       renderOrchestration();
 
-      // 验证关键元素存在（英文或中文）
-      expect(screen.getByPlaceholderText(/Type your intent|输入您的自动化需求/i)).toBeInTheDocument();
-      expect(screen.getByText(/AI Assistant|AI助手/i)).toBeInTheDocument();
+      // VerifyKeyCNYelements exist（English orChinese）
+      expect(screen.getByPlaceholderText(/Type your intent|Enter your automation needs/i)).toBeInTheDocument();
+      expect(screen.getByText(/AI Assistant|AIAssistant/i)).toBeInTheDocument();
       
-      // 使用getAllByText处理多个匹配项
-      const workflowTexts = screen.getAllByText(/Generate automation workflows|使用自然语言生成自动化工作流/i);
+      // UsegetAllByTexthandle multiple matches
+      const workflowTexts = screen.getAllByText(/Generate automation workflows|Usenatural language to generate automation workflows/i);
       expect(workflowTexts.length).toBeGreaterThan(0);
     });
   });
 
-  describe('场景7: 性能与并发测试', () => {
-    it('快速连续输入 -> 正确处理请求队列', async () => {
+  describe('Scenario7: Performance and concurrency test', () => {
+    it('Rapid consecutive input -> Correctly handle request queue', async () => {
       const resolves: Array<(value: any) => void> = [];
 
-      // 模拟异步AI解析
+      // MockasyncAIparse
       (aiService.parseIntent as any).mockImplementation(() => {
         return new Promise(resolve => {
           resolves.push(resolve);
@@ -302,47 +302,47 @@ describe('意图编排页面全面场景测试', () => {
 
       renderOrchestration();
 
-      const input = screen.getByPlaceholderText(/Type your intent|输入您的自动化需求/i);
+      const input = screen.getByPlaceholderText(/Type your intent|Enter your automation needs/i);
       const sendButton = screen.getByRole('button', { name: '' });
 
-      // 快速发送请求
+      // Send requests quickly
       fireEvent.change(input, { target: { value: 'First intent' } });
       fireEvent.keyDown(input, { key: 'Enter', code: 'Enter' });
 
-      // 等待第一个请求开始处理
+      // Wait for first request to start processing
       await waitFor(() => {
-        expect(screen.getByText(/Analyzing intent|正在解析意图/i)).toBeInTheDocument();
+        expect(screen.getByText(/Analyzing intent|Analyzing intent/i)).toBeInTheDocument();
       });
 
-      // 在第一个请求完成前，发送按钮应该被禁用
+      // Before first request completes，Send buttonshould be disabled
       expect(sendButton).toBeDisabled();
 
-      // 解析第一个请求
+      // parsefirst request
       await act(async () => {
         resolves[0]({
           status: 'success',
           steps: [{ id: 'step_1', type: 'tool', serverName: 'test', toolName: 'test_tool' }]
         });
-        // 等待微任务队列清空
+        // Wait for microtask queue to clear
         await Promise.resolve();
       });
 
-      // 验证可以继续输入 - 模拟用户输入新内容
+      // Verifycan continue input - MockUserenter new content
       fireEvent.change(input, { target: { value: 'Second intent' } });
       
-      // 验证按钮启用
+      // Verifybutton enabled
       await waitFor(() => {
         expect(sendButton).not.toBeDisabled();
       }, { timeout: 2000 });
     });
   });
 
-  describe('场景8: 网络异常处理', () => {
-    it('API调用失败 -> 优雅降级', async () => {
-      // 模拟API调用失败
+  describe('Scenario8: Network error handling', () => {
+    it('APIcallFailure -> Graceful degradation', async () => {
+      // MockAPIcallFailure
       (apiService.saveWorkflow as any).mockRejectedValue(new Error('Network error'));
 
-      // 模拟AI解析成功
+      // MockAIParse success
       (aiService.parseIntent as any).mockResolvedValue({
         status: 'success',
         steps: [
@@ -352,8 +352,8 @@ describe('意图编排页面全面场景测试', () => {
 
       renderOrchestration();
 
-      // 生成步骤
-      const input = screen.getByPlaceholderText(/Type your intent|输入您的自动化需求/i);
+      // Generate steps
+      const input = screen.getByPlaceholderText(/Type your intent|Enter your automation needs/i);
       fireEvent.change(input, { target: { value: 'Test workflow' } });
       fireEvent.keyDown(input, { key: 'Enter', code: 'Enter' });
 
@@ -361,20 +361,20 @@ describe('意图编排页面全面场景测试', () => {
         expect(screen.getByText('github')).toBeInTheDocument();
       });
 
-      // 尝试发布（应该失败但不会崩溃）
-      const publishButton = screen.getByRole('button', { name: /Publish|发布/i });
+      // TryPublish（should failbutwill not crash）
+      const publishButton = screen.getByRole('button', { name: /Publish|Publish/i });
       fireEvent.click(publishButton);
 
-      // 验证应用没有崩溃，仍然可以操作
+      // Verifyapp did not crash，still operable
       await waitFor(() => {
         expect(input).toBeInTheDocument();
       });
     });
   });
 
-  describe('场景9: UI/UX测试', () => {
-    it('聊天界面显示用户和AI消息', async () => {
-      // 模拟AI解析成功
+  describe('Scenario9: UI/UXtest', () => {
+    it('Chat interface shows user andAImessages', async () => {
+      // MockAIParse success
       (aiService.parseIntent as any).mockResolvedValue({
         status: 'success',
         steps: [{ id: 'step_1', type: 'tool', serverName: 'test', toolName: 'test_tool' }]
@@ -382,24 +382,24 @@ describe('意图编排页面全面场景测试', () => {
 
       renderOrchestration();
 
-      // 发送消息
-      const input = screen.getByPlaceholderText(/Type your intent|输入您的自动化需求/i);
+      // Sendmessages
+      const input = screen.getByPlaceholderText(/Type your intent|Enter your automation needs/i);
       fireEvent.change(input, { target: { value: 'Hello AI' } });
       fireEvent.keyDown(input, { key: 'Enter', code: 'Enter' });
 
-      // 验证用户消息显示
+      // VerifyUsermessagesdisplay
       await waitFor(() => {
         expect(screen.getByText('Hello AI')).toBeInTheDocument();
       });
 
-      // 验证AI回复显示
+      // VerifyAIresponse display
       await waitFor(() => {
-        expect(screen.getByText(/I've generated a workflow|我已为您生成工作流/i)).toBeInTheDocument();
+        expect(screen.getByText(/I've generated a workflow|I have generated a workflow for you/i)).toBeInTheDocument();
       });
     });
 
-    it('步骤卡片显示正确信息', async () => {
-      // 模拟生成步骤
+    it('Step cards display correct information', async () => {
+      // MockGenerate steps
       (aiService.parseIntent as any).mockResolvedValue({
         status: 'success',
         steps: [
@@ -415,12 +415,12 @@ describe('意图编排页面全面场景测试', () => {
 
       renderOrchestration();
 
-      // 生成步骤
-      const input = screen.getByPlaceholderText(/Type your intent|输入您的自动化需求/i);
+      // Generate steps
+      const input = screen.getByPlaceholderText(/Type your intent|Enter your automation needs/i);
       fireEvent.change(input, { target: { value: 'Show GitHub stars' } });
       fireEvent.keyDown(input, { key: 'Enter', code: 'Enter' });
 
-      // 验证步骤卡片显示
+      // VerifyStep carddisplay
       await waitFor(() => {
         expect(screen.getByText('github')).toBeInTheDocument();
         expect(screen.getByText('list_stars')).toBeInTheDocument();

@@ -310,15 +310,15 @@ export class IntentService {
     const trimmed = str.trim().toLowerCase();
     const relativeDates = ['today', 'tomorrow', 'yesterday'];
     if (relativeDates.includes(trimmed)) return true;
-    return /^\d{4}[年\/-]\d{1,2}[月\/-]\d{1,2}/.test(trimmed) || /^\d{1,2}[月\/-]\d{1,2}/.test(trimmed);
+    return /^\d{4}[-/]\d{1,2}[-/]\d{1,2}/.test(trimmed) || /^\d{1,2}[-/]\d{1,2}/.test(trimmed);
   }
   
   private normalizeDate(dateStr: string): string {
     if (!dateStr) return dateStr;
     const trimmed = dateStr.trim();
     
-    // 1. Chinese date formats
-    const chineseDateMatch = trimmed.match(/(?:(\d{4})[年\/-])?(\d{1,2})[月\/-](\d{1,2})日?/);
+    // 1. Date formats with separators (e.g., 2024-12-25, 2024/12/25)
+    const chineseDateMatch = trimmed.match(/(?:(\d{4})[-/])?(\d{1,2})[-/](\d{1,2})/);
     if (chineseDateMatch) {
       const year = chineseDateMatch[1] ? parseInt(chineseDateMatch[1]) : new Date().getFullYear();
       const month = parseInt(chineseDateMatch[2]);

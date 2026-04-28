@@ -96,7 +96,7 @@ export class OfficialRegistrySource implements RegistrySource {
       const allServices: ServiceInfo[] = [
         {
           name: 'mcp/12306',
-          description: '12306火车票查询服务',
+          description: '12306 train ticket query service',
           version: '1.0.0',
           source: 'official',
           tags: ['transport', 'tickets', 'travel', 'china'],
@@ -104,7 +104,7 @@ export class OfficialRegistrySource implements RegistrySource {
         },
         {
           name: 'mcp/weather',
-          description: '天气查询服务',
+          description: 'Weather query service',
           version: '1.0.0',
           source: 'official',
           tags: ['weather', 'forecast', 'climate'],
@@ -112,7 +112,7 @@ export class OfficialRegistrySource implements RegistrySource {
         },
         {
           name: 'mcp/news',
-          description: '新闻聚合服务',
+          description: 'News aggregation service',
           version: '1.0.0',
           source: 'official',
           tags: ['news', 'media', 'articles'],
@@ -120,7 +120,7 @@ export class OfficialRegistrySource implements RegistrySource {
         },
         {
           name: 'mcp/github',
-          description: 'GitHub API集成服务',
+          description: 'GitHub API integration service',
           version: '1.0.0',
           source: 'official',
           tags: ['github', 'code', 'repositories', 'git'],
@@ -128,7 +128,7 @@ export class OfficialRegistrySource implements RegistrySource {
         },
         {
           name: 'mcp/calculator',
-          description: '计算器服务',
+          description: 'Calculator service',
           version: '1.0.0',
           source: 'official',
           tags: ['calculator', 'math', 'tools'],
@@ -136,7 +136,7 @@ export class OfficialRegistrySource implements RegistrySource {
         },
         {
           name: 'mcp/translator',
-          description: '翻译服务',
+          description: 'Translation service',
           version: '1.0.0',
           source: 'official',
           tags: ['translation', 'language', 'translate'],
@@ -144,7 +144,7 @@ export class OfficialRegistrySource implements RegistrySource {
         },
         {
           name: 'mcp/stock',
-          description: '股票信息查询服务',
+          description: 'Stock information query service',
           version: '1.0.0',
           source: 'official',
           tags: ['stock', 'finance', 'market'],
@@ -152,7 +152,7 @@ export class OfficialRegistrySource implements RegistrySource {
         },
         {
           name: 'mcp/calendar',
-          description: '日历和日程管理服务',
+          description: 'Calendar and schedule management service',
           version: '1.0.0',
           source: 'official',
           tags: ['calendar', 'schedule', 'events'],
@@ -389,7 +389,7 @@ export class GitHubRegistrySource implements RegistrySource {
               
               return {
                 name: dir.name,
-                description: manifest.description || `GitHub MCP服务: ${dir.name}`,
+                description: manifest.description || `GitHub MCP service: ${dir.name}`,
                 version: manifest.version || '1.0.0',
                 source: 'github',
                 tags: manifest.tags || ['github', 'mcp'],
@@ -399,7 +399,7 @@ export class GitHubRegistrySource implements RegistrySource {
               // If mcp.json not found, return basic info
               return {
                 name: dir.name,
-                description: `GitHub MCP服务: ${dir.name}`,
+                description: `GitHub MCP service: ${dir.name}`,
                 version: '1.0.0',
                 source: 'github',
                 tags: ['github', 'mcp'],
@@ -414,7 +414,7 @@ export class GitHubRegistrySource implements RegistrySource {
         allServices = [
           {
             name: 'github/github-mcp-server',
-            description: 'GitHub API集成服务',
+            description: 'GitHub API integration service',
             version: '1.0.0',
             source: 'github',
             tags: ['github', 'code', 'repositories', 'git'],
@@ -524,7 +524,7 @@ export class GiteeRegistrySource implements RegistrySource {
       '12306': {
         name: '12306',
         version: '1.0.0',
-        description: '12306火车票查询服务',
+        description: '12306 train ticket query service',
         runtime: {
           type: 'process',
           command: 'node',
@@ -536,13 +536,13 @@ export class GiteeRegistrySource implements RegistrySource {
         tools: [
           {
             name: 'query_tickets',
-            description: '查询火车票',
+            description: 'Query train tickets',
             inputSchema: {
               type: 'object',
               properties: {
-                from: { type: 'string', description: '出发站' },
-                to: { type: 'string', description: '到达站' },
-                date: { type: 'string', description: '日期 (YYYY-MM-DD)' }
+                from: { type: 'string', description: 'Departure station' },
+                to: { type: 'string', description: 'Arrival station' },
+                date: { type: 'string', description: 'Date (YYYY-MM-DD)' }
               },
               required: ['from', 'to', 'date']
             }
@@ -552,7 +552,7 @@ export class GiteeRegistrySource implements RegistrySource {
       'weather': {
         name: 'weather',
         version: '1.0.0',
-        description: '天气查询服务',
+        description: 'Weather query service',
         runtime: {
           type: 'process',
           command: 'node',
@@ -564,12 +564,12 @@ export class GiteeRegistrySource implements RegistrySource {
         tools: [
           {
             name: 'get_weather',
-            description: '获取天气信息',
+            description: 'Get weather information',
             inputSchema: {
               type: 'object',
               properties: {
-                city: { type: 'string', description: '城市名称' },
-                days: { type: 'number', description: '预报天数', default: 3 }
+                city: { type: 'string', description: 'City name' },
+                days: { type: 'number', description: 'Forecast days', default: 3 }
               },
               required: ['city']
             }
@@ -579,7 +579,7 @@ export class GiteeRegistrySource implements RegistrySource {
       'news': {
         name: 'news',
         version: '1.0.0',
-        description: '新闻聚合服务',
+        description: 'News aggregation service',
         runtime: {
           type: 'process',
           command: 'node',
@@ -591,12 +591,12 @@ export class GiteeRegistrySource implements RegistrySource {
         tools: [
           {
             name: 'get_news',
-            description: '获取新闻',
+            description: 'Get news',
             inputSchema: {
               type: 'object',
               properties: {
-                category: { type: 'string', description: '新闻类别', default: 'general' },
-                limit: { type: 'number', description: '返回数量', default: 10 }
+                category: { type: 'string', description: 'News category', default: 'general' },
+                limit: { type: 'number', description: 'Return count', default: 10 }
               }
             }
           }
@@ -605,7 +605,7 @@ export class GiteeRegistrySource implements RegistrySource {
       'github': {
         name: 'github',
         version: '1.0.0',
-        description: 'GitHub API集成服务',
+        description: 'GitHub API integration service',
         runtime: {
           type: 'process',
           command: 'node',
@@ -617,12 +617,12 @@ export class GiteeRegistrySource implements RegistrySource {
         tools: [
           {
             name: 'search_repositories',
-            description: '搜索GitHub仓库',
+            description: 'Search GitHub repositories',
             inputSchema: {
               type: 'object',
               properties: {
-                query: { type: 'string', description: '搜索查询' },
-                language: { type: 'string', description: '编程语言' }
+                query: { type: 'string', description: 'Search query' },
+                language: { type: 'string', description: 'Programming language' }
               },
               required: ['query']
             }
@@ -770,7 +770,7 @@ export class GiteeRegistrySource implements RegistrySource {
                 const fullServiceName = `${categoryDir.name}/${serviceDir.name}`;
                 allServices.push({
                   name: fullServiceName,
-                  description: manifest.description || `Gitee MCP服务: ${serviceDir.name}`,
+                  description: manifest.description || `Gitee MCP service: ${serviceDir.name}`,
                   version: manifest.version || '1.0.0',
                   source: 'gitee',
                   tags: manifest.tags || [categoryDir.name, 'gitee', 'mcp'],
@@ -787,7 +787,7 @@ export class GiteeRegistrySource implements RegistrySource {
                   const fullServiceName = `${categoryDir.name}/${serviceDir.name}`;
                   allServices.push({
                     name: fullServiceName,
-                    description: directManifest.description || `Gitee MCP服务: ${serviceDir.name}`,
+                    description: directManifest.description || `Gitee MCP service: ${serviceDir.name}`,
                     version: directManifest.version || '1.0.0',
                     source: 'gitee',
                     tags: directManifest.tags || ['gitee', 'mcp'],
@@ -798,7 +798,7 @@ export class GiteeRegistrySource implements RegistrySource {
                   const fullServiceName = `${categoryDir.name}/${serviceDir.name}`;
                   allServices.push({
                     name: fullServiceName,
-                    description: `Gitee MCP服务: ${serviceDir.name}`,
+                    description: `Gitee MCP service: ${serviceDir.name}`,
                     version: '1.0.0',
                     source: 'gitee',
                     tags: [categoryDir.name, 'gitee', 'mcp'],
@@ -818,7 +818,7 @@ export class GiteeRegistrySource implements RegistrySource {
         allServices = [
           {
             name: 'Joooook/12306-mcp',
-            description: '12306火车票查询服务',
+            description: '12306 train ticket query service',
             version: '1.0.0',
             source: 'gitee',
             tags: ['transport', 'tickets', 'travel', 'china'],

@@ -2,7 +2,7 @@ import { IntentorchAdapter } from '../ai/intentorch-adapter';
 import { getAIConfig } from '../utils/config';
 
 async function runRealTest() {
-  const query = "查询2026年5月3日广州去南宁的高铁票";
+  const query = "query 2026-05-03 Guangzhou to Nanning high-speed train tickets";
   console.log(`Starting DeepSeek Full-Link Test (Round 2): "${query}"`);
   
   try {
@@ -18,15 +18,15 @@ async function runRealTest() {
     const mockTools = [
       {
         name: "query_left_tickets",
-        description: "查询12306余票信息",
+        description: "Query 12306 ticket availability",
         serverName: "Joooook/12306-mcp",
         inputSchema: {
           type: "object",
           properties: {
-            from_station: { type: "string", description: "出发站名称，如：北京" },
-            to_station: { type: "string", description: "到达站名称，如：上海" },
-            train_date: { type: "string", description: "出发日期，格式：YYYY-MM-DD" },
-            purpose_codes: { type: "string", enum: ["ADULT", "0X00"], description: "票种类型：ADULT（成人），0X00（学生）" }
+            from_station: { type: "string", description: "Departure station name, e.g.: Beijing" },
+            to_station: { type: "string", description: "Arrival station name, e.g.: Shanghai" },
+            train_date: { type: "string", description: "Departure date, format: YYYY-MM-DD" },
+            purpose_codes: { type: "string", enum: ["ADULT", "0X00"], description: "Ticket type: ADULT (adult), 0X00 (student)" }
           },
           required: ["from_station", "to_station", "train_date"]
         }

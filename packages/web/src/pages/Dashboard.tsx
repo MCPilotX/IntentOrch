@@ -24,32 +24,32 @@ const Dashboard: React.FC = () => {
     refetchInterval: 10000,
   });
 
-  // 获取数据
+  // Fetch data
   const { data: stats, isLoading: statsLoading } = useQuery({
     queryKey: ['systemStats'],
     queryFn: () => apiService.getSystemStats(),
-    refetchInterval: 5000, // 每5秒刷新一次，实现实时更新
+    refetchInterval: 5000, // Every5seconds refresh once，for real-time updates
   });
 
   const { data: servers, isLoading: serversLoading } = useQuery({
     queryKey: ['servers'],
     queryFn: () => apiService.getServers(),
-    refetchInterval: 5000, // 每5秒刷新一次，实现实时更新
+    refetchInterval: 5000, // Every5seconds refresh once，for real-time updates
   });
 
   const { data: processes, isLoading: processesLoading } = useQuery({
     queryKey: ['processes'],
     queryFn: () => apiService.getProcesses(),
-    refetchInterval: 5000, // 每5秒刷新一次，实现实时更新
+    refetchInterval: 5000, // Every5seconds refresh once，for real-time updates
   });
 
   const { data: systemLogs = [] } = useQuery({
     queryKey: ['systemLogs'],
     queryFn: () => apiService.getSystemLogs(),
-    refetchInterval: 10000, // 每10秒刷新一次
+    refetchInterval: 10000, // Every10seconds refresh once
   });
 
-  // 停止进程的mutation
+  // Stop processmutation
   const stopProcessMutation = useMutation({
     mutationFn: (pid: number) => apiService.stopProcess({ pid }),
     onSuccess: () => {
@@ -59,29 +59,29 @@ const Dashboard: React.FC = () => {
     },
   });
 
-  // 处理停止进程
+  // Handle stop process
   const handleStopProcess = (pid: number) => {
     if (window.confirm(t('processes.confirmStop'))) {
       stopProcessMutation.mutate(pid);
     }
   };
 
-  // 将系统日志转换为最近活动格式
+  // Convert system logs to recent activity format
   const recentActivities = React.useMemo(() => {
-    // 如果没有系统日志，返回空数组
+    // If no system logs，return empty array
     if (!systemLogs || systemLogs.length === 0) {
       return [];
     }
 
-    // 检查系统日志是否包含真实数据（不是默认的模拟日志）
-    // 如果日志都是默认的模拟消息，也返回空数组
+    // Check if system logs contain real data（not defaultMocklog）
+    // Iflogare all defaultMockmessages，alsoreturn empty array
     const logs = Array.isArray(systemLogs) ? systemLogs : [];
     const hasRealLogs = logs.some(log => {
-      // 检查是否是默认的模拟日志消息
+      // Check if it is defaultMocklogmessages
       const isDefaultLog = log.includes('System is running normally') || 
                           log.includes('Daemon started successfully') ||
-                          log.includes('系统运行正常') ||
-                          log.includes('守护进程启动成功');
+                          log.includes('System running normally') ||
+                          log.includes('Daemon started successfully');
       return !isDefaultLog;
     });
 
@@ -89,59 +89,59 @@ const Dashboard: React.FC = () => {
       return [];
     }
 
-    // 解析系统日志为活动记录
+    // parseSystemlogto activity records
     const activities = logs.slice(-6).reverse().map((log, index) => {
-      // 改进的日志解析逻辑
+      // Improvedlogparselogic
       let action = 'System Operation';
       let target = '';
       let user = 'system';
       let type: 'success' | 'info' | 'warning' | 'error' = 'info';
       
-      // 更精确的日志解析
+      // More preciselogparse
       const logLower = log.toLowerCase();
       
-      if (logLower.includes('start') || logLower.includes('启动')) {
+      if (logLower.includes('start') || logLower.includes('Start')) {
         action = 'Server Started';
-        const match = log.match(/server[:\s]+([^\s,]+)/i) || log.match(/启动[:\s]+([^\s,]+)/i);
+        const match = log.match(/server[:\s]+([^\s,]+)/i) || log.match(/Start[:\s]+([^\s,]+)/i);
         target = match ? match[1] : 'Unknown Server';
         type = 'success';
-      } else if (logLower.includes('stop') || logLower.includes('停止')) {
+      } else if (logLower.includes('stop') || logLower.includes('Stop')) {
         action = 'Process Stopped';
-        const match = log.match(/pid[:\s]+(\d+)/i) || log.match(/进程[:\s]+(\d+)/i);
+        const match = log.match(/pid[:\s]+(\d+)/i) || log.match(/process[:\s]+(\d+)/i);
         target = match ? `PID: ${match[1]}` : 'Unknown Process';
         type = 'warning';
-      } else if (logLower.includes('pull') || logLower.includes('拉取')) {
+      } else if (logLower.includes('pull') || logLower.includes('Pull')) {
         action = 'Server Pulled';
-        const match = log.match(/server[:\s]+([^\s,]+)/i) || log.match(/拉取[:\s]+([^\s,]+)/i);
+        const match = log.match(/server[:\s]+([^\s,]+)/i) || log.match(/Pull[:\s]+([^\s,]+)/i);
         target = match ? match[1] : 'Unknown Server';
         type = 'info';
-      } else if (logLower.includes('config') || logLower.includes('配置')) {
+      } else if (logLower.includes('config') || logLower.includes('Config')) {
         action = 'Configuration Updated';
         target = 'System Configuration';
         type = 'info';
-      } else if (logLower.includes('secret') || logLower.includes('密钥')) {
+      } else if (logLower.includes('secret') || logLower.includes('Secret')) {
         action = 'Secret Added';
-        const match = log.match(/key[:\s]+([^\s,]+)/i) || log.match(/密钥[:\s]+([^\s,]+)/i);
+        const match = log.match(/key[:\s]+([^\s,]+)/i) || log.match(/Secret[:\s]+([^\s,]+)/i);
         target = match ? match[1] : 'Unknown Secret';
         type = 'success';
-      } else if (logLower.includes('error') || logLower.includes('错误') || logLower.includes('failed') || logLower.includes('失败')) {
+      } else if (logLower.includes('error') || logLower.includes('Error') || logLower.includes('failed') || logLower.includes('Failure')) {
         action = 'System Error';
         target = log.length > 50 ? log.substring(0, 50) + '...' : log;
         type = 'error';
-      } else if (logLower.includes('success') || logLower.includes('成功')) {
+      } else if (logLower.includes('success') || logLower.includes('Success')) {
         action = 'Operation Successful';
         target = 'System Operation';
         type = 'success';
       }
 
-      // 尝试从日志中提取时间戳
+      // Attempt to extract timestamp from log
       const timeMatch = log.match(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/) || 
                        log.match(/\d{4}\/\d{2}\/\d{2} \d{2}:\d{2}:\d{2}/);
       const time = timeMatch ? new Date(timeMatch[0]).toISOString() : 
                   new Date(Date.now() - (index + 1) * 30 * 60 * 1000).toISOString();
 
-      // 尝试从日志中提取用户信息
-      const userMatch = log.match(/user[:\s]+([^\s,]+)/i) || log.match(/用户[:\s]+([^\s,]+)/i);
+      // Attempt to extract user info from log
+      const userMatch = log.match(/user[:\s]+([^\s,]+)/i) || log.match(/User[:\s]+([^\s,]+)/i);
       if (userMatch) {
         user = userMatch[1];
       }
@@ -191,7 +191,7 @@ const Dashboard: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      {/* 欢迎标题 */}
+      {/* Welcome title */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold text-gray-900 dark:text-white">{t('dashboard.title')}</h1>
@@ -206,7 +206,7 @@ const Dashboard: React.FC = () => {
         </div>
       </div>
 
-      {/* 统计卡片 */}
+      {/* Statistics cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {statCards.map((card) => {
           const Icon = card.icon;
@@ -281,7 +281,7 @@ const Dashboard: React.FC = () => {
           </div>
         </div>
 
-        {/* 最近活动 */}
+        {/* Recent activity */}
         <div className="card">
           <div className="card-header">
             <h3 className="card-title">{t('dashboard.recentActivitiesTitle')}</h3>
@@ -320,7 +320,7 @@ const Dashboard: React.FC = () => {
       </div>
 
 
-      {/* Server状态概览 */}
+      {/* ServerStatus overview */}
       <div className="card">
         <div className="card-header">
           <h3 className="card-title">{t('dashboard.serverOverviewTitle')}</h3>

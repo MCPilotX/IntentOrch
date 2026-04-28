@@ -36,7 +36,7 @@ export { RuntimeDetector, RuntimeAdapter } from './runtime';
 // ==================== Tool Registry ====================
 export { ToolRegistry as ToolRegistryModule } from './tool-registry';
 
-// ==================== 进程管理 ====================
+// ==================== Process Management ====================
 export { ProcessManager, ProcessStore } from './process-manager';
 export type { ProcessInfo } from './process-manager/types';
 
@@ -59,14 +59,14 @@ export type { DaemonResponse } from './core/types';
 // Note: CLI modules are not directly exported, used via bin/intorch.js
 
 /**
- * 获取 IntentOrch 版本信息
+ * Get IntentOrch version info
  */
 export function getVersion(): string {
   return '0.1.0';
 }
 
 /**
- * 获取系统状态
+ * Get system status
  */
 export async function getSystemStatus() {
   return {
@@ -89,7 +89,7 @@ export async function getSystemStatus() {
 }
 
 /**
- * 初始化 IntentOrch 系统
+ * Initialize IntentOrch system
  */
 export async function initialize(_config?: Record<string, unknown>) {
   logger.info(`[IntentOrch] Initializing version ${getVersion()}`);

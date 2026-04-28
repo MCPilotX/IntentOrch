@@ -1,4 +1,4 @@
-import React, { useMemo, useCallback } from 'react';
+import React, { useMemo, useCallback, useEffect, useRef } from 'react';
 import ReactFlow, { 
   Background, 
   Controls, 
@@ -9,9 +9,6 @@ import ReactFlow, {
 } from 'reactflow';
 import type { Node, Edge } from 'reactflow';
 import 'reactflow/dist/style.css';
-// Ensure d3-transition is loaded to patch selection.prototype.interrupt
-// This prevents "selection.interrupt is not a function" error from d3-zoom
-import 'd3-transition';
 import type { Workflow, WorkflowStep } from '../../types';
 
 interface WorkflowVisualizerProps {

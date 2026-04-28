@@ -282,7 +282,7 @@ export class ParameterPostProcessor {
       }
     }
 
-    // 2. Handle nested objects (like {"广州": {"station_code": "GZQ"}})
+    // 2. Handle nested objects (like {"city": {"station_code": "GZQ"}})
     const values = Object.values(obj);
     if (values.length === 1 && typeof values[0] === 'object' && values[0] !== null) {
       return ParameterPostProcessor.extractCoreValue(values[0], _paramSchema);

@@ -156,7 +156,7 @@ describe('run command', () => {
   it('warns when AI config is missing and skips NL execution', async () => {
     (getAIConfig as jest.Mock).mockResolvedValue({ provider: '', apiKey: '' });
 
-    await command.parseAsync(['node', 'test', '帮我查天气']);
+    await command.parseAsync(['node', 'test', 'check weather for me']);
 
     expect(consoleErrorSpy).toHaveBeenCalledWith('❌ AI configuration not set');
     expect(mockedIntentorch.configureAI).not.toHaveBeenCalled();

@@ -58,6 +58,6 @@ describe('AIChatPanel', () => {
       <AIChatPanel onSendMessage={() => {}} messages={[]} isAnalyzing={true} />
     );
     
-    expect(screen.getByText(/Analyzing intent|正在解析意图/i)).toBeInTheDocument();
+    expect(screen.getByText(/Analyzing intent|Analyzing intent/i)).toBeInTheDocument();
   });
 });
