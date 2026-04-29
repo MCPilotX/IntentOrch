@@ -180,10 +180,10 @@ const Processes: React.FC = () => {
                 value={statusFilter}
                 onChange={(e) => setStatusFilter(e.target.value)}
               >
-                <option value="all">All Status</option>
-                <option value="running">Running</option>
-                <option value="stopped">Stopped</option>
-                <option value="error">Error</option>
+                <option value="all">{t('processes.filterAll')}</option>
+                <option value="running">{t('processes.filterRunning')}</option>
+                <option value="stopped">{t('processes.filterStopped')}</option>
+                <option value="error">{t('processes.filterError')}</option>
               </select>
             </div>
             
@@ -192,7 +192,7 @@ const Processes: React.FC = () => {
               className="flex items-center space-x-2 px-4 py-2 bg-primary-500 text-white rounded-lg hover:bg-primary-600 transition-colors"
             >
               <RefreshCw className="w-4 h-4" />
-              <span>Refresh</span>
+              <span>{t('processes.refresh')}</span>
             </button>
           </div>
         </div>
@@ -204,10 +204,10 @@ const Processes: React.FC = () => {
           <table className="w-full">
             <thead>
               <tr className="border-b border-gray-200 dark:border-gray-700">
-                <th className="py-3 px-4 text-left text-sm font-medium text-gray-700 dark:text-gray-300">Process Info</th>
-                <th className="py-3 px-4 text-left text-sm font-medium text-gray-700 dark:text-gray-300">Status</th>
-                <th className="py-3 px-4 text-left text-sm font-medium text-gray-700 dark:text-gray-300">Start Time</th>
-                <th className="py-3 px-4 text-left text-sm font-medium text-gray-700 dark:text-gray-300">Actions</th>
+                <th className="py-3 px-4 text-left text-sm font-medium text-gray-700 dark:text-gray-300">{t('processes.processInfo')}</th>
+                <th className="py-3 px-4 text-left text-sm font-medium text-gray-700 dark:text-gray-300">{t('processes.status')}</th>
+                <th className="py-3 px-4 text-left text-sm font-medium text-gray-700 dark:text-gray-300">{t('processes.startTime')}</th>
+                <th className="py-3 px-4 text-left text-sm font-medium text-gray-700 dark:text-gray-300">{t('processes.actions')}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
@@ -244,7 +244,7 @@ const Processes: React.FC = () => {
                           <button
                             onClick={() => handleStopProcess(process.pid)}
                             className="p-2 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
-                            title="Stop Process"
+                            title={t('processes.stopProcess')}
                           >
                             <StopCircle className="w-5 h-5" />
                           </button>
@@ -252,7 +252,7 @@ const Processes: React.FC = () => {
                         {process.status === 'stopped' && (
                           <button
                             className="p-2 text-green-600 hover:bg-green-50 dark:hover:bg-green-900/20 rounded-lg transition-colors"
-                            title="Start Process"
+                            title={t('processes.startProcess')}
                           >
                             <PlayCircle className="w-5 h-5" />
                           </button>
@@ -260,13 +260,13 @@ const Processes: React.FC = () => {
                         <button
                           onClick={() => handleViewLogs(process)}
                           className="p-2 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-colors"
-                          title="View Logs"
+                          title={t('processes.viewLogs')}
                         >
                           <Eye className="w-5 h-5" />
                         </button>
                         <button
                           className="p-2 text-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
-                          title="More Actions"
+                          title={t('processes.moreActions')}
                         >
                           <MoreVertical className="w-5 h-5" />
                         </button>
@@ -279,13 +279,13 @@ const Processes: React.FC = () => {
                   <td colSpan={4} className="py-12 text-center">
                     <div className="flex flex-col items-center">
                       <Activity className="w-16 h-16 text-gray-300 dark:text-gray-600 mb-4" />
-                      <p className="text-gray-500 dark:text-gray-400">No matching processes found</p>
+                      <p className="text-gray-500 dark:text-gray-400">{t('processes.noMatchingProcesses')}</p>
                       {searchTerm && (
                         <button
                           onClick={() => setSearchTerm('')}
                           className="mt-2 text-sm text-primary-600 hover:text-primary-700 dark:text-primary-400"
                         >
-                          Clear search criteria
+                          {t('processes.clearSearch')}
                         </button>
                       )}
                     </div>
@@ -305,10 +305,10 @@ const Processes: React.FC = () => {
             <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700">
               <div>
                 <h3 className="text-lg font-medium text-gray-900 dark:text-white">
-                  {formatMCPServerName(selectedProcess.serverName)} Logs
+                  {t('processes.logsTitle', { serverName: formatMCPServerName(selectedProcess.serverName) })}
                 </h3>
                 <p className="text-sm text-gray-600 dark:text-gray-400">
-                  PID: {selectedProcess.pid} • Last updated: {formatRelativeTime(new Date().toISOString())}
+                  {t('processes.logsSubtitle', { pid: selectedProcess.pid, time: formatRelativeTime(new Date().toISOString()) })}
                 </p>
               </div>
               <button
@@ -326,21 +326,21 @@ const Processes: React.FC = () => {
                 </div>
               ) : (
                 <pre className="font-mono text-sm bg-gray-50 dark:bg-gray-900 p-4 rounded-lg overflow-x-auto">
-                  {processLogs || 'No log data available'}
+                  {processLogs || t('servers.noLogData')}
                 </pre>
               )}
             </div>
             
             <div className="flex items-center justify-between p-6 border-t border-gray-200 dark:border-gray-700">
               <div className="text-sm text-gray-500">
-                Log file: {selectedProcess.logPath || 'Not specified'}
+                {t('processes.logFile')}: {selectedProcess.logPath || 'Not specified'}
               </div>
               <div className="flex space-x-3">
                 <button className="px-4 py-2 bg-primary-500 text-white rounded-lg hover:bg-primary-600 transition-colors">
-                  Refresh Logs
+                  {t('processes.refreshLogs')}
                 </button>
                 <button className="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
-                  Download Logs
+                  {t('processes.downloadLogs')}
                 </button>
               </div>
             </div>

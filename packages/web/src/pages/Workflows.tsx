@@ -449,21 +449,21 @@ const Workflows: React.FC = () => {
                   }
                 }}
                 className="p-2 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
-                title="Export all workflows"
+                title={t('workflows.exportAll')}
               >
                 <Download className="w-5 h-5" />
               </button>
               <button 
                 onClick={handleUploadWorkflow}
                 className="p-2 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
-                title="Import workflow"
+                title={t('workflows.importWorkflow')}
               >
                 <Upload className="w-5 h-5" />
               </button>
               <button
                 onClick={() => refetch()}
                 className="p-2 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
-                title="Refresh"
+                title={t('common.refresh')}
               >
                 <Search className="w-5 h-5" />
               </button>
@@ -595,14 +595,14 @@ const Workflows: React.FC = () => {
                   <button
                     onClick={() => handleDuplicateWorkflow(workflow)}
                     className="p-1.5 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg"
-                    title="Copy"
+                    title={t('workflows.duplicate')}
                   >
                     <Copy className="w-4 h-4" />
                   </button>
                   <button
                     onClick={() => handleDeleteWorkflow(workflow.id, workflow.name)}
                     className="p-1.5 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg"
-                    title="Delete"
+                    title={t('common.delete')}
                   >
                     <Trash2 className="w-4 h-4" />
                   </button>
@@ -824,7 +824,7 @@ const Workflows: React.FC = () => {
                                 }}
                                 disabled={index === 0}
                                 className="p-1 text-gray-500 hover:text-gray-700 disabled:opacity-30"
-                                title="Move up"
+                                title={t('workflows.moveUp')}
                               >
                                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
@@ -844,7 +844,7 @@ const Workflows: React.FC = () => {
                                 }}
                                 disabled={index === selectedWorkflow.steps.length - 1}
                                 className="p-1 text-gray-500 hover:text-gray-700 disabled:opacity-30"
-                                title="Move down"
+                                title={t('workflows.moveDown')}
                               >
                                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
@@ -860,7 +860,7 @@ const Workflows: React.FC = () => {
                                   });
                                 }}
                                 className="p-1 text-red-500 hover:text-red-700"
-                                title="Delete step"
+                                title={t('common.delete')}
                               >
                                 <Trash2 className="w-4 h-4" />
                               </button>

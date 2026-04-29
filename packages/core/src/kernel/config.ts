@@ -215,7 +215,6 @@ const DEFAULT_CONFIG: KernelConfig = {
   },
 };
 
-
 let kernelConfig: KernelConfig = { ...DEFAULT_CONFIG };
 
 export function getKernelConfig(): KernelConfig {
@@ -226,12 +225,30 @@ export function setKernelConfig(config: Partial<KernelConfig>): void {
   kernelConfig = {
     ...kernelConfig,
     ...config,
-    semanticGateway: { ...DEFAULT_CONFIG.semanticGateway, ...config.semanticGateway } as KernelConfig['semanticGateway'],
-    logicFlow: { ...DEFAULT_CONFIG.logicFlow, ...config.logicFlow } as KernelConfig['logicFlow'],
-    sandboxKernel: { ...DEFAULT_CONFIG.sandboxKernel, ...config.sandboxKernel } as KernelConfig['sandboxKernel'],
-    kernelHistory: { ...DEFAULT_CONFIG.kernelHistory, ...config.kernelHistory } as KernelConfig['kernelHistory'],
-    healthCheck: { ...DEFAULT_CONFIG.healthCheck, ...config.healthCheck } as KernelConfig['healthCheck'],
-    circuitAwareSelector: { ...DEFAULT_CONFIG.circuitAwareSelector, ...config.circuitAwareSelector } as KernelConfig['circuitAwareSelector'],
+    semanticGateway: {
+      ...DEFAULT_CONFIG.semanticGateway,
+      ...config.semanticGateway,
+    } as KernelConfig["semanticGateway"],
+    logicFlow: {
+      ...DEFAULT_CONFIG.logicFlow,
+      ...config.logicFlow,
+    } as KernelConfig["logicFlow"],
+    sandboxKernel: {
+      ...DEFAULT_CONFIG.sandboxKernel,
+      ...config.sandboxKernel,
+    } as KernelConfig["sandboxKernel"],
+    kernelHistory: {
+      ...DEFAULT_CONFIG.kernelHistory,
+      ...config.kernelHistory,
+    } as KernelConfig["kernelHistory"],
+    healthCheck: {
+      ...DEFAULT_CONFIG.healthCheck,
+      ...config.healthCheck,
+    } as KernelConfig["healthCheck"],
+    circuitAwareSelector: {
+      ...DEFAULT_CONFIG.circuitAwareSelector,
+      ...config.circuitAwareSelector,
+    } as KernelConfig["circuitAwareSelector"],
   };
 }
 

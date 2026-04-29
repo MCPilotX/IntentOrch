@@ -1,50 +1,55 @@
-import { Command } from 'commander';
-import fs from 'fs/promises';
-import { getWorkflowManager } from '@intentorch/core';
-import { WorkflowEngine } from '@intentorch/core';
-import { Workflow } from '@intentorch/core';
-import { getAIConfig } from '@intentorch/core';
-import { getProcessManager } from '@intentorch/core';
-import { getRegistryClient } from '@intentorch/core';
-import { PROGRAM_NAME } from '@intentorch/core';
+import { Command } from "commander";
+import fs from "fs/promises";
+import { getWorkflowManager } from "@intentorch/core";
+import { WorkflowEngine } from "@intentorch/core";
+import { Workflow } from "@intentorch/core";
+import { getAIConfig } from "@intentorch/core";
+import { getProcessManager } from "@intentorch/core";
+import { getRegistryClient } from "@intentorch/core";
+import { PROGRAM_NAME } from "@intentorch/core";
 
-const { prompt, Confirm, Select } = require('enquirer');
+import enquirer from "enquirer";
+const { prompt } = enquirer;
 
 export function workflowCommand(): Command {
-  const command = new Command('workflow')
-    .description('Manage and execute reusable AI workflows');
+  const command = new Command("workflow").description(
+    "Manage and execute reusable AI workflows",
+  );
 
   // workflow create (Interactive Wizard)
-  command.command('create')
-    .description('Interactively create a workflow from natural language')
-    .argument('<query>', 'Natural language task description')
+  command
+    .command("create")
+    .description("Interactively create a workflow from natural language")
+    .argument("<query>", "Natural language task description")
     .action(async (query: string) => {
       try {
-        console.log('Using IntentOrch to analyze your task...');
+        console.log("Using IntentOrch to analyze your task...");
 
         // 1. Configure AI
         const aiConfig = await getAIConfig();
         if (!aiConfig.provider || !aiConfig.apiKey) {
-          throw new Error(`AI not configured. Run: ${PROGRAM_NAME} config set provider <p> && ${PROGRAM_NAME} config set apiKey <k>`);
+          throw new Error(
+            `AI not configured. Run: ${PROGRAM_NAME} config set provider <p> && ${PROGRAM_NAME} config set apiKey <k>`,
+          );
         }
-        
+
         // Dynamically import intentorch to avoid initialization at import time
-        const importedIntentorch = await import('@intentorch/core');
+        const importedIntentorch = await import("@intentorch/core");
         const intentorch = importedIntentorch.default;
-        
+
         // Temporarily suppress console output to avoid IntentOrch initialization logs
         const originalConsoleLog = console.log;
         const originalConsoleInfo = console.info;
         const originalConsoleError = console.error;
         const originalConsoleWarn = console.warn;
-        
+
         try {
           // Redirect all console output to empty functions
           console.log = () => {};
           console.info = () => {};
           console.error = () => {};
           console.warn = () => {};
-          
+
           await (intentorch as any).configureAI(aiConfig);
           await (intentorch as any).initCloudIntentEngine();
         } finally {
@@ -64,72 +69,85 @@ export function workflowCommand(): Command {
           await (intentorch as any).connectMCPServer({
             name: s.serverName,
             transport: {
-              type: 'stdio',
+              type: "stdio",
               command: manifest.runtime.command,
-              args: manifest.runtime.args || []
-            }
+              args: manifest.runtime.args || [],
+            },
           });
         }
 
         // 3. Generate Plan
-        const planResult = await (intentorch as any).parseAndPlanWorkflow(query);
+        const planResult = await (intentorch as any).parseAndPlanWorkflow(
+          query,
+        );
         if (!planResult.success || !planResult.plan) {
-          throw new Error(`IntentOrch failed to generate plan: ${planResult.error}`);
+          throw new Error(
+            `IntentOrch failed to generate plan: ${planResult.error}`,
+          );
         }
 
         const plan = planResult.plan;
-        
+
         // Display workflow plan
-        console.log('\nAI Generated Workflow Plan:');
+        console.log("\nAI Generated Workflow Plan:");
         plan.toolSelections.forEach((ts: any, idx: number) => {
-          console.log(`  ${idx + 1}. [${ts.intentId}] Use ${ts.toolName} on ${ts.serverName || 'Server'}`);
+          console.log(
+            `  ${idx + 1}. [${ts.intentId}] Use ${ts.toolName} on ${ts.serverName || "Server"}`,
+          );
         });
 
-        const confirmPlan = new Confirm({
-          name: 'confirm',
-          message: 'Does this plan look correct?'
+        const confirmResult: any = await prompt({
+          type: "confirm",
+          name: "confirm",
+          message: "Does this plan look correct?",
         });
 
-        if (!(await confirmPlan.run())) {
-          console.log('Creation cancelled. You can try refining your query.');
+        if (!confirmResult.confirm) {
+          console.log("Creation cancelled. You can try refining your query.");
           return;
         }
 
         // 4. Map to InTorch Workflow Format
         const workflow: Workflow = {
-          name: 'NewWorkflow',
-          version: '1.0.0',
+          name: "NewWorkflow",
+          version: "1.0.0",
           requirements: {
-            servers: Array.from(new Set(plan.toolSelections.map((ts: any) => ts.serverName).filter(Boolean))) as string[]
+            servers: Array.from(
+              new Set(
+                plan.toolSelections
+                  .map((ts: any) => ts.serverName)
+                  .filter(Boolean),
+              ),
+            ) as string[],
           },
           inputs: plan.parsedIntents.map((pi: any) => ({
             id: pi.id,
-            type: 'string',
+            type: "string",
             description: pi.description,
-            required: true
+            required: true,
           })),
           steps: plan.toolSelections.map((ts: any) => ({
             id: ts.intentId,
-            serverName: ts.serverName || 'unknown',
+            serverName: ts.serverName || "unknown",
             toolName: ts.toolName,
-            parameters: ts.mappedParameters
-          }))
+            parameters: ts.mappedParameters,
+          })),
         };
 
         // 5. Finalize metadata
-        const metadata = await prompt([
+        const metadata: any = await prompt([
           {
-            type: 'input',
-            name: 'name',
-            message: 'Workflow name (no spaces):',
-            initial: 'my-workflow'
+            type: "input",
+            name: "name",
+            message: "Workflow name (no spaces):",
+            initial: "my-workflow",
           },
           {
-            type: 'input',
-            name: 'description',
-            message: 'Description:',
-            initial: query
-          }
+            type: "input",
+            name: "description",
+            message: "Description:",
+            initial: query,
+          },
         ]);
 
         workflow.name = metadata.name;
@@ -139,17 +157,19 @@ export function workflowCommand(): Command {
         const manager = getWorkflowManager();
         const path = await manager.save(workflow);
         console.log(`\nSuccess! Workflow "${workflow.name}" saved to ${path}`);
-        console.log(`Run it anytime with: ${PROGRAM_NAME} workflow run ${workflow.name}`);
-
+        console.log(
+          `Run it anytime with: ${PROGRAM_NAME} workflow run ${workflow.name}`,
+        );
       } catch (error: any) {
-        console.error('Error during workflow creation:', error.message);
+        console.error("Error during workflow creation:", error.message);
       }
     });
 
   // workflow edit (Interactive)
-  command.command('edit')
-    .description('Interactively edit a stored workflow')
-    .argument('[name]', 'Workflow name')
+  command
+    .command("edit")
+    .description("Interactively edit a stored workflow")
+    .argument("[name]", "Workflow name")
     .action(async (name: string) => {
       try {
         const manager = getWorkflowManager();
@@ -158,133 +178,148 @@ export function workflowCommand(): Command {
         if (!workflowName) {
           const workflows = await manager.list();
           if (workflows.length === 0) {
-            console.log('No workflows found to edit.');
+            console.log("No workflows found to edit.");
             return;
           }
-          const selectWorkflow = new Select({
-            name: 'workflow',
-            message: 'Select a workflow to edit:',
-            choices: workflows
+          const selectResult: any = await prompt({
+            type: "select",
+            name: "workflow",
+            message: "Select a workflow to edit:",
+            choices: workflows,
           });
-          workflowName = await selectWorkflow.run();
+          workflowName = selectResult.workflow;
         }
 
         const workflow = await manager.load(workflowName);
-        console.log(`Editing workflow: ${workflow.name} (v${workflow.version})`);
+        console.log(
+          `Editing workflow: ${workflow.name} (v${workflow.version})`,
+        );
 
         while (true) {
-          const stepChoices = workflow.steps.map(s => ({
+          const stepChoices = workflow.steps.map((s) => ({
             name: s.id,
-            message: `${s.id} (${s.toolName} on ${s.serverName})`
+            message: `${s.id} (${s.toolName} on ${s.serverName})`,
           }));
-          stepChoices.push({ name: 'save_exit', message: 'Save and Exit' });
-          stepChoices.push({ name: 'cancel', message: 'Cancel' });
+          stepChoices.push({ name: "save_exit", message: "Save and Exit" });
+          stepChoices.push({ name: "cancel", message: "Cancel" });
 
-          const selectStep = new Select({
-            name: 'step',
-            message: 'Select a step to modify:',
-            choices: stepChoices
+          const stepResult: any = await prompt({
+            type: "select",
+            name: "step",
+            message: "Select a step to modify:",
+            choices: stepChoices,
           });
 
-          const stepId = await selectStep.run();
-          if (stepId === 'cancel') return;
-          if (stepId === 'save_exit') {
+          const stepId = stepResult.step;
+          if (stepId === "cancel") return;
+          if (stepId === "save_exit") {
             await manager.save(workflow);
             console.log(`Workflow "${workflow.name}" updated successfully.`);
             return;
           }
 
-          const step = workflow.steps.find(s => s.id === stepId)!;
+          const step = workflow.steps.find((s) => s.id === stepId)!;
 
-          const actionSelect = new Select({
-            name: 'action',
+          const actionResult: any = await prompt({
+            type: "select",
+            name: "action",
             message: `What would you like to edit in step "${stepId}"?`,
             choices: [
-              { name: 'args', message: 'Arguments (args)' },
-              { name: 'retry', message: 'Retry Policy' },
-              { name: 'if', message: 'Condition (if)' },
-              { name: 'back', message: 'Back' }
-            ]
+              { name: "args", message: "Arguments (args)" },
+              { name: "retry", message: "Retry Policy" },
+              { name: "if", message: "Condition (if)" },
+              { name: "back", message: "Back" },
+            ],
           });
 
-          const action = await actionSelect.run();
-          if (action === 'back') continue;
+          const action = actionResult.action;
+          if (action === "back") continue;
 
-          if (action === 'args') {
-            console.log('\nCurrent parameters:', JSON.stringify(step.parameters, null, 2));
-            const { newParameters } = await prompt({
-              type: 'input',
-              name: 'newParameters',
-              message: 'Enter new parameters in JSON format:',
-              initial: JSON.stringify(step.parameters)
+          if (action === "args") {
+            console.log(
+              "\nCurrent parameters:",
+              JSON.stringify(step.parameters, null, 2),
+            );
+            const paramsResult: any = await prompt({
+              type: "input",
+              name: "newParameters",
+              message: "Enter new parameters in JSON format:",
+              initial: JSON.stringify(step.parameters),
             });
             try {
-              step.parameters = JSON.parse(newParameters);
-              console.log('Parameters updated.');
+              step.parameters = JSON.parse(paramsResult.newParameters);
+              console.log("Parameters updated.");
             } catch (e) {
-              console.error('Invalid JSON format. Changes not applied.');
+              console.error("Invalid JSON format. Changes not applied.");
             }
-          } else if (action === 'retry') {
-            const currentRetry = step.retry || { maxAttempts: 1, delayMs: 1000 };
-            const newRetry = await prompt([
+          } else if (action === "retry") {
+            const currentRetry = step.retry || {
+              maxAttempts: 1,
+              delayMs: 1000,
+            };
+            const retryResult: any = await prompt([
               {
-                type: 'numeral',
-                name: 'maxAttempts',
-                message: 'Max attempts:',
-                initial: currentRetry.maxAttempts
+                type: "numeral",
+                name: "maxAttempts",
+                message: "Max attempts:",
+                initial: currentRetry.maxAttempts,
               },
               {
-                type: 'numeral',
-                name: 'delayMs',
-                message: 'Delay between retries (ms):',
-                initial: currentRetry.delayMs
-              }
+                type: "numeral",
+                name: "delayMs",
+                message: "Delay between retries (ms):",
+                initial: currentRetry.delayMs,
+              },
             ]);
-            step.retry = newRetry;
-            console.log('Retry policy updated.');
-          } else if (action === 'if') {
-            const { newCondition } = await prompt({
-              type: 'input',
-              name: 'newCondition',
-              message: 'Enter execution condition (Jexl expression):',
-              initial: step.if || ''
+            step.retry = {
+              maxAttempts: retryResult.maxAttempts,
+              delayMs: retryResult.delayMs,
+            };
+            console.log("Retry policy updated.");
+          } else if (action === "if") {
+            const conditionResult: any = await prompt({
+              type: "input",
+              name: "newCondition",
+              message: "Enter execution condition (Jexl expression):",
+              initial: step.if || "",
             });
-            step.if = newCondition || undefined;
-            console.log('Condition updated.');
+            step.if = conditionResult.newCondition || undefined;
+            console.log("Condition updated.");
           }
         }
       } catch (error: any) {
-        console.error('Error editing workflow:', error.message);
+        console.error("Error editing workflow:", error.message);
       }
     });
 
   // workflow list
   command
-    .command('list')
-    .description('List all stored workflows')
+    .command("list")
+    .description("List all stored workflows")
     .action(async () => {
       try {
         const manager = getWorkflowManager();
         const list = await manager.list();
         if (list.length === 0) {
-          console.log('No workflows found.');
+          console.log("No workflows found.");
           return;
         }
-        console.log('Available Workflows:');
-        list.forEach(name => console.log(` - ${name}`));
+        console.log("Available Workflows:");
+        list.forEach((name) => console.log(` - ${name}`));
       } catch (error: any) {
-        console.error('Error listing workflows:', error.message);
+        console.error("Error listing workflows:", error.message);
       }
     });
 
   // workflow save
-  command.command('save')
-    .description('Save a workflow from a JSON file')
-    .argument('<file>', 'Path to JSON workflow file')
-    .option('--name <name>', 'Override workflow name')
-    .action(async (file: string, options) => {
+  command
+    .command("save")
+    .description("Save a workflow from a JSON file")
+    .argument("<file>", "Path to JSON workflow file")
+    .option("--name <name>", "Override workflow name")
+    .action(async (file: string, options: any) => {
       try {
-        const data = await fs.readFile(file, 'utf-8');
+        const data = await fs.readFile(file, "utf-8");
         const workflow: Workflow = JSON.parse(data);
         if (options.name) {
           workflow.name = options.name;
@@ -293,23 +328,24 @@ export function workflowCommand(): Command {
         const savedPath = await manager.save(workflow);
         console.log(`Workflow "${workflow.name}" saved to ${savedPath}`);
       } catch (error: any) {
-        console.error('Error saving workflow:', error.message);
+        console.error("Error saving workflow:", error.message);
       }
     });
 
   // workflow run
-  command.command('run')
-    .description('Execute a workflow by name or file')
-    .argument('<identifier>', 'Workflow name or JSON file path')
-    .option('-p, --params <json>', 'Parameters in JSON format', '{}')
-    .action(async (identifier: string, options) => {
+  command
+    .command("run")
+    .description("Execute a workflow by name or file")
+    .argument("<identifier>", "Workflow name or JSON file path")
+    .option("-p, --params <json>", "Parameters in JSON format", "{}")
+    .action(async (identifier: string, options: any) => {
       try {
         let workflow: Workflow;
         const manager = getWorkflowManager();
 
         // 1. Load workflow
-        if (identifier.endsWith('.json')) {
-          const data = await fs.readFile(identifier, 'utf-8');
+        if (identifier.endsWith(".json")) {
+          const data = await fs.readFile(identifier, "utf-8");
           workflow = JSON.parse(data);
         } else if (await manager.exists(identifier)) {
           workflow = await manager.load(identifier);
@@ -323,27 +359,30 @@ export function workflowCommand(): Command {
         try {
           params = JSON.parse(options.params);
         } catch (e) {
-          console.error('Invalid JSON params');
+          console.error("Invalid JSON params");
           return;
         }
 
         // 3. Execute
-        console.log(`Executing workflow: "${workflow.name}" (v${workflow.version})`);
+        console.log(
+          `Executing workflow: "${workflow.name}" (v${workflow.version})`,
+        );
         const engine = new WorkflowEngine();
         const results = await engine.execute(workflow, params);
-        
-        console.log('\nWorkflow executed successfully!');
-        console.log('\nResults:');
+
+        console.log("\nWorkflow executed successfully!");
+        console.log("\nResults:");
         console.log(JSON.stringify(results, null, 2));
       } catch (error: any) {
-        console.error('Workflow execution failed:', error.message);
+        console.error("Workflow execution failed:", error.message);
       }
     });
 
   // workflow delete
-  command.command('delete')
-    .description('Delete a stored workflow')
-    .argument('<name>', 'Workflow name')
+  command
+    .command("delete")
+    .description("Delete a stored workflow")
+    .argument("<name>", "Workflow name")
     .action(async (name: string) => {
       try {
         const manager = getWorkflowManager();
@@ -354,7 +393,7 @@ export function workflowCommand(): Command {
           console.log(`Workflow "${name}" not found.`);
         }
       } catch (error: any) {
-        console.error('Error deleting workflow:', error.message);
+        console.error("Error deleting workflow:", error.message);
       }
     });
 

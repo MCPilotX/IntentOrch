@@ -220,7 +220,7 @@ export default function Login() {
           {/* Logo 和品牌区 */}
           <div className="text-center">
             <div className="mx-auto flex items-center justify-center w-20 h-20 rounded-full overflow-hidden bg-gradient-to-br from-blue-500/10 to-indigo-500/10 dark:from-blue-500/20 dark:to-indigo-500/20 ring-1 ring-blue-200/30 dark:ring-blue-800/30 shadow-lg shadow-blue-200/30 dark:shadow-blue-900/20">
-              <img src="/logo.jpg" alt="Intentorch Logo" className="w-full h-full object-cover" />
+              <img src="/logo.jpg" alt={t('app.name')} className="w-full h-full object-cover" />
             </div>
             <h2 className="mt-4 text-3xl font-bold text-gray-900 dark:text-white">
               {t('login.title')}

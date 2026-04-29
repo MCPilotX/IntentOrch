@@ -1,4 +1,9 @@
-import { toOwnerProjectFormat, toDisplayString, toStorageFormat, isSameService as isSameServiceOPF } from './owner-project-format';
+import {
+  toOwnerProjectFormat,
+  toDisplayString,
+  toStorageFormat,
+  isSameService as isSameServiceOPF,
+} from "./owner-project-format.js";
 
 /**
  * Server name normalization utilities
@@ -8,7 +13,7 @@ import { toOwnerProjectFormat, toDisplayString, toStorageFormat, isSameService a
 /**
  * Normalize server name to ensure uniqueness
  * Format: source:owner/project[@branch][:path]
- * 
+ *
  * Examples:
  * - "Joooook/12306-mcp" -> "github:Joooook/12306-mcp"
  * - "github:Joooook/12306-mcp" -> "github:Joooook/12306-mcp"
@@ -18,42 +23,51 @@ import { toOwnerProjectFormat, toDisplayString, toStorageFormat, isSameService a
 export function normalizeServerName(serverName: string): string {
   // Use new unified format processing
   const format = toOwnerProjectFormat(serverName);
-  
+
   // Validate result - owner and project must not be empty
   if (!format.owner || !format.project) {
-    throw new Error(`Invalid server name: "${serverName}" - could not extract owner/project (owner="${format.owner}", project="${format.project}")`);
+    throw new Error(
+      `Invalid server name: "${serverName}" - could not extract owner/project (owner="${format.owner}", project="${format.project}")`,
+    );
   }
-  
-  // Determine prefix based on source
-  let source = 'github'; // default
 
-  if (serverName.startsWith('http://') || serverName.startsWith('https://')) {
+  // Determine prefix based on source
+  let source = "github"; // default
+
+  if (serverName.startsWith("http://") || serverName.startsWith("https://")) {
     // URL format - determine source from URL
-    if (serverName.includes('gitee.com')) {
-      source = 'gitee';
-    } else if (serverName.includes('raw.githubusercontent.com') || serverName.includes('github.com')) {
-      source = 'github';
+    if (serverName.includes("gitee.com")) {
+      source = "gitee";
+    } else if (
+      serverName.includes("raw.githubusercontent.com") ||
+      serverName.includes("github.com")
+    ) {
+      source = "github";
     } else {
-      source = 'direct';
+      source = "direct";
     }
-  } else if (serverName.includes(':')) {
-    const parts = serverName.split(':');
+  } else if (serverName.includes(":")) {
+    const parts = serverName.split(":");
     const possibleSource = parts[0];
-    if (['github', 'gitee', 'official', 'local'].includes(possibleSource)) {
+    if (["github", "gitee", "official", "local"].includes(possibleSource)) {
       source = possibleSource;
     }
-  } else if (serverName.startsWith('official/')) {
-    source = 'official';
-  } else if (serverName.startsWith('./') || serverName.startsWith('/') || serverName.endsWith('.json')) {
-    source = 'local';
-  } else if (!serverName.includes('/')) {
+  } else if (serverName.startsWith("official/")) {
+    source = "official";
+  } else if (
+    serverName.startsWith("./") ||
+    serverName.startsWith("/") ||
+    serverName.endsWith(".json")
+  ) {
+    source = "local";
+  } else if (!serverName.includes("/")) {
     // Single name without slash: assume official registry
-    source = 'official';
+    source = "official";
   } else {
     // owner/repo format: assume github
-    source = 'github';
+    source = "github";
   }
-  
+
   // Build normalized name
   let normalized = `${source}:${format.fullName}`;
   if (format.branch) {
@@ -62,7 +76,7 @@ export function normalizeServerName(serverName: string): string {
   if (format.path) {
     normalized += `:${format.path}`;
   }
-  
+
   return normalized;
 }
 
@@ -102,14 +116,14 @@ export interface ServerNameComponents {
 export function parseServerName(serverName: string): ServerNameComponents {
   const format = toOwnerProjectFormat(serverName);
   const normalized = normalizeServerName(serverName);
-  const source = normalized.split(':')[0];
-  
+  const source = normalized.split(":")[0];
+
   return {
     source,
     owner: format.owner,
     repo: format.project,
     branch: format.branch,
     path: format.path,
-    original: serverName
+    original: serverName,
   };
 }

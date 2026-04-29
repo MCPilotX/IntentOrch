@@ -1,18 +1,25 @@
 /**
  * @deprecated Configuration Adapter — Use ConfigService directly instead.
- * 
+ *
  * This adapter exists only for backward compatibility with legacy code that uses:
  * 1. src/utils/config.ts (ConfigManager singleton)
  * 2. src/core/config-manager.ts (static ConfigManager)
- * 
- * New code should use ConfigService (from './config-service') directly.
+ *
+ * New code should use ConfigService (from './config-service.js') directly.
  * This file will be removed in a future major version.
- * 
+ *
  * It delegates to the new ConfigService while maintaining the old API.
  */
 
-import { ConfigService, getConfigService } from './config-service';
-import type { AIConfig, AIProvider, ServiceConfig, DockerConnectionConfig, RuntimeSpecificConfig, DetectionResult } from './types';
+import { ConfigService, getConfigService } from "./config-service.js";
+import type {
+  AIConfig,
+  AIProvider,
+  ServiceConfig,
+  DockerConnectionConfig,
+  RuntimeSpecificConfig,
+  DetectionResult,
+} from "./types.js";
 
 // ==================== Adapter for src/utils/config.ts ====================
 
@@ -114,11 +121,16 @@ export class StaticConfigManagerAdapter {
     await this.configService.initialize();
   }
 
-  static async getServiceConfig(serviceName: string): Promise<ServiceConfig | null> {
+  static async getServiceConfig(
+    serviceName: string,
+  ): Promise<ServiceConfig | null> {
     return this.configService.getServiceConfig(serviceName);
   }
 
-  static async saveServiceConfig(serviceName: string, config: ServiceConfig): Promise<void> {
+  static async saveServiceConfig(
+    serviceName: string,
+    config: ServiceConfig,
+  ): Promise<void> {
     await this.configService.saveServiceConfig(serviceName, config);
   }
 
@@ -126,33 +138,43 @@ export class StaticConfigManagerAdapter {
     return this.configService.listServices();
   }
 
-  static async getDockerHostConfig(hostName: string): Promise<DockerConnectionConfig | null> {
+  static async getDockerHostConfig(
+    hostName: string,
+  ): Promise<DockerConnectionConfig | null> {
     return this.configService.getDockerHostConfig(hostName);
   }
 
-  static async saveDockerHostConfig(hostName: string, config: DockerConnectionConfig): Promise<void> {
+  static async saveDockerHostConfig(
+    hostName: string,
+    config: DockerConnectionConfig,
+  ): Promise<void> {
     await this.configService.saveDockerHostConfig(hostName, config);
   }
 
   static async deleteDockerHostConfig(hostName: string): Promise<void> {
     // Note: This method doesn't exist in ConfigService yet
     // For now, we'll implement a simple version
-    const configPath = `${process.env.INTORCH_HOME || '~/.intorch'}/config/docker-hosts/${hostName}.json`;
-    const fs = await import('fs/promises');
+    const configPath = `${process.env.INTORCH_HOME || "~/.intorch"}/config/docker-hosts/${hostName}.json`;
+    const fs = await import("fs/promises");
     try {
       await fs.unlink(configPath);
     } catch (error: any) {
-      if (error.code !== 'ENOENT') {
+      if (error.code !== "ENOENT") {
         throw error;
       }
     }
   }
 
-  static async getRuntimeProfile(runtime: string): Promise<RuntimeSpecificConfig | null> {
+  static async getRuntimeProfile(
+    runtime: string,
+  ): Promise<RuntimeSpecificConfig | null> {
     return this.configService.getRuntimeProfile(runtime as any);
   }
 
-  static async saveRuntimeProfile(runtime: string, config: RuntimeSpecificConfig): Promise<void> {
+  static async saveRuntimeProfile(
+    runtime: string,
+    config: RuntimeSpecificConfig,
+  ): Promise<void> {
     await this.configService.saveRuntimeProfile(runtime as any, config);
   }
 
@@ -167,7 +189,7 @@ export class StaticConfigManagerAdapter {
 
   static async saveGlobalConfig(config: any): Promise<void> {
     const appConfig = await this.configService.getAppConfig();
-    
+
     // Merge with existing config
     const mergedConfig = {
       ...appConfig,
@@ -187,14 +209,14 @@ export class StaticConfigManagerAdapter {
     // Return a simplified default config
     return {
       ai: {
-        provider: 'none',
-        model: 'none',
-        apiKey: '',
-        apiEndpoint: '',
+        provider: "none",
+        model: "none",
+        apiKey: "",
+        apiEndpoint: "",
       },
       registry: {
-        default: 'gitee',
-        fallback: 'github',
+        default: "gitee",
+        fallback: "github",
       },
       services: {
         autoStart: [],
@@ -216,13 +238,16 @@ export function getConfigManager(): LegacyConfigManagerAdapter {
 }
 
 // Re-export types for backward compatibility
-export type { AIConfig } from './types';
+export type { AIConfig } from "./types.js";
 
 // Utility functions for backward compatibility
 export async function getAIConfig(): Promise<AIConfig> {
   return getConfigManager().getAIConfig();
 }
 
-export async function getRegistryConfig(): Promise<{ default: string; fallback: string }> {
+export async function getRegistryConfig(): Promise<{
+  default: string;
+  fallback: string;
+}> {
   return getConfigManager().getRegistryConfig();
 }

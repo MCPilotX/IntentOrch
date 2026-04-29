@@ -1,4 +1,4 @@
-import { ServiceConfig } from '../core/types';
+import { ServiceConfig } from "../core/types.js";
 
 export interface RuntimeAdapter {
   getSpawnArgs(config: ServiceConfig): { command: string; args: string[] };

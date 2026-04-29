@@ -1,10 +1,10 @@
-import { logger } from "../core/logger";
+import { logger } from "../core/logger.js";
 /**
  * Enhanced Runtime Adapter Interface
  * Balances minimalist style with functional robustness
  */
 
-import { ServiceConfig } from '../core/types';
+import { ServiceConfig } from "../core/types.js";
 
 /**
  * Process Information
@@ -12,7 +12,7 @@ import { ServiceConfig } from '../core/types';
 export interface ProcessInfo {
   id: string;
   pid?: number;
-  status: 'starting' | 'running' | 'stopping' | 'stopped' | 'error';
+  status: "starting" | "running" | "stopping" | "stopped" | "error";
   startedAt?: Date;
   config: ServiceConfig;
 }
@@ -37,7 +37,7 @@ export interface HealthStatus {
   healthy: boolean;
   checks: Array<{
     name: string;
-    status: 'pass' | 'fail' | 'warn';
+    status: "pass" | "fail" | "warn";
     message?: string;
     duration?: number;
   }>;
@@ -148,7 +148,7 @@ export class RuntimeAdapterError extends Error {
     public override cause?: Error,
   ) {
     super(message);
-    this.name = 'RuntimeAdapterError';
+    this.name = "RuntimeAdapterError";
   }
 }
 
@@ -157,31 +157,31 @@ export class RuntimeAdapterError extends Error {
  */
 export enum RuntimeErrorCode {
   // Configuration errors
-  CONFIG_INVALID = 'CONFIG_INVALID',
-  CONFIG_MISSING = 'CONFIG_MISSING',
+  CONFIG_INVALID = "CONFIG_INVALID",
+  CONFIG_MISSING = "CONFIG_MISSING",
 
   // Process errors
-  PROCESS_START_FAILED = 'PROCESS_START_FAILED',
-  PROCESS_STOP_FAILED = 'PROCESS_STOP_FAILED',
-  PROCESS_NOT_FOUND = 'PROCESS_NOT_FOUND',
+  PROCESS_START_FAILED = "PROCESS_START_FAILED",
+  PROCESS_STOP_FAILED = "PROCESS_STOP_FAILED",
+  PROCESS_NOT_FOUND = "PROCESS_NOT_FOUND",
 
   // Runtime errors
-  RUNTIME_NOT_SUPPORTED = 'RUNTIME_NOT_SUPPORTED',
-  RUNTIME_NOT_INSTALLED = 'RUNTIME_NOT_INSTALLED',
+  RUNTIME_NOT_SUPPORTED = "RUNTIME_NOT_SUPPORTED",
+  RUNTIME_NOT_INSTALLED = "RUNTIME_NOT_INSTALLED",
 
   // Resource errors
-  RESOURCE_LIMIT_EXCEEDED = 'RESOURCE_LIMIT_EXCEEDED',
-  PERMISSION_DENIED = 'PERMISSION_DENIED',
+  RESOURCE_LIMIT_EXCEEDED = "RESOURCE_LIMIT_EXCEEDED",
+  PERMISSION_DENIED = "PERMISSION_DENIED",
 
   // Network errors
-  NETWORK_ERROR = 'NETWORK_ERROR',
-  CONNECTION_REFUSED = 'CONNECTION_REFUSED',
+  NETWORK_ERROR = "NETWORK_ERROR",
+  CONNECTION_REFUSED = "CONNECTION_REFUSED",
 
   // Timeout errors
-  TIMEOUT = 'TIMEOUT',
+  TIMEOUT = "TIMEOUT",
 
   // Unknown errors
-  UNKNOWN = 'UNKNOWN',
+  UNKNOWN = "UNKNOWN",
 }
 
 /**
@@ -207,7 +207,10 @@ export class RuntimeAdapterRegistry {
   /**
    * Create adapter instance
    */
-  static createAdapter(runtimeType: string, config: ServiceConfig): EnhancedRuntimeAdapter {
+  static createAdapter(
+    runtimeType: string,
+    config: ServiceConfig,
+  ): EnhancedRuntimeAdapter {
     const factory = this.getFactory(runtimeType);
     if (!factory) {
       throw new RuntimeAdapterError(
@@ -243,32 +246,38 @@ export abstract class BaseRuntimeAdapter implements EnhancedRuntimeAdapter {
   // Default implementations for optional methods
   async healthCheck(config: ServiceConfig): Promise<HealthStatus> {
     // Default health check: Check if process is running
-    const processes = Array.from(this.processMap.values())
-      .filter(p => p.config.name === config.name);
+    const processes = Array.from(this.processMap.values()).filter(
+      (p) => p.config.name === config.name,
+    );
 
     if (processes.length === 0) {
       return {
         healthy: false,
-        checks: [{
-          name: 'process-exists',
-          status: 'fail',
-          message: 'No running process found',
-        }],
+        checks: [
+          {
+            name: "process-exists",
+            status: "fail",
+            message: "No running process found",
+          },
+        ],
         score: 0,
       };
     }
 
-    const runningProcesses = processes.filter(p => p.status === 'running');
+    const runningProcesses = processes.filter((p) => p.status === "running");
 
     return {
       healthy: runningProcesses.length > 0,
-      checks: [{
-        name: 'process-running',
-        status: runningProcesses.length > 0 ? 'pass' : 'fail',
-        message: runningProcesses.length > 0
-          ? `${runningProcesses.length} process(es) running`
-          : 'No running processes',
-      }],
+      checks: [
+        {
+          name: "process-running",
+          status: runningProcesses.length > 0 ? "pass" : "fail",
+          message:
+            runningProcesses.length > 0
+              ? `${runningProcesses.length} process(es) running`
+              : "No running processes",
+        },
+      ],
       score: runningProcesses.length > 0 ? 100 : 0,
     };
   }
@@ -302,7 +311,7 @@ export abstract class BaseRuntimeAdapter implements EnhancedRuntimeAdapter {
     if (!config.name || !config.name.trim()) {
       throw new RuntimeAdapterError(
         RuntimeErrorCode.CONFIG_INVALID,
-        'Service name is required',
+        "Service name is required",
         { config },
       );
     }
@@ -310,7 +319,7 @@ export abstract class BaseRuntimeAdapter implements EnhancedRuntimeAdapter {
     if (!config.path || !config.path.trim()) {
       throw new RuntimeAdapterError(
         RuntimeErrorCode.CONFIG_INVALID,
-        'Service path is required',
+        "Service path is required",
         { config },
       );
     }

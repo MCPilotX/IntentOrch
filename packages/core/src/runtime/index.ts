@@ -4,11 +4,11 @@
  */
 
 // Export adapters
-export { RuntimeAdapter } from './adapter';
+export { RuntimeAdapter } from "./adapter.js";
 
 // Export detectors
-export { RuntimeDetector } from './detector';
-export { EnhancedRuntimeDetector } from './detector-advanced';
+export { RuntimeDetector } from "./detector.js";
+export { EnhancedRuntimeDetector } from "./detector-advanced.js";
 
 // Export executable analyzer
-export { ExecutableAnalyzer } from './executable-analyzer';
+export { ExecutableAnalyzer } from "./executable-analyzer.js";

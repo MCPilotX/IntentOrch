@@ -2,22 +2,22 @@
 export interface Manifest {
   name: string;
   version: string;
-  description?: string;      // Service description
+  description?: string; // Service description
   runtime: {
-    type: string;           // Runtime type (nodejs, python, docker, etc.)
+    type: string; // Runtime type (nodejs, python, docker, etc.)
     command: string;
-    args?: string[];        // Make args optional
-    env?: string[];         // Required environment variable names (fetched from secret)
-    cwd?: string;           // Working directory
+    args?: string[]; // Make args optional
+    env?: string[]; // Required environment variable names (fetched from secret)
+    cwd?: string; // Working directory
   };
   transport?: {
-    type: 'stdio' | 'http' | 'sse' | 'websocket' | 'tcp';  // Communication transport type
-    port?: number;           // Port for HTTP transport
+    type: "stdio" | "http" | "sse" | "websocket" | "tcp"; // Communication transport type
+    port?: number; // Port for HTTP transport
   };
   capabilities?: {
-    tools?: any[];          // Tools array (can be ToolMetadata or string[])
+    tools?: any[]; // Tools array (can be ToolMetadata or string[])
   };
-  tools?: any[];            // Direct tools array (alternative to capabilities.tools)
+  tools?: any[]; // Direct tools array (alternative to capabilities.tools)
   metadata?: {
     description?: string;
     author?: string;

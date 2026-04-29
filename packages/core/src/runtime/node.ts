@@ -1,19 +1,19 @@
-import { logger } from "../core/logger";
-import { spawn, type ChildProcess, execSync } from 'child_process';
+import { logger } from "../core/logger.js";
+import { spawn, type ChildProcess, execSync } from "child_process";
 
 export interface AdapterOptions {
   name: string;
   cwd: string;
   env?: Record<string, string>;
   args?: string[];
-  runtime?: 'bun' | 'node'; // Optional runtime preference
+  runtime?: "bun" | "node"; // Optional runtime preference
 }
 
 export class NodeAdapter {
   private process: ChildProcess | null = null;
   private requestId = 0;
   private pendingRequests = new Map<number, (res: any) => void>();
-  private runtime: 'bun' | 'node' = 'bun';
+  private runtime: "bun" | "node" = "bun";
 
   constructor(private options: AdapterOptions) {
     // Determine which runtime to use
@@ -22,30 +22,32 @@ export class NodeAdapter {
     } else {
       // Auto-detect: try bun first, fallback to node
       try {
-        execSync('which bun', { stdio: 'ignore' });
+        execSync("which bun", { stdio: "ignore" });
         // Further verify that bun is executable
-        execSync('bun --version', { stdio: 'ignore' });
-        this.runtime = 'bun';
+        execSync("bun --version", { stdio: "ignore" });
+        this.runtime = "bun";
       } catch {
-        this.runtime = 'node';
+        this.runtime = "node";
       }
     }
   }
 
   async start(): Promise<void> {
     return new Promise((resolve, reject) => {
-      logger.info(`[RAL] Starting Node.js service: ${this.options.name} (using ${this.runtime})`);
+      logger.info(
+        `[RAL] Starting Node.js service: ${this.options.name} (using ${this.runtime})`,
+      );
 
-      const command = this.runtime === 'bun' ? 'bun' : 'node';
-      const args = this.runtime === 'bun' ? ['run', 'index.js'] : ['index.js'];
+      const command = this.runtime === "bun" ? "bun" : "node";
+      const args = this.runtime === "bun" ? ["run", "index.js"] : ["index.js"];
 
       this.process = spawn(command, args, {
         cwd: this.options.cwd,
         env: { ...process.env, ...this.options.env },
-        stdio: ['pipe', 'pipe', 'pipe'],
+        stdio: ["pipe", "pipe", "pipe"],
       });
 
-      this.process.stdout?.on('data', (data) => {
+      this.process.stdout?.on("data", (data) => {
         const raw = data.toString().trim();
         try {
           const json = JSON.parse(raw);
@@ -60,22 +62,24 @@ export class NodeAdapter {
         }
       });
 
-      this.process.stderr?.on('data', (data) => {
+      this.process.stderr?.on("data", (data) => {
         logger.error(`[${this.options.name}] ERR: ${data.toString()}`);
       });
 
-      this.process.on('spawn', () => resolve());
-      this.process.on('error', (err) => reject(err));
+      this.process.on("spawn", () => resolve());
+      this.process.on("error", (err) => reject(err));
     });
   }
 
   // Send MCP JSON-RPC request
   async call(method: string, params: any = {}): Promise<any> {
-    if (!this.process) {throw new Error(`Service ${this.options.name} is not running.`);}
+    if (!this.process) {
+      throw new Error(`Service ${this.options.name} is not running.`);
+    }
 
     const id = ++this.requestId;
     const request = {
-      jsonrpc: '2.0',
+      jsonrpc: "2.0",
       id,
       method,
       params,
@@ -83,7 +87,7 @@ export class NodeAdapter {
 
     return new Promise((resolve) => {
       this.pendingRequests.set(id, resolve);
-      this.process?.stdin?.write(JSON.stringify(request) + '\n');
+      this.process?.stdin?.write(JSON.stringify(request) + "\n");
     });
   }
 

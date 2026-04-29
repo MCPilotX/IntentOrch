@@ -1,5 +1,5 @@
 // Import path module for path constants
-import * as path from 'path';
+import * as path from "path";
 
 /**
  * Application-wide constants and enumerations
@@ -8,48 +8,49 @@ import * as path from 'path';
 
 // ==================== AI Providers ====================
 export const AIProviders = {
-  NONE: 'none' as const,
-  OPENAI: 'openai' as const,
-  ANTHROPIC: 'anthropic' as const,
-  GOOGLE: 'google' as const,
-  AZURE: 'azure' as const,
-  DEEPSEEK: 'deepseek' as const,
-  COHERE: 'cohere' as const,
-  OLLAMA: 'ollama' as const,
-  LOCAL: 'local' as const,
-  CUSTOM: 'custom' as const,
+  NONE: "none" as const,
+  OPENAI: "openai" as const,
+  ANTHROPIC: "anthropic" as const,
+  GOOGLE: "google" as const,
+  AZURE: "azure" as const,
+  DEEPSEEK: "deepseek" as const,
+  COHERE: "cohere" as const,
+  OLLAMA: "ollama" as const,
+  LOCAL: "local" as const,
+  CUSTOM: "custom" as const,
 } as const;
 
-export type AIProvider = typeof AIProviders[keyof typeof AIProviders];
+export type AIProvider = (typeof AIProviders)[keyof typeof AIProviders];
 
 // ==================== Registry Sources ====================
 export const RegistrySources = {
-  GITEE: 'gitee' as const,
-  GITHUB: 'github' as const,
-  OFFICIAL: 'official' as const,
-  DIRECT: 'direct' as const,
-  LOCAL: 'local' as const,
+  GITEE: "gitee" as const,
+  GITHUB: "github" as const,
+  OFFICIAL: "official" as const,
+  DIRECT: "direct" as const,
+  LOCAL: "local" as const,
 } as const;
 
-export type RegistrySource = typeof RegistrySources[keyof typeof RegistrySources];
+export type RegistrySource =
+  (typeof RegistrySources)[keyof typeof RegistrySources];
 
 // ==================== Runtime Types ====================
 export const RuntimeTypes = {
-  NODE: 'node' as const,
-  PYTHON: 'python' as const,
-  GO: 'go' as const,
-  RUST: 'rust' as const,
-  DOCKER: 'docker' as const,
-  BINARY: 'binary' as const,
-  JAVA: 'java' as const,
+  NODE: "node" as const,
+  PYTHON: "python" as const,
+  GO: "go" as const,
+  RUST: "rust" as const,
+  DOCKER: "docker" as const,
+  BINARY: "binary" as const,
+  JAVA: "java" as const,
 } as const;
 
-export type RuntimeType = typeof RuntimeTypes[keyof typeof RuntimeTypes];
+export type RuntimeType = (typeof RuntimeTypes)[keyof typeof RuntimeTypes];
 
 // ==================== Configuration Defaults ====================
 export const ConfigDefaults = {
   AI_PROVIDER: AIProviders.NONE,
-  AI_MODEL: 'none' as const,
+  AI_MODEL: "none" as const,
   REGISTRY_DEFAULT: RegistrySources.GITEE,
   REGISTRY_FALLBACK: RegistrySources.GITHUB,
 } as const;
@@ -58,41 +59,48 @@ export const ConfigDefaults = {
 export const ErrorMessages = {
   // Configuration errors
   CONFIG_NOT_FOUND: (key: string) => `Configuration "${key}" not found`,
-  AI_NOT_CONFIGURED: 'AI provider is not configured. Please run: intorch config set provider <provider>',
-  API_KEY_REQUIRED: (provider: string) => `${provider} requires an API key. Please run: intorch config set apiKey <key>`,
+  AI_NOT_CONFIGURED:
+    "AI provider is not configured. Please run: intorch config set provider <provider>",
+  API_KEY_REQUIRED: (provider: string) =>
+    `${provider} requires an API key. Please run: intorch config set apiKey <key>`,
 
   // Registry errors
-  REGISTRY_SOURCE_NOT_FOUND: (source: string) => `Registry source "${source}" not found`,
-  MANIFEST_NOT_FOUND: (server: string) => `MCP Server "${server}" not found in registry`,
+  REGISTRY_SOURCE_NOT_FOUND: (source: string) =>
+    `Registry source "${source}" not found`,
+  MANIFEST_NOT_FOUND: (server: string) =>
+    `MCP Server "${server}" not found in registry`,
 
   // Runtime errors
-  RUNTIME_NOT_SUPPORTED: (runtime: string) => `Runtime "${runtime}" is not supported`,
+  RUNTIME_NOT_SUPPORTED: (runtime: string) =>
+    `Runtime "${runtime}" is not supported`,
   PROCESS_NOT_FOUND: (name: string) => `Process "${name}" is not running`,
 
   // Validation errors
-  INVALID_PROVIDER: (provider: string, valid: string[]) => 
-    `Invalid provider: "${provider}". Valid providers: ${valid.join(', ')}`,
-  MISSING_REQUIRED_PARAM: (param: string) => `Missing required parameter: "${param}"`,
+  INVALID_PROVIDER: (provider: string, valid: string[]) =>
+    `Invalid provider: "${provider}". Valid providers: ${valid.join(", ")}`,
+  MISSING_REQUIRED_PARAM: (param: string) =>
+    `Missing required parameter: "${param}"`,
 } as const;
 
 // ==================== Path Constants ====================
 // Use ~/.intorch as the unified configuration directory
-export const INTORCH_HOME = process.env.INTORCH_HOME || 
-  (process.platform === 'win32' 
-    ? path.join(process.env.APPDATA || process.env.HOME || '', '.intorch')
-    : path.join(process.env.HOME || '', '.intorch'));
+export const INTORCH_HOME =
+  process.env.INTORCH_HOME ||
+  (process.platform === "win32"
+    ? path.join(process.env.APPDATA || process.env.HOME || "", ".intorch")
+    : path.join(process.env.HOME || "", ".intorch"));
 
-export const CONFIG_PATH = path.join(INTORCH_HOME, 'config.json');
-export const LOGS_DIR = path.join(INTORCH_HOME, 'logs');
-export const VENVS_DIR = path.join(INTORCH_HOME, 'venvs');
+export const CONFIG_PATH = path.join(INTORCH_HOME, "config.json");
+export const LOGS_DIR = path.join(INTORCH_HOME, "logs");
+export const VENVS_DIR = path.join(INTORCH_HOME, "venvs");
 
 // ==================== Default Configuration ====================
 export const DEFAULT_CONFIG = {
   ai: {
     provider: ConfigDefaults.AI_PROVIDER,
-    apiKey: '',
+    apiKey: "",
     model: ConfigDefaults.AI_MODEL,
-    apiEndpoint: '',
+    apiEndpoint: "",
   },
   registry: {
     default: ConfigDefaults.REGISTRY_DEFAULT,
@@ -145,14 +153,14 @@ export const Timeouts = {
 // ==================== Daemon Defaults ====================
 export const DaemonDefaults = {
   PORT: 9658,
-  HOST: 'localhost',
-  VERSION: '0.8.0',
+  HOST: "localhost",
+  VERSION: "0.8.0",
 } as const;
 
 // ==================== LLM Model Defaults ====================
 export const LLMDefaults = {
-  MODEL: 'gpt-3.5-turbo',
-  MODEL_FALLBACK: 'gpt-4o-mini',
+  MODEL: "gpt-3.5-turbo",
+  MODEL_FALLBACK: "gpt-4o-mini",
   TEMPERATURE: 0.1,
   MAX_TOKENS: 2048,
   TIMEOUT: 30_000,
@@ -169,10 +177,10 @@ export const ExecutionDefaults = {
 
 // ==================== Known Server Names ====================
 export const KnownServers = [
-  'Joooook/12306-mcp',
-  'modelcontextprotocol/server-filesystem',
-  'modelcontextprotocol/server-github',
-  'modelcontextprotocol/server-postgres',
-  'modelcontextprotocol/server-sqlite',
-  'modelcontextprotocol/server-puppeteer',
+  "Joooook/12306-mcp",
+  "modelcontextprotocol/server-filesystem",
+  "modelcontextprotocol/server-github",
+  "modelcontextprotocol/server-postgres",
+  "modelcontextprotocol/server-sqlite",
+  "modelcontextprotocol/server-puppeteer",
 ] as const;

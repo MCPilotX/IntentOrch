@@ -3,7 +3,7 @@
  * Provides intelligent parameter name mapping between different naming conventions
  */
 
-import { Tool, JSONSchemaProperty } from './types';
+import { Tool, JSONSchemaProperty } from "./types.js";
 
 export interface ParameterMapping {
   sourceName: string;
@@ -25,19 +25,19 @@ export enum ValidationLevel {
    * Strict validation - rejects all unknown parameters
    * when additionalProperties is false
    */
-  STRICT = 'strict',
+  STRICT = "strict",
 
   /**
    * Compatible validation (default) - allows known compatibility parameters
    * like path/name, query/search, etc. even when additionalProperties is false
    */
-  COMPATIBLE = 'compatible',
+  COMPATIBLE = "compatible",
 
   /**
    * Lenient validation - allows all parameters regardless of schema
    * Useful for buggy MCP servers
    */
-  LENIENT = 'lenient'
+  LENIENT = "lenient",
 }
 
 /**
@@ -76,79 +76,81 @@ export class ParameterMapper {
   /**
    * Current configuration
    */
-  private static config: ParameterMapperConfig = { ...ParameterMapper.defaultConfig };
+  private static config: ParameterMapperConfig = {
+    ...ParameterMapper.defaultConfig,
+  };
   private static DEFAULT_MAPPINGS: ParameterMappingRule[] = [
     // Universal parameter mapping rules - works for any MCP service
     {
       pattern: /.*/, // Matches all tools
       mappings: [
         // Universal path/location parameter mappings (bidirectional)
-        { sourceName: 'name', targetName: 'path' },
-        { sourceName: 'path', targetName: 'name' },
-        { sourceName: 'filename', targetName: 'path' },
-        { sourceName: 'file', targetName: 'path' },
-        { sourceName: 'directory', targetName: 'path' },
-        { sourceName: 'folder', targetName: 'path' },
-        { sourceName: 'filepath', targetName: 'path' },
-        { sourceName: 'location', targetName: 'path' },
-        { sourceName: 'url', targetName: 'path' },
-        { sourceName: 'uri', targetName: 'path' },
+        { sourceName: "name", targetName: "path" },
+        { sourceName: "path", targetName: "name" },
+        { sourceName: "filename", targetName: "path" },
+        { sourceName: "file", targetName: "path" },
+        { sourceName: "directory", targetName: "path" },
+        { sourceName: "folder", targetName: "path" },
+        { sourceName: "filepath", targetName: "path" },
+        { sourceName: "location", targetName: "path" },
+        { sourceName: "url", targetName: "path" },
+        { sourceName: "uri", targetName: "path" },
 
         // Universal search/query parameter mappings
-        { sourceName: 'query', targetName: 'search' },
-        { sourceName: 'filter', targetName: 'search' },
-        { sourceName: 'term', targetName: 'search' },
-        { sourceName: 'keyword', targetName: 'search' },
-        { sourceName: 'q', targetName: 'search' },
+        { sourceName: "query", targetName: "search" },
+        { sourceName: "filter", targetName: "search" },
+        { sourceName: "term", targetName: "search" },
+        { sourceName: "keyword", targetName: "search" },
+        { sourceName: "q", targetName: "search" },
 
         // Universal content/data parameter mappings
-        { sourceName: 'content', targetName: 'data' },
-        { sourceName: 'data', targetName: 'content' },
-        { sourceName: 'body', targetName: 'data' },
-        { sourceName: 'payload', targetName: 'data' },
-        { sourceName: 'text', targetName: 'content' },
-        { sourceName: 'message', targetName: 'content' },
+        { sourceName: "content", targetName: "data" },
+        { sourceName: "data", targetName: "content" },
+        { sourceName: "body", targetName: "data" },
+        { sourceName: "payload", targetName: "data" },
+        { sourceName: "text", targetName: "content" },
+        { sourceName: "message", targetName: "content" },
 
         // Universal identifier parameter mappings
-        { sourceName: 'id', targetName: 'identifier' },
-        { sourceName: 'identifier', targetName: 'id' },
-        { sourceName: 'key', targetName: 'id' },
-        { sourceName: 'slug', targetName: 'id' },
-        { sourceName: 'uuid', targetName: 'id' },
-        { sourceName: 'guid', targetName: 'id' },
+        { sourceName: "id", targetName: "identifier" },
+        { sourceName: "identifier", targetName: "id" },
+        { sourceName: "key", targetName: "id" },
+        { sourceName: "slug", targetName: "id" },
+        { sourceName: "uuid", targetName: "id" },
+        { sourceName: "guid", targetName: "id" },
 
         // Universal configuration parameter mappings
-        { sourceName: 'config', targetName: 'configuration' },
-        { sourceName: 'configuration', targetName: 'config' },
-        { sourceName: 'settings', targetName: 'config' },
-        { sourceName: 'options', targetName: 'config' },
-        { sourceName: 'params', targetName: 'parameters' },
-        { sourceName: 'parameters', targetName: 'params' },
-        { sourceName: 'args', targetName: 'arguments' },
-        { sourceName: 'arguments', targetName: 'args' },
+        { sourceName: "config", targetName: "configuration" },
+        { sourceName: "configuration", targetName: "config" },
+        { sourceName: "settings", targetName: "config" },
+        { sourceName: "options", targetName: "config" },
+        { sourceName: "params", targetName: "parameters" },
+        { sourceName: "parameters", targetName: "params" },
+        { sourceName: "args", targetName: "arguments" },
+        { sourceName: "arguments", targetName: "args" },
 
         // Universal type/format parameter mappings
-        { sourceName: 'type', targetName: 'format' },
-        { sourceName: 'format', targetName: 'type' },
-        { sourceName: 'kind', targetName: 'type' },
-        { sourceName: 'category', targetName: 'type' },
-        { sourceName: 'class', targetName: 'type' },
+        { sourceName: "type", targetName: "format" },
+        { sourceName: "format", targetName: "type" },
+        { sourceName: "kind", targetName: "type" },
+        { sourceName: "category", targetName: "type" },
+        { sourceName: "class", targetName: "type" },
 
         // Universal action/operation parameter mappings
-        { sourceName: 'action', targetName: 'operation' },
-        { sourceName: 'operation', targetName: 'action' },
-        { sourceName: 'command', targetName: 'action' },
-        { sourceName: 'method', targetName: 'action' },
+        { sourceName: "action", targetName: "operation" },
+        { sourceName: "operation", targetName: "action" },
+        { sourceName: "command", targetName: "action" },
+        { sourceName: "method", targetName: "action" },
 
         // Universal source/target parameter mappings
-        { sourceName: 'source', targetName: 'from' },
-        { sourceName: 'from', targetName: 'source' },
-        { sourceName: 'destination', targetName: 'to' },
-        { sourceName: 'to', targetName: 'destination' },
-        { sourceName: 'target', targetName: 'destination' },
-        { sourceName: 'input', targetName: 'source' },
-        { sourceName: 'output', targetName: 'destination' },
-        { sourceName: 'result', targetName: 'output' },
+        { sourceName: "source", targetName: "from" },
+        { sourceName: "from", targetName: "source" },
+        { sourceName: "destination", targetName: "to" },
+        { sourceName: "to", targetName: "destination" },
+        { sourceName: "target", targetName: "destination" },
+        { sourceName: "input", targetName: "source" },
+        { sourceName: "output", targetName: "destination" },
+        { sourceName: "result", targetName: "output" },
       ],
       priority: 10, // Default priority
     },
@@ -159,13 +161,15 @@ export class ParameterMapper {
    */
   static mapParameters(
     toolName: string,
-    toolSchema: Tool['inputSchema'],
+    toolSchema: Tool["inputSchema"],
     sourceParams: Record<string, unknown>,
   ): Record<string, unknown> {
-    let targetParams: Record<string, unknown> = { ...sourceParams };
+    const targetParams: Record<string, unknown> = { ...sourceParams };
 
     // Get sorted mapping rules (highest priority first)
-    const sortedRules = [...this.DEFAULT_MAPPINGS].sort((a, b) => b.priority - a.priority);
+    const sortedRules = [...this.DEFAULT_MAPPINGS].sort(
+      (a, b) => b.priority - a.priority,
+    );
 
     // Apply each matching rule
     for (const rule of sortedRules) {
@@ -190,7 +194,10 @@ export class ParameterMapper {
     for (const [sourceName, value] of Object.entries(sourceParams)) {
       if (!schemaProperties.includes(sourceName)) {
         // Try to find a naming convention match
-        const mapping = this.findNamingConventionMatch(sourceName, schemaProperties);
+        const mapping = this.findNamingConventionMatch(
+          sourceName,
+          schemaProperties,
+        );
         if (mapping && !(mapping.targetName in targetParams)) {
           targetParams[mapping.targetName] = value;
         }
@@ -208,11 +215,13 @@ export class ParameterMapper {
     sourceName: string,
     targetSchemaProperties: string[],
   ): ParameterMapping | null {
-    const sortedRules = [...this.DEFAULT_MAPPINGS].sort((a, b) => b.priority - a.priority);
+    const sortedRules = [...this.DEFAULT_MAPPINGS].sort(
+      (a, b) => b.priority - a.priority,
+    );
 
     for (const rule of sortedRules) {
       if (rule.pattern.test(toolName)) {
-        const mapping = rule.mappings.find(m => m.sourceName === sourceName);
+        const mapping = rule.mappings.find((m) => m.sourceName === sourceName);
         if (mapping && targetSchemaProperties.includes(mapping.targetName)) {
           return mapping;
         }
@@ -232,7 +241,10 @@ export class ParameterMapper {
     // Check if this parameter is a known compatibility parameter for any schema property
     for (const rule of this.DEFAULT_MAPPINGS) {
       for (const mapping of rule.mappings) {
-        if (mapping.sourceName === paramName && schemaProperties.includes(mapping.targetName)) {
+        if (
+          mapping.sourceName === paramName &&
+          schemaProperties.includes(mapping.targetName)
+        ) {
           return true;
         }
       }
@@ -248,11 +260,13 @@ export class ParameterMapper {
     targetName: string,
     sourceParamNames: string[],
   ): string | null {
-    const sortedRules = [...this.DEFAULT_MAPPINGS].sort((a, b) => b.priority - a.priority);
+    const sortedRules = [...this.DEFAULT_MAPPINGS].sort(
+      (a, b) => b.priority - a.priority,
+    );
 
     for (const rule of sortedRules) {
       if (rule.pattern.test(toolName)) {
-        const mapping = rule.mappings.find(m => m.targetName === targetName);
+        const mapping = rule.mappings.find((m) => m.targetName === targetName);
         if (mapping && sourceParamNames.includes(mapping.sourceName)) {
           return mapping.sourceName;
         }
@@ -265,24 +279,27 @@ export class ParameterMapper {
   /**
    * Convert between different naming conventions
    */
-  private static convertNamingConvention(name: string, targetConvention: 'camel' | 'snake' | 'kebab'): string {
-    if (targetConvention === 'camel') {
+  private static convertNamingConvention(
+    name: string,
+    targetConvention: "camel" | "snake" | "kebab",
+  ): string {
+    if (targetConvention === "camel") {
       // Convert snake_case or kebab-case to camelCase
       return name.replace(/[_-]([a-z])/g, (_, letter) => letter.toUpperCase());
-    } else if (targetConvention === 'snake') {
+    } else if (targetConvention === "snake") {
       // Convert camelCase or kebab-case to snake_case
       // Handle camelCase: insert underscore before uppercase letters (except first letter)
-      const withUnderscores = name.replace(/([a-z])([A-Z])/g, '$1_$2');
+      const withUnderscores = name.replace(/([a-z])([A-Z])/g, "$1_$2");
       // Convert any hyphens to underscores
-      const withSnake = withUnderscores.replace(/-/g, '_');
+      const withSnake = withUnderscores.replace(/-/g, "_");
       // Convert to lowercase
       return withSnake.toLowerCase();
-    } else if (targetConvention === 'kebab') {
+    } else if (targetConvention === "kebab") {
       // Convert camelCase or snake_case to kebab-case
       // Handle camelCase: insert hyphen before uppercase letters (except first letter)
-      const withHyphens = name.replace(/([a-z])([A-Z])/g, '$1-$2');
+      const withHyphens = name.replace(/([a-z])([A-Z])/g, "$1-$2");
       // Convert any underscores to hyphens
-      const withKebab = withHyphens.replace(/_/g, '-');
+      const withKebab = withHyphens.replace(/_/g, "-");
       // Convert to lowercase
       return withKebab.toLowerCase();
     }
@@ -297,32 +314,45 @@ export class ParameterMapper {
     targetSchemaProperties: string[],
   ): ParameterMapping | null {
     // Try different naming convention conversions
-    const conventions: Array<'camel' | 'snake' | 'kebab'> = ['camel', 'snake', 'kebab'];
-    
+    const conventions: Array<"camel" | "snake" | "kebab"> = [
+      "camel",
+      "snake",
+      "kebab",
+    ];
+
     for (const targetConvention of conventions) {
-      const converted = this.convertNamingConvention(sourceName, targetConvention);
-      if (converted !== sourceName && targetSchemaProperties.includes(converted)) {
+      const converted = this.convertNamingConvention(
+        sourceName,
+        targetConvention,
+      );
+      if (
+        converted !== sourceName &&
+        targetSchemaProperties.includes(converted)
+      ) {
         return {
           sourceName,
           targetName: converted,
         };
       }
     }
-    
+
     // Also try converting target properties to match source naming style
     // Determine source naming convention
-    let sourceConvention: 'camel' | 'snake' | 'kebab' | 'unknown' = 'unknown';
-    if (sourceName.includes('_')) {
-      sourceConvention = 'snake';
-    } else if (sourceName.includes('-')) {
-      sourceConvention = 'kebab';
+    let sourceConvention: "camel" | "snake" | "kebab" | "unknown" = "unknown";
+    if (sourceName.includes("_")) {
+      sourceConvention = "snake";
+    } else if (sourceName.includes("-")) {
+      sourceConvention = "kebab";
     } else if (/[A-Z]/.test(sourceName)) {
-      sourceConvention = 'camel';
+      sourceConvention = "camel";
     }
-    
-    if (sourceConvention !== 'unknown') {
+
+    if (sourceConvention !== "unknown") {
       for (const targetProperty of targetSchemaProperties) {
-        const convertedTarget = this.convertNamingConvention(targetProperty, sourceConvention);
+        const convertedTarget = this.convertNamingConvention(
+          targetProperty,
+          sourceConvention,
+        );
         if (convertedTarget === sourceName) {
           return {
             sourceName,
@@ -331,7 +361,7 @@ export class ParameterMapper {
         }
       }
     }
-    
+
     return null;
   }
 
@@ -347,7 +377,7 @@ export class ParameterMapper {
    */
   static addMappingRules(rules: ParameterMappingRule[]): void {
     // Add new rules with priority 15 (higher than default rules)
-    const enhancedRules = rules.map(rule => ({
+    const enhancedRules = rules.map((rule) => ({
       ...rule,
       priority: rule.priority || 15, // Default priority higher than existing rules
     }));
@@ -360,7 +390,9 @@ export class ParameterMapper {
    */
   static clearCustomMappingRules(): void {
     // Keep only rules with priority <= 10 (default rules)
-    this.DEFAULT_MAPPINGS = this.DEFAULT_MAPPINGS.filter(rule => rule.priority <= 10);
+    this.DEFAULT_MAPPINGS = this.DEFAULT_MAPPINGS.filter(
+      (rule) => rule.priority <= 10,
+    );
   }
 
   /**
@@ -389,7 +421,7 @@ export class ParameterMapper {
    */
   static validateAndNormalize(
     toolName: string,
-    toolSchema: Tool['inputSchema'],
+    toolSchema: Tool["inputSchema"],
     params: Record<string, unknown>,
   ): { normalized: Record<string, unknown>; warnings: string[] } {
     const warnings: string[] = [];
@@ -405,7 +437,11 @@ export class ParameterMapper {
     for (const [sourceName] of Object.entries(params)) {
       if (!schemaProperties.includes(sourceName)) {
         // Check if this parameter was mapped to a schema property
-        const mapping = this.findMapping(toolName, sourceName, schemaProperties);
+        const mapping = this.findMapping(
+          toolName,
+          sourceName,
+          schemaProperties,
+        );
         if (mapping && this.config.logWarnings) {
           // This is a compatibility parameter that was mapped
           mappedCompatibilityParams.add(sourceName);
@@ -416,13 +452,18 @@ export class ParameterMapper {
     if (toolSchema.additionalProperties === false) {
       for (const paramName of Object.keys(normalized)) {
         if (!schemaProperties.includes(paramName)) {
-          const isCompatibilityParam = this.isCompatibilityParameter(paramName, schemaProperties);
+          const isCompatibilityParam = this.isCompatibilityParameter(
+            paramName,
+            schemaProperties,
+          );
 
           // Handle based on validation level
           switch (this.config.validationLevel) {
             case ValidationLevel.STRICT:
               // Strict: reject all unknown parameters
-              warnings.push(`Unknown parameter "${paramName}" for tool "${toolName}"`);
+              warnings.push(
+                `Unknown parameter "${paramName}" for tool "${toolName}"`,
+              );
               // Remove unknown parameter from normalized result
               delete normalized[paramName];
               break;
@@ -430,16 +471,22 @@ export class ParameterMapper {
             case ValidationLevel.COMPATIBLE:
               // Compatible: allow only compatibility parameters
               if (!isCompatibilityParam) {
-                warnings.push(`Unknown parameter "${paramName}" for tool "${toolName}"`);
+                warnings.push(
+                  `Unknown parameter "${paramName}" for tool "${toolName}"`,
+                );
               } else if (this.config.logWarnings) {
-                warnings.push(`Added compatibility parameter "${paramName}" for tool "${toolName}"`);
+                warnings.push(
+                  `Added compatibility parameter "${paramName}" for tool "${toolName}"`,
+                );
               }
               break;
 
             case ValidationLevel.LENIENT:
               // Lenient: allow all parameters
               if (this.config.logWarnings) {
-                warnings.push(`Allowing unknown parameter "${paramName}" for tool "${toolName}" (lenient mode)`);
+                warnings.push(
+                  `Allowing unknown parameter "${paramName}" for tool "${toolName}" (lenient mode)`,
+                );
               }
               break;
           }
@@ -451,7 +498,9 @@ export class ParameterMapper {
     if (this.config.enforceRequired && toolSchema.required) {
       for (const requiredParam of toolSchema.required) {
         if (!(requiredParam in normalized) && !(requiredParam in params)) {
-          warnings.push(`Missing required parameter "${requiredParam}" for tool "${toolName}"`);
+          warnings.push(
+            `Missing required parameter "${requiredParam}" for tool "${toolName}"`,
+          );
         }
       }
     }
@@ -463,7 +512,7 @@ export class ParameterMapper {
    * Filter parameters to only include those that match the schema
    */
   static filterSchemaParameters(
-    toolSchema: Tool['inputSchema'],
+    toolSchema: Tool["inputSchema"],
     params: Record<string, unknown>,
   ): Record<string, unknown> {
     const schemaProperties = Object.keys(toolSchema.properties || {});
@@ -483,7 +532,7 @@ export class ParameterMapper {
    */
   static getCompatibilityParameters(
     toolName: string,
-    toolSchema: Tool['inputSchema'],
+    toolSchema: Tool["inputSchema"],
     params: Record<string, unknown>,
   ): Record<string, unknown> {
     const schemaProperties = Object.keys(toolSchema.properties || {});
@@ -492,7 +541,11 @@ export class ParameterMapper {
     for (const [sourceName, value] of Object.entries(params)) {
       if (!schemaProperties.includes(sourceName)) {
         // Check if this parameter is a known compatibility parameter
-        const mapping = this.findMapping(toolName, sourceName, schemaProperties);
+        const mapping = this.findMapping(
+          toolName,
+          sourceName,
+          schemaProperties,
+        );
         if (mapping) {
           compatibilityParams[sourceName] = value;
         }

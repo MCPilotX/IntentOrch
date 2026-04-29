@@ -11,9 +11,9 @@
  * 4. Non-blocking - Runs in background without blocking user requests
  */
 
-import { EventEmitter } from 'events';
-import { logger } from '../core/logger';
-import { getKernelConfig } from './config';
+import { EventEmitter } from "events";
+import { logger } from "../core/logger.js";
+import { getKernelConfig } from "./config.js";
 
 // ==================== Type Definitions ====================
 
@@ -67,7 +67,9 @@ export class HealthCheckScheduler extends EventEmitter {
     healthCheckFn: () => Promise<boolean>,
   ): void {
     if (this.serverCheckers.has(serverName)) {
-      logger.debug(`[HealthCheckScheduler] Server "${serverName}" already registered, updating check function`);
+      logger.debug(
+        `[HealthCheckScheduler] Server "${serverName}" already registered, updating check function`,
+      );
     }
 
     const checker = new ServerHealthChecker(
@@ -76,19 +78,21 @@ export class HealthCheckScheduler extends EventEmitter {
       this.config,
     );
 
-    checker.on('stateChange', (result: HealthCheckResult) => {
+    checker.on("stateChange", (result: HealthCheckResult) => {
       this.lastResults.set(serverName, result);
-      this.emit('stateChange', result);
+      this.emit("stateChange", result);
     });
 
-    checker.on('degraded', (result: HealthCheckResult) => {
-      logger.warn(`[HealthCheckScheduler] Server "${serverName}" marked as DEGRADED after ${result.consecutiveFailures} consecutive failures`);
-      this.emit('degraded', result);
+    checker.on("degraded", (result: HealthCheckResult) => {
+      logger.warn(
+        `[HealthCheckScheduler] Server "${serverName}" marked as DEGRADED after ${result.consecutiveFailures} consecutive failures`,
+      );
+      this.emit("degraded", result);
     });
 
-    checker.on('recovered', (result: HealthCheckResult) => {
+    checker.on("recovered", (result: HealthCheckResult) => {
       logger.info(`[HealthCheckScheduler] Server "${serverName}" RECOVERED`);
-      this.emit('recovered', result);
+      this.emit("recovered", result);
     });
 
     this.serverCheckers.set(serverName, checker);
@@ -113,12 +117,14 @@ export class HealthCheckScheduler extends EventEmitter {
    */
   start(): void {
     if (this.running) {
-      logger.debug('[HealthCheckScheduler] Already running');
+      logger.debug("[HealthCheckScheduler] Already running");
       return;
     }
 
     this.running = true;
-    logger.info(`[HealthCheckScheduler] Started with interval ${this.config.interval}ms`);
+    logger.info(
+      `[HealthCheckScheduler] Started with interval ${this.config.interval}ms`,
+    );
 
     // Run first check immediately
     this.runAllChecks();
@@ -129,7 +135,7 @@ export class HealthCheckScheduler extends EventEmitter {
     }, this.config.interval);
 
     // Allow the timer to not block process exit
-    if (this.timer && typeof this.timer === 'object' && 'unref' in this.timer) {
+    if (this.timer && typeof this.timer === "object" && "unref" in this.timer) {
       this.timer.unref();
     }
   }
@@ -151,7 +157,7 @@ export class HealthCheckScheduler extends EventEmitter {
       checker.stop();
     }
 
-    logger.info('[HealthCheckScheduler] Stopped');
+    logger.info("[HealthCheckScheduler] Stopped");
   }
 
   /**
@@ -163,12 +169,17 @@ export class HealthCheckScheduler extends EventEmitter {
 
     for (const [serverName, checker] of this.serverCheckers) {
       promises.push(
-        checker.check().then(result => {
-          results.set(serverName, result);
-          this.lastResults.set(serverName, result);
-        }).catch(error => {
-          logger.error(`[HealthCheckScheduler] Error checking "${serverName}": ${error.message}`);
-        }),
+        checker
+          .check()
+          .then((result) => {
+            results.set(serverName, result);
+            this.lastResults.set(serverName, result);
+          })
+          .catch((error) => {
+            logger.error(
+              `[HealthCheckScheduler] Error checking "${serverName}": ${error.message}`,
+            );
+          }),
       );
     }
 
@@ -182,7 +193,9 @@ export class HealthCheckScheduler extends EventEmitter {
   async checkServer(serverName: string): Promise<HealthCheckResult | null> {
     const checker = this.serverCheckers.get(serverName);
     if (!checker) {
-      logger.warn(`[HealthCheckScheduler] No checker registered for "${serverName}"`);
+      logger.warn(
+        `[HealthCheckScheduler] No checker registered for "${serverName}"`,
+      );
       return null;
     }
 
@@ -250,7 +263,7 @@ export class HealthCheckScheduler extends EventEmitter {
    */
   updateConfig(config: Partial<HealthCheckConfig>): void {
     this.config = { ...this.config, ...config };
-    logger.debug('[HealthCheckScheduler] Configuration updated');
+    logger.debug("[HealthCheckScheduler] Configuration updated");
 
     // Restart with new interval if running
     if (this.running) {
@@ -291,7 +304,10 @@ class ServerHealthChecker extends EventEmitter {
 
     try {
       // Run the health check function with timeout
-      alive = await this.executeWithTimeout(this.healthCheckFn(), this.config.checkTimeout);
+      alive = await this.executeWithTimeout(
+        this.healthCheckFn(),
+        this.config.checkTimeout,
+      );
     } catch (error) {
       alive = false;
     }
@@ -312,10 +328,10 @@ class ServerHealthChecker extends EventEmitter {
           lastSuccess: this.lastSuccess,
           lastFailure: this.lastFailure,
           consecutiveFailures: 0,
-          circuitState: 'CLOSED',
+          circuitState: "CLOSED",
         };
-        this.emit('recovered', result);
-        this.emit('stateChange', result);
+        this.emit("recovered", result);
+        this.emit("stateChange", result);
         return result;
       }
     } else {
@@ -323,7 +339,10 @@ class ServerHealthChecker extends EventEmitter {
       this.lastFailure = Date.now();
 
       // Check if should be marked as degraded
-      if (!this.isDegraded && this.consecutiveFailures >= this.config.failureThreshold) {
+      if (
+        !this.isDegraded &&
+        this.consecutiveFailures >= this.config.failureThreshold
+      ) {
         this.isDegraded = true;
         const result: HealthCheckResult = {
           serverName: this.serverName,
@@ -332,10 +351,10 @@ class ServerHealthChecker extends EventEmitter {
           lastSuccess: this.lastSuccess,
           lastFailure: this.lastFailure,
           consecutiveFailures: this.consecutiveFailures,
-          circuitState: 'OPEN',
+          circuitState: "OPEN",
         };
-        this.emit('degraded', result);
-        this.emit('stateChange', result);
+        this.emit("degraded", result);
+        this.emit("stateChange", result);
         return result;
       }
     }
@@ -347,28 +366,31 @@ class ServerHealthChecker extends EventEmitter {
       lastSuccess: this.lastSuccess,
       lastFailure: this.lastFailure,
       consecutiveFailures: this.consecutiveFailures,
-      circuitState: alive ? 'CLOSED' : 'OPEN',
+      circuitState: alive ? "CLOSED" : "OPEN",
     };
 
-    this.emit('stateChange', result);
+    this.emit("stateChange", result);
     return result;
   }
 
   /**
    * Execute a promise with timeout
    */
-  private async executeWithTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+  private async executeWithTimeout<T>(
+    promise: Promise<T>,
+    timeoutMs: number,
+  ): Promise<T> {
     return new Promise<T>((resolve, reject) => {
       const timeoutId = setTimeout(() => {
         reject(new Error(`Health check timeout after ${timeoutMs}ms`));
       }, timeoutMs);
 
       promise
-        .then(result => {
+        .then((result) => {
           clearTimeout(timeoutId);
           resolve(result);
         })
-        .catch(error => {
+        .catch((error) => {
           clearTimeout(timeoutId);
           reject(error);
         });

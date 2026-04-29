@@ -2,6 +2,6 @@
  * Process Manager Module Exports
  */
 
-export { ProcessManager } from './manager';
-export { ProcessStoreManager } from './store';
-export type { ProcessInfo, ProcessStore } from './types';
+export { ProcessManager } from "./manager.js";
+export { ProcessStoreManager } from "./store.js";
+export type { ProcessInfo, ProcessStore } from "./types.js";

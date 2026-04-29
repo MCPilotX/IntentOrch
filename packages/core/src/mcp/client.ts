@@ -1,4 +1,4 @@
-import { logger } from "../core/logger";
+import { logger } from "../core/logger.js";
 /**
  * MCP Client Core Class
  * Provides complete MCP protocol client functionality
@@ -7,8 +7,8 @@ import { logger } from "../core/logger";
  * Uses a simple stdio-based transport implementation.
  */
 
-import { EventEmitter } from 'events';
-import { spawn, ChildProcess } from 'child_process';
+import { EventEmitter } from "events";
+import { spawn, ChildProcess } from "child_process";
 import {
   MCPClientConfig,
   JSONRPCRequest,
@@ -23,19 +23,29 @@ import {
   MCPEvent,
   MCPEventType,
   MCP_METHODS,
-} from './types';
-import { ParameterMapper } from './parameter-mapper';
-import { ErrorBoundary, globalErrorBoundary } from '../kernel/error-boundary';
+} from "./types.js";
+import { ParameterMapper } from "./parameter-mapper.js";
+import {
+  ErrorBoundary,
+  globalErrorBoundary,
+} from "../kernel/error-boundary.js";
 
 // ==================== Simple Stdio Transport ====================
 
 class StdioTransport extends EventEmitter {
   private process: ChildProcess | null = null;
-  private buffer: string = '';
+  private buffer: string = "";
   private _connected: boolean = false;
   private _existingProcess: ChildProcess | null = null;
 
-  constructor(private config: { command: string; args?: string[]; env?: Record<string, string>; existingProcess?: ChildProcess }) {
+  constructor(
+    private config: {
+      command: string;
+      args?: string[];
+      env?: Record<string, string>;
+      existingProcess?: ChildProcess;
+    },
+  ) {
     super();
     this._existingProcess = config.existingProcess || null;
   }
@@ -45,35 +55,35 @@ class StdioTransport extends EventEmitter {
 
     // Helper to setup listeners for a process
     const setupProcessListeners = (child: ChildProcess) => {
-      child.stdout?.on('data', (data: Buffer) => {
+      child.stdout?.on("data", (data: Buffer) => {
         this.buffer += data.toString();
         this.processBuffer();
       });
 
-      child.stderr?.on('data', (data: Buffer) => {
+      child.stderr?.on("data", (data: Buffer) => {
         // MCP servers often log to stderr, forward as debug
         const msg = data.toString().trim();
         if (msg) {
-          this.emit('stderr', msg);
+          this.emit("stderr", msg);
         }
       });
 
-      child.on('error', (error: Error) => {
+      child.on("error", (error: Error) => {
         this._connected = false;
-        this.emit('error', error);
+        this.emit("error", error);
       });
 
-      child.on('exit', (code: number | null) => {
+      child.on("exit", (code: number | null) => {
         this._connected = false;
-        this.emit('disconnected');
+        this.emit("disconnected");
         if (code !== 0 && code !== null) {
-          this.emit('error', new Error(`Process exited with code ${code}`));
+          this.emit("error", new Error(`Process exited with code ${code}`));
         }
       });
 
-      child.on('close', () => {
+      child.on("close", () => {
         this._connected = false;
-        this.emit('disconnected');
+        this.emit("disconnected");
       });
     };
 
@@ -82,15 +92,15 @@ class StdioTransport extends EventEmitter {
       this.process = this._existingProcess;
       setupProcessListeners(this.process);
       this._connected = true;
-      this.emit('connected');
+      this.emit("connected");
       return;
     }
 
     return new Promise((resolve, reject) => {
       try {
         const child = spawn(this.config.command, this.config.args || [], {
-          stdio: ['pipe', 'pipe', 'pipe'],
-          env: this.config.env || process.env as Record<string, string>,
+          stdio: ["pipe", "pipe", "pipe"],
+          env: this.config.env || (process.env as Record<string, string>),
           shell: false,
         });
 
@@ -101,10 +111,14 @@ class StdioTransport extends EventEmitter {
         setTimeout(() => {
           if (child.exitCode === null) {
             this._connected = true;
-            this.emit('connected');
+            this.emit("connected");
             resolve();
           } else {
-            reject(new Error(`Process exited immediately with code ${child.exitCode}`));
+            reject(
+              new Error(
+                `Process exited immediately with code ${child.exitCode}`,
+              ),
+            );
           }
         }, 500);
       } catch (error) {
@@ -122,12 +136,12 @@ class StdioTransport extends EventEmitter {
         this._connected = false;
         return;
       }
-      
-      this.process.kill('SIGTERM');
+
+      this.process.kill("SIGTERM");
       // Give it a moment to exit gracefully
-      await new Promise(resolve => setTimeout(resolve, 500));
+      await new Promise((resolve) => setTimeout(resolve, 500));
       if (this.process.exitCode === null) {
-        this.process.kill('SIGKILL');
+        this.process.kill("SIGKILL");
       }
       this.process = null;
     }
@@ -135,22 +149,24 @@ class StdioTransport extends EventEmitter {
   }
 
   isConnected(): boolean {
-    return this._connected && this.process !== null && this.process.exitCode === null;
+    return (
+      this._connected && this.process !== null && this.process.exitCode === null
+    );
   }
 
   async send(message: any): Promise<void> {
     if (!this.process?.stdin) {
-      throw new Error('Transport not connected');
+      throw new Error("Transport not connected");
     }
 
-    const data = JSON.stringify(message) + '\n';
+    const data = JSON.stringify(message) + "\n";
     this.process.stdin.write(data);
   }
 
   private processBuffer(): void {
-    const lines = this.buffer.split('\n');
+    const lines = this.buffer.split("\n");
     // Keep the last incomplete line in the buffer
-    this.buffer = lines.pop() || '';
+    this.buffer = lines.pop() || "";
 
     for (const line of lines) {
       const trimmed = line.trim();
@@ -158,10 +174,10 @@ class StdioTransport extends EventEmitter {
 
       try {
         const message = JSON.parse(trimmed);
-        this.emit('message', message);
+        this.emit("message", message);
       } catch (error) {
         // Non-JSON output from stderr-like messages
-        this.emit('stderr', trimmed);
+        this.emit("stderr", trimmed);
       }
     }
   }
@@ -174,11 +190,14 @@ export class MCPClient extends EventEmitter {
   private transport: StdioTransport;
   private connected: boolean = false;
   private requestId: number = 0;
-  private pendingRequests: Map<string | number, {
-    resolve: (value: any) => void;
-    reject: (error: Error) => void;
-    timeout: NodeJS.Timeout;
-  }> = new Map();
+  private pendingRequests: Map<
+    string | number,
+    {
+      resolve: (value: any) => void;
+      reject: (error: Error) => void;
+      timeout: NodeJS.Timeout;
+    }
+  > = new Map();
 
   // State
   private tools: Tool[] = [];
@@ -196,7 +215,7 @@ export class MCPClient extends EventEmitter {
     };
 
     this.transport = new StdioTransport({
-      command: config.transport.command || 'npx',
+      command: config.transport.command || "npx",
       args: config.transport.args || [],
       env: config.transport.env as Record<string, string> | undefined,
       existingProcess: config.transport.existingProcess,
@@ -213,7 +232,7 @@ export class MCPClient extends EventEmitter {
       async () => {
         await this.transport.connect();
         this.connected = true;
-        this.emitEvent('connected');
+        this.emitEvent("connected");
 
         if (this.config.autoConnect) {
           await this.refreshTools();
@@ -222,20 +241,24 @@ export class MCPClient extends EventEmitter {
         // Health check
         try {
           const tools = await this.listTools();
-          logger.debug(`[MCPClient] Health check passed: ${tools.length} tools available`);
+          logger.debug(
+            `[MCPClient] Health check passed: ${tools.length} tools available`,
+          );
         } catch (healthError: any) {
-          logger.warn(`[MCPClient] Health check failed: ${healthError.message}`);
+          logger.warn(
+            `[MCPClient] Health check failed: ${healthError.message}`,
+          );
         }
       },
       {
         serverName: this.config.serverName,
-        operationName: 'connect',
+        operationName: "connect",
       },
     );
 
     if (!result.success) {
-      this.emitEvent('error', result.error);
-      throw result.error || new Error('Connection failed');
+      this.emitEvent("error", result.error);
+      throw result.error || new Error("Connection failed");
     }
   }
 
@@ -245,16 +268,16 @@ export class MCPClient extends EventEmitter {
     try {
       await this.transport.disconnect();
     } catch (error) {
-      this.emitEvent('error', error);
+      this.emitEvent("error", error);
       throw error;
     } finally {
       this.connected = false;
       this.pendingRequests.forEach(({ reject, timeout }) => {
         clearTimeout(timeout);
-        reject(new Error('Disconnected'));
+        reject(new Error("Disconnected"));
       });
       this.pendingRequests.clear();
-      this.emitEvent('disconnected');
+      this.emitEvent("disconnected");
     }
   }
 
@@ -270,32 +293,42 @@ export class MCPClient extends EventEmitter {
         const response = await this.sendRequest(MCP_METHODS.TOOLS_LIST);
         const toolList = response as ToolList;
         this.tools = toolList.tools;
-        this.emitEvent('tools_updated', this.tools);
+        this.emitEvent("tools_updated", this.tools);
         return this.tools;
       },
       {
         serverName: this.config.serverName,
-        operationName: 'listTools',
+        operationName: "listTools",
       },
     );
 
     if (!result.success) {
-      throw result.error || new Error('Failed to list tools');
+      throw result.error || new Error("Failed to list tools");
     }
 
     return result.result!;
   }
 
-  async callTool(toolName: string, arguments_: Record<string, any>): Promise<ToolResult> {
+  async callTool(
+    toolName: string,
+    arguments_: Record<string, any>,
+  ): Promise<ToolResult> {
     const tool = this.findTool(toolName);
     let mappedArguments = arguments_;
 
     if (tool) {
       try {
-        const { normalized } = ParameterMapper.validateAndNormalize(toolName, tool.inputSchema, arguments_);
+        const { normalized } = ParameterMapper.validateAndNormalize(
+          toolName,
+          tool.inputSchema,
+          arguments_,
+        );
         mappedArguments = normalized;
       } catch (error) {
-        logger.warn(`Parameter mapping failed for tool "${toolName}":`, error instanceof Error ? error.message : String(error));
+        logger.warn(
+          `Parameter mapping failed for tool "${toolName}":`,
+          error instanceof Error ? error.message : String(error),
+        );
       }
     }
 
@@ -330,7 +363,9 @@ export class MCPClient extends EventEmitter {
             });
 
             if (response === undefined || response === null) {
-              lastError = new Error(`Tool "${toolName}" execution failed: MCP server returned empty response`);
+              lastError = new Error(
+                `Tool "${toolName}" execution failed: MCP server returned empty response`,
+              );
               if (attempt < maxRetries) {
                 await this.delay(1000 * attempt);
                 continue;
@@ -340,8 +375,10 @@ export class MCPClient extends EventEmitter {
 
             const toolResult = response as ToolResult;
 
-            if (typeof toolResult !== 'object' || toolResult === null) {
-              lastError = new Error(`Tool "${toolName}" execution failed: invalid response format`);
+            if (typeof toolResult !== "object" || toolResult === null) {
+              lastError = new Error(
+                `Tool "${toolName}" execution failed: invalid response format`,
+              );
               if (attempt < maxRetries) {
                 await this.delay(1000 * attempt);
                 continue;
@@ -350,13 +387,18 @@ export class MCPClient extends EventEmitter {
             }
 
             if (toolResult.isError) {
-              const errorMessage = toolResult.content?.[0]?.text || 'Tool execution failed';
+              const errorMessage =
+                toolResult.content?.[0]?.text || "Tool execution failed";
               if (this.isRetryableError(errorMessage) && attempt < maxRetries) {
-                lastError = new Error(`Tool "${toolName}" execution failed: ${errorMessage}`);
+                lastError = new Error(
+                  `Tool "${toolName}" execution failed: ${errorMessage}`,
+                );
                 await this.delay(1000 * attempt);
                 continue;
               }
-              throw new Error(`Tool "${toolName}" execution failed: ${errorMessage}`);
+              throw new Error(
+                `Tool "${toolName}" execution failed: ${errorMessage}`,
+              );
             }
 
             return toolResult;
@@ -368,7 +410,12 @@ export class MCPClient extends EventEmitter {
           }
         }
 
-        throw lastError || new Error(`Tool "${toolName}" execution failed after ${maxRetries} attempts`);
+        throw (
+          lastError ||
+          new Error(
+            `Tool "${toolName}" execution failed after ${maxRetries} attempts`,
+          )
+        );
       },
       {
         serverName: this.config.serverName,
@@ -393,7 +440,7 @@ export class MCPClient extends EventEmitter {
   }
 
   findTool(name: string): Tool | undefined {
-    return this.tools.find(tool => tool.name === name);
+    return this.tools.find((tool) => tool.name === name);
   }
 
   // ==================== Resource Related Methods ====================
@@ -404,17 +451,17 @@ export class MCPClient extends EventEmitter {
         const response = await this.sendRequest(MCP_METHODS.RESOURCES_LIST);
         const resourceList = response as ResourceList;
         this.resources = resourceList.resources;
-        this.emitEvent('resources_updated', this.resources);
+        this.emitEvent("resources_updated", this.resources);
         return this.resources;
       },
       {
         serverName: this.config.serverName,
-        operationName: 'listResources',
+        operationName: "listResources",
       },
     );
 
     if (!result.success) {
-      throw result.error || new Error('Failed to list resources');
+      throw result.error || new Error("Failed to list resources");
     }
 
     return result.result!;
@@ -423,7 +470,9 @@ export class MCPClient extends EventEmitter {
   async readResource(uri: string): Promise<any> {
     const result = await globalErrorBoundary.execute(
       async () => {
-        const response = await this.sendRequest(MCP_METHODS.RESOURCES_READ, { uri });
+        const response = await this.sendRequest(MCP_METHODS.RESOURCES_READ, {
+          uri,
+        });
         return response;
       },
       {
@@ -455,23 +504,26 @@ export class MCPClient extends EventEmitter {
         const response = await this.sendRequest(MCP_METHODS.PROMPTS_LIST);
         const promptList = response as PromptList;
         this.prompts = promptList.prompts;
-        this.emitEvent('prompts_updated', this.prompts);
+        this.emitEvent("prompts_updated", this.prompts);
         return this.prompts;
       },
       {
         serverName: this.config.serverName,
-        operationName: 'listPrompts',
+        operationName: "listPrompts",
       },
     );
 
     if (!result.success) {
-      throw result.error || new Error('Failed to list prompts');
+      throw result.error || new Error("Failed to list prompts");
     }
 
     return result.result!;
   }
 
-  async getPrompt(name: string, arguments_?: Record<string, any>): Promise<any> {
+  async getPrompt(
+    name: string,
+    arguments_?: Record<string, any>,
+  ): Promise<any> {
     const result = await globalErrorBoundary.execute(
       async () => {
         const response = await this.sendRequest(MCP_METHODS.PROMPTS_GET, {
@@ -505,12 +557,12 @@ export class MCPClient extends EventEmitter {
 
   private async sendRequest(method: string, params?: any): Promise<any> {
     if (!this.isConnected()) {
-      throw new Error('Not connected to MCP server');
+      throw new Error("Not connected to MCP server");
     }
 
     const requestId = this.generateRequestId();
     const request: JSONRPCRequest = {
-      jsonrpc: '2.0',
+      jsonrpc: "2.0",
       id: requestId,
       method,
       params,
@@ -524,7 +576,7 @@ export class MCPClient extends EventEmitter {
 
       this.pendingRequests.set(requestId, { resolve, reject, timeout });
 
-      this.transport.send(request).catch(error => {
+      this.transport.send(request).catch((error) => {
         this.pendingRequests.delete(requestId);
         clearTimeout(timeout);
         reject(error);
@@ -539,15 +591,15 @@ export class MCPClient extends EventEmitter {
   // ==================== Transport Layer Event Handling ====================
 
   private setupTransportListeners(): void {
-    this.transport.on('message', this.handleTransportMessage.bind(this));
-    this.transport.on('error', this.handleTransportError.bind(this));
-    this.transport.on('connected', () => {
+    this.transport.on("message", this.handleTransportMessage.bind(this));
+    this.transport.on("error", this.handleTransportError.bind(this));
+    this.transport.on("connected", () => {
       this.connected = true;
-      this.emitEvent('connected');
+      this.emitEvent("connected");
     });
-    this.transport.on('disconnected', () => {
+    this.transport.on("disconnected", () => {
       this.connected = false;
-      this.emitEvent('disconnected');
+      this.emitEvent("disconnected");
     });
   }
 
@@ -555,18 +607,20 @@ export class MCPClient extends EventEmitter {
     try {
       const response = message as JSONRPCResponse;
 
-      if (!response || typeof response !== 'object') {
-        logger.error('[MCPClient] Invalid response received:', message);
+      if (!response || typeof response !== "object") {
+        logger.error("[MCPClient] Invalid response received:", message);
         return;
       }
 
       if (response.id && this.pendingRequests.has(response.id)) {
-        const { resolve, reject, timeout } = this.pendingRequests.get(response.id)!;
+        const { resolve, reject, timeout } = this.pendingRequests.get(
+          response.id,
+        )!;
         clearTimeout(timeout);
         this.pendingRequests.delete(response.id);
 
         if (response.error) {
-          const errorMessage = response.error.message || 'Unknown error';
+          const errorMessage = response.error.message || "Unknown error";
           const error = new Error(errorMessage);
           (error as any).code = response.error.code;
           (error as any).data = response.error.data;
@@ -578,17 +632,17 @@ export class MCPClient extends EventEmitter {
         this.handleNotification(response);
       }
     } catch (error) {
-      this.emitEvent('error', error);
+      this.emitEvent("error", error);
     }
   }
 
   private handleTransportError(error: Error): void {
-    this.emitEvent('error', error);
+    this.emitEvent("error", error);
   }
 
   private handleNotification(response: JSONRPCResponse): void {
     if (response.result) {
-      logger.info('Received notification:', response);
+      logger.info("Received notification:", response);
     }
   }
 
@@ -601,21 +655,28 @@ export class MCPClient extends EventEmitter {
       timestamp: Date.now(),
     };
     this.emit(type, event);
-    this.emit('event', event);
+    this.emit("event", event);
   }
 
   // ==================== Utility Methods ====================
 
   private delay(ms: number): Promise<void> {
-    return new Promise(resolve => setTimeout(resolve, ms));
+    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
   private isRetryableError(errorMessage: string): boolean {
     const retryablePatterns = [
-      /timeout/i, /network/i, /connection/i, /temporarily/i,
-      /busy/i, /rate limit/i, /too many requests/i, /server error/i, /internal error/i
+      /timeout/i,
+      /network/i,
+      /connection/i,
+      /temporarily/i,
+      /busy/i,
+      /rate limit/i,
+      /too many requests/i,
+      /server error/i,
+      /internal error/i,
     ];
-    return retryablePatterns.some(pattern => pattern.test(errorMessage));
+    return retryablePatterns.some((pattern) => pattern.test(errorMessage));
   }
 
   async withRetry<T>(operation: () => Promise<T>): Promise<T> {
@@ -626,7 +687,12 @@ export class MCPClient extends EventEmitter {
       } catch (error) {
         lastError = error as Error;
         if (attempt < this.config.maxRetries!) {
-          await new Promise(resolve => setTimeout(resolve, Math.min(1000 * Math.pow(2, attempt - 1), 10000)));
+          await new Promise((resolve) =>
+            setTimeout(
+              resolve,
+              Math.min(1000 * Math.pow(2, attempt - 1), 10000),
+            ),
+          );
         }
       }
     }

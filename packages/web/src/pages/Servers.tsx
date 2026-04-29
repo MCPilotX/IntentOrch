@@ -44,9 +44,9 @@ const DEFAULT_CLAUDE_CONFIG = `{
 
 // Tab definitions
 const TABS = [
-  { id: 'mcp-standard', label: 'MCP 标准配置', icon: FileJson },
-  { id: 'github', label: 'GitHub Hub', icon: Globe },
-  { id: 'gitee', label: 'Gitee Hub', icon: Globe },
+  { id: 'mcp-standard', labelKey: 'servers.tabMCPStandard', icon: FileJson },
+  { id: 'github', labelKey: 'servers.githubHub', icon: Globe },
+  { id: 'gitee', labelKey: 'servers.giteeHub', icon: Globe },
 ] as const;
 
 type TabId = typeof TABS[number]['id'];
@@ -310,7 +310,7 @@ export default function Servers() {
                   }`}
                 >
                   <Icon className="h-4 w-4" />
-                  <span>{tab.label}</span>
+                  <span>{t(tab.labelKey)}</span>
                 </button>
               );
             })}
@@ -325,19 +325,16 @@ export default function Servers() {
               <div className="flex items-center space-x-2">
                 <Terminal className="h-5 w-5 text-primary-500" />
                 <h3 className="text-lg font-medium text-gray-900 dark:text-white">
-                  Import Claude Desktop Config
+                  {t('servers.importConfig')}
                 </h3>
               </div>
               
               <p className="text-sm text-gray-600 dark:text-gray-400">
-                Paste your Claude Desktop MCP configuration below. The system will automatically parse it and convert each server entry into a compatible format.
+                {t('servers.importConfigDescription')}
               </p>
               
               <div className="p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
-                <p className="text-xs text-blue-700 dark:text-blue-400">
-                  <strong>Format:</strong> Claude Desktop uses <code className="bg-blue-100 dark:bg-blue-900/40 px-1 rounded">mcpServers</code> field with server name, command, args, and env.
-                  Each server will be automatically converted to IntentOrch manifest format.
-                </p>
+                <p className="text-xs text-blue-700 dark:text-blue-400" dangerouslySetInnerHTML={{ __html: t('servers.importConfigFormat') }} />
               </div>
               
               <textarea
@@ -377,7 +374,7 @@ export default function Servers() {
                   disabled={importConfigMutation.isPending || !importConfigText.trim()}
                   className="px-6 py-2 text-sm bg-primary-500 text-white rounded-lg hover:bg-primary-600 disabled:opacity-50 transition-colors"
                 >
-                  {importConfigMutation.isPending ? 'Importing...' : 'Import Config'}
+                  {importConfigMutation.isPending ? t('servers.importing') : t('servers.importConfig')}
                 </button>
               </div>
             </div>
@@ -389,7 +386,7 @@ export default function Servers() {
               <div className="flex items-center space-x-2">
                 <Globe className="h-5 w-5 text-primary-500" />
                 <h3 className="text-lg font-medium text-gray-900 dark:text-white">
-                  GitHub Hub
+                  {t('servers.githubHub')}
                 </h3>
               </div>
               
@@ -414,15 +411,15 @@ export default function Servers() {
                     disabled={searchLoading}
                     className="px-4 py-2 bg-primary-500 text-white rounded-lg hover:bg-primary-600 disabled:opacity-50"
                   >
-                    {searchLoading ? 'Searching...' : t('common.search')}
+                    {searchLoading ? t('common.searching') : t('common.search')}
                   </button>
                 </div>
                 
                 {showSearchResults && (
                   <div className="mt-3 border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden bg-gray-50 dark:bg-gray-900/30">
                     <div className="px-4 py-2 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center">
-                      <span className="text-sm font-medium">Search Results ({searchResults.length})</span>
-                      <button onClick={() => setShowSearchResults(false)} className="text-xs text-primary-500">Close</button>
+                      <span className="text-sm font-medium">{t('common.search.results')} ({searchResults.length})</span>
+                      <button onClick={() => setShowSearchResults(false)} className="text-xs text-primary-500">{t('common.close')}</button>
                     </div>
                     <div className="max-h-60 overflow-auto divide-y divide-gray-200 dark:divide-gray-700">
                       {searchResults.map((service, index) => (
@@ -435,7 +432,7 @@ export default function Servers() {
                           {service.description && <div className="text-sm text-gray-500 truncate">{service.description}</div>}
                         </div>
                       ))}
-                      {searchResults.length === 0 && !searchLoading && <div className="p-4 text-center text-gray-500">No results found</div>}
+                      {searchResults.length === 0 && !searchLoading && <div className="p-4 text-center text-gray-500">{t('common.search.noResults')}</div>}
                     </div>
                   </div>
                 )}
@@ -459,7 +456,7 @@ export default function Servers() {
                     disabled={pullServerMutation.isPending || !pullUrl.trim()}
                     className="px-6 py-2 bg-primary-500 text-white rounded-lg hover:bg-primary-600 disabled:opacity-50"
                   >
-                    {pullServerMutation.isPending ? 'Pulling...' : t('servers.pullButton')}
+                    {pullServerMutation.isPending ? t('servers.pullingButton') : t('servers.pullButton')}
                   </button>
                 </div>
               </div>
@@ -486,7 +483,7 @@ export default function Servers() {
               <div className="flex items-center space-x-2">
                 <Globe className="h-5 w-5 text-primary-500" />
                 <h3 className="text-lg font-medium text-gray-900 dark:text-white">
-                  Gitee Hub
+                  {t('servers.giteeHub')}
                 </h3>
               </div>
               
@@ -511,15 +508,15 @@ export default function Servers() {
                     disabled={searchLoading}
                     className="px-4 py-2 bg-primary-500 text-white rounded-lg hover:bg-primary-600 disabled:opacity-50"
                   >
-                    {searchLoading ? 'Searching...' : t('common.search')}
+                    {searchLoading ? t('common.searching') : t('common.search')}
                   </button>
                 </div>
                 
                 {showSearchResults && (
                   <div className="mt-3 border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden bg-gray-50 dark:bg-gray-900/30">
                     <div className="px-4 py-2 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center">
-                      <span className="text-sm font-medium">Search Results ({searchResults.length})</span>
-                      <button onClick={() => setShowSearchResults(false)} className="text-xs text-primary-500">Close</button>
+                      <span className="text-sm font-medium">{t('common.search.results')} ({searchResults.length})</span>
+                      <button onClick={() => setShowSearchResults(false)} className="text-xs text-primary-500">{t('common.close')}</button>
                     </div>
                     <div className="max-h-60 overflow-auto divide-y divide-gray-200 dark:divide-gray-700">
                       {searchResults.map((service, index) => (
@@ -532,7 +529,7 @@ export default function Servers() {
                           {service.description && <div className="text-sm text-gray-500 truncate">{service.description}</div>}
                         </div>
                       ))}
-                      {searchResults.length === 0 && !searchLoading && <div className="p-4 text-center text-gray-500">No results found</div>}
+                      {searchResults.length === 0 && !searchLoading && <div className="p-4 text-center text-gray-500">{t('common.search.noResults')}</div>}
                     </div>
                   </div>
                 )}
@@ -556,7 +553,7 @@ export default function Servers() {
                     disabled={pullServerMutation.isPending || !pullUrl.trim()}
                     className="px-6 py-2 bg-primary-500 text-white rounded-lg hover:bg-primary-600 disabled:opacity-50"
                   >
-                    {pullServerMutation.isPending ? 'Pulling...' : t('servers.pullButton')}
+                    {pullServerMutation.isPending ? t('servers.pullingButton') : t('servers.pullButton')}
                   </button>
                 </div>
               </div>
@@ -616,7 +613,7 @@ export default function Servers() {
                         disabled={startingServers.has(server.id)}
                         className="px-3 py-1.5 text-xs bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 rounded-md hover:bg-green-200 transition-colors disabled:opacity-50"
                       >
-                        {startingServers.has(server.id) ? 'Starting...' : t('servers.start')}
+                        {startingServers.has(server.id) ? t('servers.starting') : t('servers.start')}
                       </button>
                     )}
                   </div>

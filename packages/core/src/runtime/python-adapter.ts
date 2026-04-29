@@ -1,15 +1,17 @@
-import { RuntimeAdapter } from './adapter';
-import { ServiceConfig } from '../core/types';
-import { VENVS_DIR } from '../core/constants';
-import * as path from 'path';
-import * as fs from 'fs';
-import { exec } from 'child_process';
-import { promisify } from 'util';
-import { logger } from '../core/logger';
+import { RuntimeAdapter } from "./adapter.js";
+import { ServiceConfig } from "../core/types.js";
+import { VENVS_DIR } from "../core/constants.js";
+import * as path from "path";
+import * as fs from "fs";
+import { exec } from "child_process";
+import { promisify } from "util";
+import { logger } from "../core/logger.js";
 
 const defaultExecAsync = promisify(exec);
 
-export type ExecAsyncFunction = (command: string) => Promise<{ stdout: string; stderr: string }>;
+export type ExecAsyncFunction = (
+  command: string,
+) => Promise<{ stdout: string; stderr: string }>;
 
 export class PythonAdapter implements RuntimeAdapter {
   private execAsync: ExecAsyncFunction;
@@ -19,8 +21,8 @@ export class PythonAdapter implements RuntimeAdapter {
   }
   getSpawnArgs(config: ServiceConfig): { command: string; args: string[] } {
     const venvPath = path.join(VENVS_DIR, config.name);
-    const pythonPath = path.join(venvPath, 'bin', 'python');
-    const entry = config.entry || 'main.py';
+    const pythonPath = path.join(venvPath, "bin", "python");
+    const entry = config.entry || "main.py";
     return {
       command: pythonPath,
       args: [entry, ...(config.args || [])],
@@ -38,22 +40,31 @@ export class PythonAdapter implements RuntimeAdapter {
       }
 
       // Check if virtual environment already exists
-      const venvExists = fs.existsSync(venvPath) &&
-                        fs.existsSync(path.join(venvPath, 'bin', 'python'));
+      const venvExists =
+        fs.existsSync(venvPath) &&
+        fs.existsSync(path.join(venvPath, "bin", "python"));
 
       if (!venvExists) {
-        logger.info(`Creating Python virtual environment for ${config.name} at ${venvPath}`);
+        logger.info(
+          `Creating Python virtual environment for ${config.name} at ${venvPath}`,
+        );
 
         // Create virtual environment
-        const { stdout: _stdout, stderr } = await this.execAsync(`python3 -m venv "${venvPath}"`);
+        const { stdout: _stdout, stderr } = await this.execAsync(
+          `python3 -m venv "${venvPath}"`,
+        );
 
-        if (stderr && !stderr.includes('created virtual environment')) {
+        if (stderr && !stderr.includes("created virtual environment")) {
           logger.warn(`Virtual environment creation warnings: ${stderr}`);
         }
 
-        logger.info(`Virtual environment created successfully for ${config.name}`);
+        logger.info(
+          `Virtual environment created successfully for ${config.name}`,
+        );
       } else {
-        logger.info(`Using existing virtual environment for ${config.name} at ${venvPath}`);
+        logger.info(
+          `Using existing virtual environment for ${config.name} at ${venvPath}`,
+        );
       }
 
       // Install dependencies (if requirements are configured)
@@ -64,15 +75,18 @@ export class PythonAdapter implements RuntimeAdapter {
 
       logger.info(`Python setup completed for ${config.name}`);
     } catch (error: any) {
-      logger.error(`Failed to setup Python environment for ${config.name}: ${error.message}`, {
-        stack: error.stack,
-      });
+      logger.error(
+        `Failed to setup Python environment for ${config.name}: ${error.message}`,
+        {
+          stack: error.stack,
+        },
+      );
       throw new Error(`Python environment setup failed: ${error.message}`);
     }
   }
 
   private async installDependencies(config: ServiceConfig, venvPath: string) {
-    const pipPath = path.join(venvPath, 'bin', 'pip');
+    const pipPath = path.join(venvPath, "bin", "pip");
 
     try {
       // Check if pip is available
@@ -82,43 +96,62 @@ export class PythonAdapter implements RuntimeAdapter {
       const deps = pythonConfig?.dependencies;
 
       if (Array.isArray(deps) && deps.length > 0) {
-        logger.info(`Installing Python dependencies for ${config.name}: ${deps.join(', ')}`);
+        logger.info(
+          `Installing Python dependencies for ${config.name}: ${deps.join(", ")}`,
+        );
 
         // Install each dependency
         for (const dep of deps) {
           try {
-            const { stdout: _stdout, stderr } = await this.execAsync(`${pipPath} install "${dep}"`);
+            const { stdout: _stdout, stderr } = await this.execAsync(
+              `${pipPath} install "${dep}"`,
+            );
             logger.info(`Installed dependency: ${dep}`);
 
-            if (stderr && stderr.includes('WARNING')) {
+            if (stderr && stderr.includes("WARNING")) {
               logger.warn(`Installation warnings for ${dep}: ${stderr}`);
             }
           } catch (depError: any) {
-            logger.error(`Failed to install dependency ${dep}: ${depError.message}`);
+            logger.error(
+              `Failed to install dependency ${dep}: ${depError.message}`,
+            );
             // Continue installing other dependencies
           }
         }
 
         logger.info(`All dependencies installed for ${config.name}`);
-      } else if (typeof deps === 'string' && (deps as string).trim().endsWith('.txt')) {
+      } else if (
+        typeof deps === "string" &&
+        (deps as string).trim().endsWith(".txt")
+      ) {
         // Handle requirements.txt file
-        const requirementsPath = path.isAbsolute(deps) ? deps : path.join(process.cwd(), deps);
+        const requirementsPath = path.isAbsolute(deps)
+          ? deps
+          : path.join(process.cwd(), deps);
 
         if (fs.existsSync(requirementsPath)) {
-          logger.info(`Installing dependencies from requirements file: ${requirementsPath}`);
-          const { stdout: _stdout, stderr } = await this.execAsync(`${pipPath} install -r "${requirementsPath}"`);
+          logger.info(
+            `Installing dependencies from requirements file: ${requirementsPath}`,
+          );
+          const { stdout: _stdout, stderr } = await this.execAsync(
+            `${pipPath} install -r "${requirementsPath}"`,
+          );
 
-          if (stderr && stderr.includes('WARNING')) {
+          if (stderr && stderr.includes("WARNING")) {
             logger.warn(`Requirements installation warnings: ${stderr}`);
           }
 
-          logger.info(`Dependencies installed from requirements file for ${config.name}`);
+          logger.info(
+            `Dependencies installed from requirements file for ${config.name}`,
+          );
         } else {
           logger.warn(`Requirements file not found: ${requirementsPath}`);
         }
       }
     } catch (error: any) {
-      logger.error(`Failed to install dependencies for ${config.name}: ${error.message}`);
+      logger.error(
+        `Failed to install dependencies for ${config.name}: ${error.message}`,
+      );
       throw new Error(`Dependency installation failed: ${error.message}`);
     }
   }

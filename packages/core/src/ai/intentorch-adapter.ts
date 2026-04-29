@@ -6,10 +6,13 @@
  * Uses the new Plan → Confirm → Execute pipeline (replaces old parseAndPlan + executeWorkflowWithTracking).
  */
 
-import { CloudIntentEngine, type CloudIntentEngineConfig } from './cloud-intent-engine';
-import type { AIConfig } from '../core/types';
-import { MCPClient } from '../mcp/client';
-import { logger } from '../core/logger';
+import {
+  CloudIntentEngine,
+  type CloudIntentEngineConfig,
+} from "./cloud-intent-engine.js";
+import type { AIConfig } from "../core/types.js";
+import { MCPClient } from "../mcp/client.js";
+import { logger } from "../core/logger.js";
 
 // Server connection info
 interface ConnectedServer {
@@ -26,61 +29,67 @@ export class IntentorchAdapter {
   private aiConfig: AIConfig | null = null;
 
   constructor() {
-    logger.debug('[IntentorchAdapter] Creating adapter instance');
+    logger.debug("[IntentorchAdapter] Creating adapter instance");
   }
 
   /**
    * Configure AI settings (mimics intentorch.configureAI)
    */
   async configureAI(config: AIConfig): Promise<void> {
-    logger.info(`[IntentorchAdapter] Configuring AI with provider: ${config.provider || 'openai'}`);
+    logger.info(
+      `[IntentorchAdapter] Configuring AI with provider: ${config.provider || "openai"}`,
+    );
     this.aiConfig = config;
-    logger.debug('[IntentorchAdapter] AI configured successfully');
+    logger.debug("[IntentorchAdapter] AI configured successfully");
   }
 
   /**
    * Initialize Cloud Intent Engine (mimics intentorch.initCloudIntentEngine)
    */
   async initCloudIntentEngine(): Promise<void> {
-    logger.info('[IntentorchAdapter] Initializing Cloud Intent Engine');
+    logger.info("[IntentorchAdapter] Initializing Cloud Intent Engine");
 
     if (!this.aiConfig) {
-      throw new Error('AI must be configured before initializing Cloud Intent Engine');
+      throw new Error(
+        "AI must be configured before initializing Cloud Intent Engine",
+      );
     }
 
     // Create CloudIntentEngine with default config
     const config: CloudIntentEngineConfig = {
       llm: {
-        provider: this.aiConfig.provider || 'openai',
+        provider: this.aiConfig.provider || "openai",
         apiKey: this.aiConfig.apiKey,
-        model: this.aiConfig.model || 'gpt-4o-mini',
+        model: this.aiConfig.model || "gpt-4o-mini",
         temperature: 0.3,
         maxTokens: 1000,
         timeout: 30000,
-        maxRetries: 3
+        maxRetries: 3,
       },
       execution: {
         maxConcurrentTools: 3,
         timeout: 60000,
         retryAttempts: 2,
-        retryDelay: 1000
+        retryDelay: 1000,
       },
       fallback: {
         enableKeywordMatching: true,
         askUserOnFailure: false,
-        defaultTools: {}
+        defaultTools: {},
       },
       parameterMapping: {
-        validationLevel: 'warning' as any,
+        validationLevel: "warning" as any,
         enableCompatibilityMappings: true,
         logWarnings: true,
-        enforceRequired: false
-      }
+        enforceRequired: false,
+      },
     };
 
     this.cloudIntentEngine = new CloudIntentEngine(config);
 
-    logger.debug('[IntentorchAdapter] Cloud Intent Engine initialized successfully');
+    logger.debug(
+      "[IntentorchAdapter] Cloud Intent Engine initialized successfully",
+    );
   }
 
   /**
@@ -94,33 +103,42 @@ export class IntentorchAdapter {
       args?: string[];
     };
   }): Promise<void> {
-    logger.info(`[IntentorchAdapter] Connecting to MCP server: ${options.name}`);
+    logger.info(
+      `[IntentorchAdapter] Connecting to MCP server: ${options.name}`,
+    );
 
     try {
       const client = new MCPClient({
         transport: {
-          type: 'stdio' as const,
+          type: "stdio" as const,
           command: options.transport.command,
           args: options.transport.args || [],
-          env: { ...process.env } as Record<string, string>
-        }
+          env: { ...process.env } as Record<string, string>,
+        },
       });
 
       // Handle transport errors to prevent process crash
-      client.on('error', (error) => {
-        logger.warn(`[IntentorchAdapter] MCP Client error for ${options.name}: ${error.message || error}`);
+      client.on("error", (error) => {
+        logger.warn(
+          `[IntentorchAdapter] MCP Client error for ${options.name}: ${error.message || error}`,
+        );
       });
 
       await client.connect();
 
       this.connectedServers.set(options.name, {
         name: options.name,
-        client
+        client,
       });
 
-      logger.debug(`[IntentorchAdapter] Successfully connected to server: ${options.name}`);
+      logger.debug(
+        `[IntentorchAdapter] Successfully connected to server: ${options.name}`,
+      );
     } catch (error: any) {
-      logger.error(`[IntentorchAdapter] Failed to connect to server ${options.name}:`, error.message);
+      logger.error(
+        `[IntentorchAdapter] Failed to connect to server ${options.name}:`,
+        error.message,
+      );
       throw error;
     }
   }
@@ -139,15 +157,22 @@ export class IntentorchAdapter {
         const serverTools = await Promise.race([
           server.client.listTools(),
           new Promise<never>((_, reject) =>
-            setTimeout(() => reject(new Error('Request timeout after 60000ms')), TOOL_LIST_TIMEOUT)
-          )
+            setTimeout(
+              () => reject(new Error("Request timeout after 60000ms")),
+              TOOL_LIST_TIMEOUT,
+            ),
+          ),
         ]);
-        tools.push(...serverTools.map((tool: any) => ({
-          ...tool,
-          serverName: name
-        })));
+        tools.push(
+          ...serverTools.map((tool: any) => ({
+            ...tool,
+            serverName: name,
+          })),
+        );
       } catch (error: any) {
-        logger.warn(`[IntentorchAdapter] Failed to list tools for server ${name}: ${error.message}`);
+        logger.warn(
+          `[IntentorchAdapter] Failed to list tools for server ${name}: ${error.message}`,
+        );
         // Continue with other servers - don't let one slow server block everything
       }
     }
@@ -170,10 +195,14 @@ export class IntentorchAdapter {
     textResponse?: string;
     error?: string;
   }> {
-    logger.info(`[IntentorchAdapter] processQuery called: "${query.substring(0, 100)}..."`);
+    logger.info(
+      `[IntentorchAdapter] processQuery called: "${query.substring(0, 100)}..."`,
+    );
 
     if (!this.cloudIntentEngine) {
-      throw new Error('Cloud Intent Engine must be initialized before processing queries');
+      throw new Error(
+        "Cloud Intent Engine must be initialized before processing queries",
+      );
     }
 
     try {
@@ -183,13 +212,13 @@ export class IntentorchAdapter {
 
       // Use processQueryWithHistory for LLM function calling
       const result = await this.cloudIntentEngine.processQueryWithHistory([
-        { role: 'user', content: query },
+        { role: "user", content: query },
       ]);
 
       if (result.hasToolCall && result.toolCalls.length > 0) {
         return {
           success: true,
-          toolCalls: result.toolCalls.map(tc => ({
+          toolCalls: result.toolCalls.map((tc) => ({
             toolName: tc.toolName,
             arguments: tc.arguments,
           })),
@@ -198,10 +227,13 @@ export class IntentorchAdapter {
 
       return {
         success: false,
-        error: 'No tool was selected for the query',
+        error: "No tool was selected for the query",
       };
     } catch (error: any) {
-      logger.error('[IntentorchAdapter] Failed to process query:', error.message);
+      logger.error(
+        "[IntentorchAdapter] Failed to process query:",
+        error.message,
+      );
       return {
         success: false,
         error: error.message,
@@ -225,10 +257,14 @@ export class IntentorchAdapter {
     };
     error?: string;
   }> {
-    logger.info(`[IntentorchAdapter] parseAndPlanWorkflow called: "${query.substring(0, 100)}..."`);
+    logger.info(
+      `[IntentorchAdapter] parseAndPlanWorkflow called: "${query.substring(0, 100)}..."`,
+    );
 
     if (!this.cloudIntentEngine) {
-      throw new Error('Cloud Intent Engine must be initialized before planning');
+      throw new Error(
+        "Cloud Intent Engine must be initialized before planning",
+      );
     }
 
     try {
@@ -246,21 +282,24 @@ export class IntentorchAdapter {
               intentId: step.id || `step-${idx}`,
               toolName: step.toolName,
               serverName: (step as any).serverName, // Some steps might have serverName
-              parameters: step.arguments
-            }))
-          }
+              parameters: step.arguments,
+            })),
+          },
         };
       }
 
       return {
         success: false,
-        error: 'Failed to generate plan'
+        error: "Failed to generate plan",
       };
     } catch (error: any) {
-      logger.error('[IntentorchAdapter] parseAndPlanWorkflow failed:', error.message);
+      logger.error(
+        "[IntentorchAdapter] parseAndPlanWorkflow failed:",
+        error.message,
+      );
       return {
         success: false,
-        error: error.message
+        error: error.message,
       };
     }
   }
@@ -280,16 +319,23 @@ export class IntentorchAdapter {
    * Disconnect from MCP server (mimics intentorch.disconnectMCPServer)
    */
   async disconnectMCPServer(serverName: string): Promise<void> {
-    logger.info(`[IntentorchAdapter] Disconnecting from MCP server: ${serverName}`);
+    logger.info(
+      `[IntentorchAdapter] Disconnecting from MCP server: ${serverName}`,
+    );
 
     const server = this.connectedServers.get(serverName);
     if (server) {
       try {
         await server.client.disconnect();
         this.connectedServers.delete(serverName);
-        logger.debug(`[IntentorchAdapter] Successfully disconnected from server: ${serverName}`);
+        logger.debug(
+          `[IntentorchAdapter] Successfully disconnected from server: ${serverName}`,
+        );
       } catch (error: any) {
-        logger.error(`[IntentorchAdapter] Failed to disconnect from server ${serverName}:`, error.message);
+        logger.error(
+          `[IntentorchAdapter] Failed to disconnect from server ${serverName}:`,
+          error.message,
+        );
       }
     }
   }
@@ -298,7 +344,7 @@ export class IntentorchAdapter {
    * Cleanup all connections
    */
   async cleanup(): Promise<void> {
-    logger.info('[IntentorchAdapter] Cleaning up all connections');
+    logger.info("[IntentorchAdapter] Cleaning up all connections");
 
     const disconnectPromises: Promise<void>[] = [];
     for (const [name] of this.connectedServers) {
@@ -308,7 +354,7 @@ export class IntentorchAdapter {
     await Promise.allSettled(disconnectPromises);
     this.connectedServers.clear();
 
-    logger.debug('[IntentorchAdapter] Cleanup completed');
+    logger.debug("[IntentorchAdapter] Cleanup completed");
   }
 }
 

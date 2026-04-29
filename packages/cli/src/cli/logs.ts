@@ -1,15 +1,16 @@
-import { Command } from 'commander';
-import fs from 'fs';
-import { getProcessManager } from '@intentorch/core';
-import { getLogPath } from '@intentorch/core';
-import { isWindows } from '@intentorch/core';
+import { Command } from "commander";
+import fs from "fs";
+import { spawn } from "child_process";
+import { getProcessManager } from "@intentorch/core";
+import { getLogPath } from "@intentorch/core";
+import { isWindows } from "@intentorch/core";
 
 export function logsCommand(): Command {
-  const command = new Command('logs')
-    .description('View or stream logs from a running MCP Server')
-    .argument('<identifier>', 'PID or server name')
-    .option('-f, --follow', 'Follow log output', false)
-    .option('-n, --lines <number>', 'Number of lines to show', '100')
+  const command = new Command("logs")
+    .description("View or stream logs from a running MCP Server")
+    .argument("<identifier>", "PID or server name")
+    .option("-f, --follow", "Follow log output", false)
+    .option("-n, --lines <number>", "Number of lines to show", "100")
     .action(async (identifier: string, options) => {
       try {
         const processManager = getProcessManager();
@@ -45,13 +46,13 @@ export function logsCommand(): Command {
           followLogs(logPath, parseInt(options.lines, 10));
         } else {
           // Just read the file
-          const content = fs.readFileSync(logPath, 'utf-8');
-          const lines = content.split('\n');
+          const content = fs.readFileSync(logPath, "utf-8");
+          const lines = content.split("\n");
           const numLines = parseInt(options.lines, 10);
-          console.log(lines.slice(-numLines).join('\n'));
+          console.log(lines.slice(-numLines).join("\n"));
         }
       } catch (error: any) {
-        console.error('❌ Error reading logs:', error.message);
+        console.error("❌ Error reading logs:", error.message);
       }
     });
 
@@ -61,22 +62,22 @@ export function logsCommand(): Command {
 function followLogs(filePath: string, lines: number) {
   if (isWindows()) {
     // Windows: Use native FS watching
-    
+
     // 1. Initial read of last N lines
-    const content = fs.readFileSync(filePath, 'utf-8');
-    const initialLines = content.split('\n').slice(-lines).join('\n');
-    process.stdout.write(initialLines + '\n');
+    const content = fs.readFileSync(filePath, "utf-8");
+    const initialLines = content.split("\n").slice(-lines).join("\n");
+    process.stdout.write(initialLines + "\n");
 
     // 2. Watch for changes and stream new content
     let fileSize = fs.statSync(filePath).size;
     fs.watch(filePath, (event) => {
-      if (event === 'change') {
+      if (event === "change") {
         try {
           const stats = fs.statSync(filePath);
           if (stats.size > fileSize) {
             const stream = fs.createReadStream(filePath, {
               start: fileSize,
-              end: stats.size
+              end: stats.size,
             });
             stream.pipe(process.stdout);
             fileSize = stats.size;
@@ -89,12 +90,11 @@ function followLogs(filePath: string, lines: number) {
     });
   } else {
     // Unix: Fallback to efficient tail -f
-    const { spawn } = require('child_process');
-    const tail = spawn('tail', ['-n', lines.toString(), '-f', filePath]);
+    const tail = spawn("tail", ["-n", lines.toString(), "-f", filePath]);
     tail.stdout.pipe(process.stdout);
     tail.stderr.pipe(process.stderr);
 
-    process.on('SIGINT', () => {
+    process.on("SIGINT", () => {
       tail.kill();
       process.exit();
     });

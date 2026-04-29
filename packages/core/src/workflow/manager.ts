@@ -1,17 +1,17 @@
-import { logger } from "../core/logger";
-import fs from 'fs/promises';
-import path from 'path';
-import { v4 as uuidv4 } from 'uuid';
-import { Workflow } from './types';
-import { getInTorchDir, ensureInTorchDir } from '../utils/paths';
+import { logger } from "../core/logger.js";
+import fs from "fs/promises";
+import path from "path";
+import { v4 as uuidv4 } from "uuid";
+import { Workflow } from "./types.js";
+import { getInTorchDir, ensureInTorchDir } from "../utils/paths.js";
 
 export class WorkflowManager {
   private workflowsDir: string;
   private indexFile: string;
 
   constructor() {
-    this.workflowsDir = path.join(getInTorchDir(), 'workflows');
-    this.indexFile = path.join(this.workflowsDir, '_index.json');
+    this.workflowsDir = path.join(getInTorchDir(), "workflows");
+    this.indexFile = path.join(this.workflowsDir, "_index.json");
   }
 
   async ensureDir(): Promise<void> {
@@ -23,13 +23,16 @@ export class WorkflowManager {
 
   async save(workflow: Workflow): Promise<string> {
     await this.ensureDir();
-    
+
     let workflowId = workflow.id;
     let filePath: string;
-    
+
     if (workflowId) {
       // Existing workflow: check if it exists
-      const existingFilePath = path.join(this.workflowsDir, `${workflowId}.json`);
+      const existingFilePath = path.join(
+        this.workflowsDir,
+        `${workflowId}.json`,
+      );
       try {
         await fs.access(existingFilePath);
         // File exists, use existing ID and path
@@ -44,7 +47,7 @@ export class WorkflowManager {
       workflowId = uuidv4();
       filePath = path.join(this.workflowsDir, `${workflowId}.json`);
     }
-    
+
     // Ensure workflow has the correct ID
     const workflowToSave = {
       ...workflow,
@@ -52,27 +55,31 @@ export class WorkflowManager {
       originalName: workflow.name, // Store original name for reference
       updatedAt: new Date().toISOString(), // Always update timestamp
     };
-    
+
     // Ensure createdAt is set for new workflows
     if (!workflowToSave.createdAt) {
       workflowToSave.createdAt = new Date().toISOString();
     }
-    
-    await fs.writeFile(filePath, JSON.stringify(workflowToSave, null, 2), 'utf-8');
-    
+
+    await fs.writeFile(
+      filePath,
+      JSON.stringify(workflowToSave, null, 2),
+      "utf-8",
+    );
+
     // Update index
     await this.updateIndex(workflowId, workflow.name);
-    
+
     return workflowId; // Return the workflow ID
   }
 
   async load(id: string): Promise<Workflow> {
     await this.ensureDir();
-    
+
     // First try to load by UUID (direct file)
     const uuidFilePath = path.join(this.workflowsDir, `${id}.json`);
     try {
-      const data = await fs.readFile(uuidFilePath, 'utf-8');
+      const data = await fs.readFile(uuidFilePath, "utf-8");
       return JSON.parse(data);
     } catch (e) {
       // If not found by UUID, try to find by name in index
@@ -80,7 +87,7 @@ export class WorkflowManager {
       const uuid = this.findUUIDByName(id, index);
       if (uuid) {
         const filePath = path.join(this.workflowsDir, `${uuid}.json`);
-        const data = await fs.readFile(filePath, 'utf-8');
+        const data = await fs.readFile(filePath, "utf-8");
         return JSON.parse(data);
       }
       throw new Error(`Workflow not found: ${id}`);
@@ -92,12 +99,12 @@ export class WorkflowManager {
     try {
       const files = await fs.readdir(this.workflowsDir);
       const workflows: Workflow[] = [];
-      
+
       for (const file of files) {
-        if (file.endsWith('.json') && file !== '_index.json') {
+        if (file.endsWith(".json") && file !== "_index.json") {
           try {
             const filePath = path.join(this.workflowsDir, file);
-            const data = await fs.readFile(filePath, 'utf-8');
+            const data = await fs.readFile(filePath, "utf-8");
             const workflow = JSON.parse(data);
             workflows.push(workflow);
           } catch (e) {
@@ -106,7 +113,7 @@ export class WorkflowManager {
           }
         }
       }
-      
+
       return workflows;
     } catch (e) {
       return [];
@@ -115,7 +122,7 @@ export class WorkflowManager {
 
   async delete(id: string): Promise<void> {
     await this.ensureDir();
-    
+
     // First try to delete by UUID
     const uuidFilePath = path.join(this.workflowsDir, `${id}.json`);
     try {
@@ -139,7 +146,7 @@ export class WorkflowManager {
 
   async exists(id: string): Promise<boolean> {
     await this.ensureDir();
-    
+
     // Check by UUID
     const uuidFilePath = path.join(this.workflowsDir, `${id}.json`);
     try {
@@ -156,7 +163,7 @@ export class WorkflowManager {
   // Private helper methods
   private async loadIndex(): Promise<Record<string, string>> {
     try {
-      const data = await fs.readFile(this.indexFile, 'utf-8');
+      const data = await fs.readFile(this.indexFile, "utf-8");
       return JSON.parse(data);
     } catch (e) {
       return {};
@@ -164,7 +171,7 @@ export class WorkflowManager {
   }
 
   private async saveIndex(index: Record<string, string>): Promise<void> {
-    await fs.writeFile(this.indexFile, JSON.stringify(index, null, 2), 'utf-8');
+    await fs.writeFile(this.indexFile, JSON.stringify(index, null, 2), "utf-8");
   }
 
   private async updateIndex(uuid: string, name: string): Promise<void> {
@@ -179,7 +186,10 @@ export class WorkflowManager {
     await this.saveIndex(index);
   }
 
-  private findUUIDByName(name: string, index: Record<string, string>): string | null {
+  private findUUIDByName(
+    name: string,
+    index: Record<string, string>,
+  ): string | null {
     for (const [uuid, workflowName] of Object.entries(index)) {
       if (workflowName === name) {
         return uuid;

@@ -195,7 +195,7 @@ const Layout: React.FC = () => {
               <div className="w-8 h-8 rounded-lg overflow-hidden flex items-center justify-center">
                 <img 
                   src="/logo.jpg" 
-                  alt="Intentorch Logo" 
+                  alt={t('app.name')}
                   className="w-full h-full object-cover"
                 />
               </div>
@@ -265,7 +265,7 @@ const Layout: React.FC = () => {
                 <div className="w-8 h-8 rounded-lg overflow-hidden flex items-center justify-center">
                   <img 
                     src="/logo.jpg" 
-                    alt="Intentorch Logo" 
+                    alt={t('app.name')}
                     className="w-full h-full object-cover"
                   />
                 </div>

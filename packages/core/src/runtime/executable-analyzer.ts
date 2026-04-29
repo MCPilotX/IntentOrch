@@ -1,14 +1,19 @@
-import * as fs from 'fs';
-import * as path from 'path';
-import { execSync } from 'child_process';
-import { RuntimeType } from '../core/types';
-import { logger } from '../core/logger';
+import * as fs from "fs";
+import * as path from "path";
+import { execSync } from "child_process";
+import { RuntimeType } from "../core/types.js";
+import { logger } from "../core/logger.js";
 
 export interface ExecutableAnalysis {
   type: RuntimeType;
   confidence: number;
   details: {
-    method: 'fileCommand' | 'magicNumber' | 'shebang' | 'permissions' | 'extension';
+    method:
+      | "fileCommand"
+      | "magicNumber"
+      | "shebang"
+      | "permissions"
+      | "extension";
     result: string;
     rawOutput?: string;
   };
@@ -40,7 +45,7 @@ export class ExecutableAnalyzer {
       this.analyzeShebang(filePath),
       this.analyzeByPermissions(filePath),
       this.analyzeByExtension(filePath),
-    ].filter(analysis => analysis !== null);
+    ].filter((analysis) => analysis !== null);
 
     if (analyses.length === 0) {
       return null;
@@ -63,42 +68,46 @@ export class ExecutableAnalyzer {
   /**
    * Use file command to detect file type (highest priority)
    */
-  private static analyzeWithFileCommand(filePath: string): ExecutableAnalysis | null {
+  private static analyzeWithFileCommand(
+    filePath: string,
+  ): ExecutableAnalysis | null {
     try {
-      const output = execSync(`file -b "${filePath}"`, { encoding: 'utf-8' }).trim();
+      const output = execSync(`file -b "${filePath}"`, {
+        encoding: "utf-8",
+      }).trim();
 
-      let type: RuntimeType = 'binary';
+      let type: RuntimeType = "binary";
       let confidence = 0.8;
-      let details = '';
+      let details = "";
 
-      if (output.includes('ELF')) {
-        type = 'binary';
+      if (output.includes("ELF")) {
+        type = "binary";
         confidence = 0.9;
-        details = 'ELF executable';
-      } else if (output.includes('Mach-O')) {
-        type = 'binary';
+        details = "ELF executable";
+      } else if (output.includes("Mach-O")) {
+        type = "binary";
         confidence = 0.9;
-        details = 'Mach-O executable';
-      } else if (output.includes('PE32+') || output.includes('PE32')) {
-        type = 'binary';
+        details = "Mach-O executable";
+      } else if (output.includes("PE32+") || output.includes("PE32")) {
+        type = "binary";
         confidence = 0.9;
-        details = 'Windows PE executable';
-      } else if (output.includes('Node.js')) {
-        type = 'node';
+        details = "Windows PE executable";
+      } else if (output.includes("Node.js")) {
+        type = "node";
         confidence = 0.95;
-        details = 'Node.js script';
-      } else if (output.includes('Python')) {
-        type = 'python';
+        details = "Node.js script";
+      } else if (output.includes("Python")) {
+        type = "python";
         confidence = 0.95;
-        details = 'Python script';
-      } else if (output.includes('Bourne-Again shell script')) {
-        type = 'binary';
+        details = "Python script";
+      } else if (output.includes("Bourne-Again shell script")) {
+        type = "binary";
         confidence = 0.85;
-        details = 'Bash script';
-      } else if (output.includes('POSIX shell script')) {
-        type = 'binary';
+        details = "Bash script";
+      } else if (output.includes("POSIX shell script")) {
+        type = "binary";
         confidence = 0.85;
-        details = 'Shell script';
+        details = "Shell script";
       } else {
         // Unrecognized type
         return null;
@@ -108,7 +117,7 @@ export class ExecutableAnalyzer {
         type,
         confidence,
         details: {
-          method: 'fileCommand',
+          method: "fileCommand",
           result: details,
           rawOutput: output,
         },
@@ -122,22 +131,24 @@ export class ExecutableAnalyzer {
   /**
    * Detect file type via magic numbers
    */
-  private static analyzeWithMagicNumbers(filePath: string): ExecutableAnalysis | null {
+  private static analyzeWithMagicNumbers(
+    filePath: string,
+  ): ExecutableAnalysis | null {
     try {
-      const buffer = fs.readFileSync(filePath, { flag: 'r' });
+      const buffer = fs.readFileSync(filePath, { flag: "r" });
 
       // Only read first few bytes for magic number detection
       const header = buffer.slice(0, 16);
-      const hex = header.toString('hex');
+      const hex = header.toString("hex");
 
       // ELF file: 7f 45 4c 46
-      if (hex.startsWith('7f454c46')) {
+      if (hex.startsWith("7f454c46")) {
         return {
-          type: 'binary',
+          type: "binary",
           confidence: 0.85,
           details: {
-            method: 'magicNumber',
-            result: 'ELF executable',
+            method: "magicNumber",
+            result: "ELF executable",
             rawOutput: hex.substring(0, 8),
           },
         };
@@ -145,39 +156,39 @@ export class ExecutableAnalyzer {
 
       // Mach-O (64-bit): cf fa ed fe
       // Mach-O (32-bit): ce fa ed fe
-      if (hex.startsWith('cffaedfe') || hex.startsWith('cefaedfe')) {
+      if (hex.startsWith("cffaedfe") || hex.startsWith("cefaedfe")) {
         return {
-          type: 'binary',
+          type: "binary",
           confidence: 0.85,
           details: {
-            method: 'magicNumber',
-            result: 'Mach-O executable',
+            method: "magicNumber",
+            result: "Mach-O executable",
             rawOutput: hex.substring(0, 8),
           },
         };
       }
 
       // PE file: 4d 5a (MZ)
-      if (hex.startsWith('4d5a')) {
+      if (hex.startsWith("4d5a")) {
         return {
-          type: 'binary',
+          type: "binary",
           confidence: 0.85,
           details: {
-            method: 'magicNumber',
-            result: 'Windows PE executable',
+            method: "magicNumber",
+            result: "Windows PE executable",
             rawOutput: hex.substring(0, 4),
           },
         };
       }
 
       // Java class file: ca fe ba be
-      if (hex.startsWith('cafebabe')) {
+      if (hex.startsWith("cafebabe")) {
         return {
-          type: 'java',
+          type: "java",
           confidence: 0.9,
           details: {
-            method: 'magicNumber',
-            result: 'Java class file',
+            method: "magicNumber",
+            result: "Java class file",
             rawOutput: hex.substring(0, 8),
           },
         };
@@ -194,35 +205,35 @@ export class ExecutableAnalyzer {
    */
   private static analyzeShebang(filePath: string): ExecutableAnalysis | null {
     try {
-      const content = fs.readFileSync(filePath, 'utf-8');
-      const firstLine = content.split('\n')[0].trim();
+      const content = fs.readFileSync(filePath, "utf-8");
+      const firstLine = content.split("\n")[0].trim();
 
-      if (!firstLine.startsWith('#!')) {
+      if (!firstLine.startsWith("#!")) {
         return null;
       }
 
       const shebang = firstLine.substring(2).toLowerCase();
-      let type: RuntimeType = 'binary';
+      let type: RuntimeType = "binary";
       let confidence = 0.8;
 
-      if (shebang.includes('node') || shebang.includes('bun')) {
-        type = 'node';
+      if (shebang.includes("node") || shebang.includes("bun")) {
+        type = "node";
         confidence = 0.9;
-      } else if (shebang.includes('python')) {
-        type = 'python';
+      } else if (shebang.includes("python")) {
+        type = "python";
         confidence = 0.9;
-      } else if (shebang.includes('bash') || shebang.includes('sh')) {
-        type = 'binary';
+      } else if (shebang.includes("bash") || shebang.includes("sh")) {
+        type = "binary";
         confidence = 0.85;
-      } else if (shebang.includes('perl')) {
-        type = 'binary';
+      } else if (shebang.includes("perl")) {
+        type = "binary";
         confidence = 0.8;
-      } else if (shebang.includes('ruby')) {
-        type = 'binary';
+      } else if (shebang.includes("ruby")) {
+        type = "binary";
         confidence = 0.8;
       } else {
         // Unknown interpreter
-        type = 'binary';
+        type = "binary";
         confidence = 0.7;
       }
 
@@ -230,7 +241,7 @@ export class ExecutableAnalyzer {
         type,
         confidence,
         details: {
-          method: 'shebang',
+          method: "shebang",
           result: shebang,
           rawOutput: firstLine,
         },
@@ -244,7 +255,9 @@ export class ExecutableAnalyzer {
   /**
    * Detect by file permissions
    */
-  private static analyzeByPermissions(filePath: string): ExecutableAnalysis | null {
+  private static analyzeByPermissions(
+    filePath: string,
+  ): ExecutableAnalysis | null {
     try {
       const stats = fs.statSync(filePath);
       const mode = stats.mode;
@@ -252,11 +265,11 @@ export class ExecutableAnalyzer {
 
       if (isExecutable) {
         return {
-          type: 'binary',
+          type: "binary",
           confidence: 0.6,
           details: {
-            method: 'permissions',
-            result: 'Executable file',
+            method: "permissions",
+            result: "Executable file",
             rawOutput: `mode: 0o${mode.toString(8)}`,
           },
         };
@@ -271,22 +284,27 @@ export class ExecutableAnalyzer {
   /**
    * Detect by file extension (last resort)
    */
-  private static analyzeByExtension(filePath: string): ExecutableAnalysis | null {
+  private static analyzeByExtension(
+    filePath: string,
+  ): ExecutableAnalysis | null {
     const ext = path.extname(filePath).toLowerCase();
 
-    const extensionMap: Record<string, { type: RuntimeType; confidence: number }> = {
-      '.exe': { type: 'binary', confidence: 0.7 },
-      '.bin': { type: 'binary', confidence: 0.7 },
-      '.app': { type: 'binary', confidence: 0.7 },
-      '.out': { type: 'binary', confidence: 0.6 },
-      '.js': { type: 'node', confidence: 0.5 },
-      '.ts': { type: 'node', confidence: 0.5 },
-      '.py': { type: 'python', confidence: 0.5 },
-      '.go': { type: 'go', confidence: 0.5 },
-      '.rs': { type: 'rust', confidence: 0.5 },
-      '.java': { type: 'java', confidence: 0.5 },
-      '.class': { type: 'java', confidence: 0.6 },
-      '.jar': { type: 'java', confidence: 0.6 },
+    const extensionMap: Record<
+      string,
+      { type: RuntimeType; confidence: number }
+    > = {
+      ".exe": { type: "binary", confidence: 0.7 },
+      ".bin": { type: "binary", confidence: 0.7 },
+      ".app": { type: "binary", confidence: 0.7 },
+      ".out": { type: "binary", confidence: 0.6 },
+      ".js": { type: "node", confidence: 0.5 },
+      ".ts": { type: "node", confidence: 0.5 },
+      ".py": { type: "python", confidence: 0.5 },
+      ".go": { type: "go", confidence: 0.5 },
+      ".rs": { type: "rust", confidence: 0.5 },
+      ".java": { type: "java", confidence: 0.5 },
+      ".class": { type: "java", confidence: 0.6 },
+      ".jar": { type: "java", confidence: 0.6 },
     };
 
     const mapping = extensionMap[ext];
@@ -295,7 +313,7 @@ export class ExecutableAnalyzer {
         type: mapping.type,
         confidence: mapping.confidence,
         details: {
-          method: 'extension',
+          method: "extension",
           result: `File extension: ${ext}`,
           rawOutput: ext,
         },
@@ -313,7 +331,7 @@ export class ExecutableAnalyzer {
       const stats = fs.statSync(filePath);
 
       // Check Unix execution permissions
-      if (process.platform !== 'win32') {
+      if (process.platform !== "win32") {
         const mode = stats.mode;
         const isExecutable = (mode & 0o111) !== 0;
         if (isExecutable) {
@@ -322,9 +340,9 @@ export class ExecutableAnalyzer {
       }
 
       // Check file extensions (Windows)
-      if (process.platform === 'win32') {
+      if (process.platform === "win32") {
         const ext = path.extname(filePath).toLowerCase();
-        const executableExtensions = ['.exe', '.bat', '.cmd', '.ps1', '.com'];
+        const executableExtensions = [".exe", ".bat", ".cmd", ".ps1", ".com"];
         if (executableExtensions.includes(ext)) {
           return true;
         }
@@ -332,8 +350,8 @@ export class ExecutableAnalyzer {
 
       // Check shebang (script files)
       try {
-        const content = fs.readFileSync(filePath, 'utf-8');
-        if (content.startsWith('#!')) {
+        const content = fs.readFileSync(filePath, "utf-8");
+        if (content.startsWith("#!")) {
           return true;
         }
       } catch {
@@ -393,15 +411,17 @@ export class ExecutableAnalyzer {
     }
 
     // Prefer files without extensions (Unix convention)
-    const noExtension = executables.filter(p => path.extname(p) === '');
+    const noExtension = executables.filter((p) => path.extname(p) === "");
     if (noExtension.length > 0) {
       return noExtension[0];
     }
 
     // Then choose common executable extensions
-    const commonExtensions = ['.exe', '.bin', '.app', '.out'];
+    const commonExtensions = [".exe", ".bin", ".app", ".out"];
     for (const ext of commonExtensions) {
-      const withExt = executables.filter(p => path.extname(p).toLowerCase() === ext);
+      const withExt = executables.filter(
+        (p) => path.extname(p).toLowerCase() === ext,
+      );
       if (withExt.length > 0) {
         return withExt[0];
       }
@@ -414,7 +434,9 @@ export class ExecutableAnalyzer {
   /**
    * Batch analyze executable files in directory
    */
-  static analyzeDirectory(dirPath: string): Array<{ file: string; analysis: ExecutableAnalysis }> {
+  static analyzeDirectory(
+    dirPath: string,
+  ): Array<{ file: string; analysis: ExecutableAnalysis }> {
     const executables = this.findExecutables(dirPath);
     const results: Array<{ file: string; analysis: ExecutableAnalysis }> = [];
 

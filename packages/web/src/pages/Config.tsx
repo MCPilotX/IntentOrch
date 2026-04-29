@@ -138,7 +138,7 @@ export default function ConfigPage() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                  AI Provider
+                  {t('config.provider')}
                 </label>
                 <select
                   className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800"
@@ -163,7 +163,7 @@ export default function ConfigPage() {
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                  Model
+                  {t('config.model')}
                 </label>
                 <input
                   type="text"
@@ -190,12 +190,12 @@ export default function ConfigPage() {
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                API Key
+                {t('config.apiKey')}
               </label>
               <input
                 type="password"
                 className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 font-mono"
-                placeholder="sk-..."
+                placeholder={t('config.apiKeyPlaceholder')}
                 value={formData.config.ai?.apiKey || ''}
                 onChange={(e) => setFormData({
                   ...formData,
@@ -216,7 +216,7 @@ export default function ConfigPage() {
                 disabled={testing || !formData.config.ai?.apiKey}
                 className="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors disabled:opacity-50"
               >
-                {testing ? 'Testing...' : 'Test Connection'}
+                {testing ? t('config.testing') : t('config.testConfiguration')}
               </button>
               {testResult && (
                 <span className={`text-sm ${testResult.success ? 'text-green-600' : 'text-red-600'}`}>
@@ -230,13 +230,13 @@ export default function ConfigPage() {
         {/* Registry Configuration */}
         <div className="card">
           <div className="card-header">
-            <h3 className="card-title">Registry Settings</h3>
-            <p className="card-description">Preferred source for pulling MCP servers</p>
+            <h3 className="card-title">{t('config.registryConfiguration')}</h3>
+            <p className="card-description">{t('config.registrySettings')}</p>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                Preferred Source
+                {t('config.defaultRegistry')}
               </label>
               <select
                 className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800"
@@ -252,9 +252,8 @@ export default function ConfigPage() {
                   }
                 })}
               >
-                <option value="gitee">Gitee</option>
-                <option value="github">GitHub</option>
-                <option value="official">Official</option>
+                <option value="gitee">{t('servers.giteeSourceDescription')}</option>
+                <option value="github">{t('servers.githubSourceDescription')}</option>
               </select>
             </div>
           </div>
@@ -266,7 +265,7 @@ export default function ConfigPage() {
             disabled={saving}
             className="px-6 py-2 bg-primary-500 text-white rounded-lg hover:bg-primary-600 transition-colors shadow-lg disabled:opacity-50"
           >
-            {saving ? 'Saving...' : 'Save Configuration'}
+            {saving ? t('config.saving') : t('config.saveConfiguration')}
           </button>
         </div>
       </form>

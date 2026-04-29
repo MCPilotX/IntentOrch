@@ -10,11 +10,28 @@
  * 3. ErrorBoundary - Error boundary for MCP client calls
  */
 
-export { KernelConfig, getKernelConfig, setKernelConfig, isKernelEnabled } from './config';
-export type { KernelConfig as KernelConfigType } from './config';
+export {
+  KernelConfig,
+  getKernelConfig,
+  setKernelConfig,
+  isKernelEnabled,
+} from "./config.js";
+export type { KernelConfig as KernelConfigType } from "./config.js";
 
-export { HealthCheckScheduler, healthCheckScheduler } from './health-check-scheduler';
-export type { HealthCheckResult, HealthCheckConfig } from './health-check-scheduler';
+export {
+  HealthCheckScheduler,
+  healthCheckScheduler,
+} from "./health-check-scheduler.js";
+export type {
+  HealthCheckResult,
+  HealthCheckConfig,
+} from "./health-check-scheduler.js";
 
-export { ErrorBoundary, globalErrorBoundary } from './error-boundary';
-export type { ErrorCategory, RecoveryStrategy, ErrorClassification, ErrorBoundaryConfig, ErrorBoundaryResult } from './error-boundary';
+export { ErrorBoundary, globalErrorBoundary } from "./error-boundary.js";
+export type {
+  ErrorCategory,
+  RecoveryStrategy,
+  ErrorClassification,
+  ErrorBoundaryConfig,
+  ErrorBoundaryResult,
+} from "./error-boundary.js";

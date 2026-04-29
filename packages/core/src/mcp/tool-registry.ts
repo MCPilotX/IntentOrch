@@ -3,8 +3,8 @@
  * Focuses on MCP tool management, providing tool registration, discovery, execution and other functions
  */
 
-import { Tool, ToolCall, ToolResult } from './types';
-import { ParameterMapper } from './parameter-mapper';
+import { Tool, ToolCall, ToolResult } from "./types.js";
+import { ParameterMapper } from "./parameter-mapper.js";
 
 export interface ToolExecutor {
   (args: Record<string, any>): Promise<ToolResult>;
@@ -14,11 +14,11 @@ export interface RegisteredTool {
   tool: Tool;
   executor: ToolExecutor;
   metadata: {
-    serverId: string;           // MCP server identifier
-    serverName?: string;        // Server name (optional)
-    discoveredAt: number;       // Discovery timestamp
-    lastUsed?: number;          // Last used time
-    usageCount?: number;        // Usage count statistics
+    serverId: string; // MCP server identifier
+    serverName?: string; // Server name (optional)
+    discoveredAt: number; // Discovery timestamp
+    lastUsed?: number; // Last used time
+    usageCount?: number; // Usage count statistics
   };
 }
 
@@ -73,7 +73,7 @@ export class ToolRegistry {
     serverId: string,
     serverName?: string,
   ): void {
-    tools.forEach(tool => {
+    tools.forEach((tool) => {
       this.registerTool(tool, executorFactory(tool.name), serverId, serverName);
     });
   }
@@ -115,7 +115,7 @@ export class ToolRegistry {
     }
 
     let removedCount = 0;
-    toolNames.forEach(toolName => {
+    toolNames.forEach((toolName) => {
       if (this.tools.delete(toolName)) {
         removedCount++;
       }
@@ -147,41 +147,52 @@ export class ToolRegistry {
 
       // Add helpful suggestions
       if (connectedServers.length > 0) {
-        errorMessage += `\n\nConnected servers: ${connectedServers.join(', ')}`;
+        errorMessage += `\n\nConnected servers: ${connectedServers.join(", ")}`;
 
         // Suggest similar tool names
         const similarTools = availableTools
-          .filter(tool => tool.tool.name.toLowerCase().includes(toolCall.name.toLowerCase()) ||
-                         toolCall.name.toLowerCase().includes(tool.tool.name.toLowerCase()))
+          .filter(
+            (tool) =>
+              tool.tool.name
+                .toLowerCase()
+                .includes(toolCall.name.toLowerCase()) ||
+              toolCall.name
+                .toLowerCase()
+                .includes(tool.tool.name.toLowerCase()),
+          )
           .slice(0, 3);
 
         if (similarTools.length > 0) {
-          errorMessage += '\n\nDid you mean one of these tools?';
-          similarTools.forEach(tool => {
+          errorMessage += "\n\nDid you mean one of these tools?";
+          similarTools.forEach((tool) => {
             errorMessage += `\n  - ${tool.tool.name} (from server: ${tool.metadata.serverName})`;
           });
         }
 
         // List all available tools if there aren't too many
         if (availableTools.length <= 10) {
-          errorMessage += '\n\nAvailable tools:';
-          availableTools.forEach(tool => {
+          errorMessage += "\n\nAvailable tools:";
+          availableTools.forEach((tool) => {
             errorMessage += `\n  - ${tool.tool.name} (${tool.metadata.serverName})`;
           });
         } else {
           errorMessage += `\n\nThere are ${availableTools.length} tools available from ${connectedServers.length} servers.`;
         }
       } else {
-        errorMessage += '\n\nNo MCP servers are currently connected.';
-        errorMessage += '\nConnect a server first using connectMCPServer() or connectAllFromConfig().';
-        errorMessage += '\n\nYou can connect any MCP server that provides tools.';
+        errorMessage += "\n\nNo MCP servers are currently connected.";
+        errorMessage +=
+          "\nConnect a server first using connectMCPServer() or connectAllFromConfig().";
+        errorMessage +=
+          "\n\nYou can connect any MCP server that provides tools.";
       }
 
       return {
-        content: [{
-          type: 'text',
-          text: errorMessage,
-        }],
+        content: [
+          {
+            type: "text",
+            text: errorMessage,
+          },
+        ],
         isError: true,
       };
     }
@@ -191,10 +202,12 @@ export class ToolRegistry {
       const tool = this.tools.get(tc.name);
       if (!tool) {
         return {
-          content: [{
-            type: 'text',
-            text: `Tool "${tc.name}" not found during fallback execution`,
-          }],
+          content: [
+            {
+              type: "text",
+              text: `Tool "${tc.name}" not found during fallback execution`,
+            },
+          ],
           isError: true,
         };
       }
@@ -213,10 +226,12 @@ export class ToolRegistry {
         return result;
       } catch (error) {
         return {
-          content: [{
-            type: 'text',
-            text: `Tool execution failed: ${error instanceof Error ? error.message : String(error)}`,
-          }],
+          content: [
+            {
+              type: "text",
+              text: `Tool execution failed: ${error instanceof Error ? error.message : String(error)}`,
+            },
+          ],
           isError: true,
         };
       }
@@ -234,10 +249,12 @@ export class ToolRegistry {
 
     if (!registeredTool) {
       return {
-        content: [{
-          type: 'text',
-          text: `Tool "${toolCall.name}" not found`,
-        }],
+        content: [
+          {
+            type: "text",
+            text: `Tool "${toolCall.name}" not found`,
+          },
+        ],
         isError: true,
       };
     }
@@ -251,15 +268,18 @@ export class ToolRegistry {
 
       // Update usage statistics
       registeredTool.metadata.lastUsed = Date.now();
-      registeredTool.metadata.usageCount = (registeredTool.metadata.usageCount || 0) + 1;
+      registeredTool.metadata.usageCount =
+        (registeredTool.metadata.usageCount || 0) + 1;
 
       return result;
     } catch (error) {
       return {
-        content: [{
-          type: 'text',
-          text: `Tool execution failed: ${error instanceof Error ? error.message : String(error)}`,
-        }],
+        content: [
+          {
+            type: "text",
+            text: `Tool execution failed: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
         isError: true,
       };
     }
@@ -282,7 +302,7 @@ export class ToolRegistry {
     }
 
     return Array.from(toolNames)
-      .map(name => this.tools.get(name))
+      .map((name) => this.tools.get(name))
       .filter((tool): tool is RegisteredTool => tool !== undefined);
   }
 
@@ -297,7 +317,8 @@ export class ToolRegistry {
     const servers: string[] = [];
 
     for (const registeredTool of this.tools.values()) {
-      const serverName = registeredTool.metadata.serverName || registeredTool.metadata.serverId;
+      const serverName =
+        registeredTool.metadata.serverName || registeredTool.metadata.serverId;
       if (!servers.includes(serverName)) {
         servers.push(serverName);
       }
@@ -314,19 +335,25 @@ export class ToolRegistry {
 
     try {
       // Use ParameterMapper for validation and normalization
-      const { normalized } = ParameterMapper.validateAndNormalize(toolName, schema, args);
+      const { normalized } = ParameterMapper.validateAndNormalize(
+        toolName,
+        schema,
+        args,
+      );
 
       // Update the arguments with normalized parameters
-      Object.keys(args).forEach(key => delete args[key]);
+      Object.keys(args).forEach((key) => delete args[key]);
       Object.assign(args, normalized);
 
       // Check required parameters
       if (schema.required && Array.isArray(schema.required)) {
-        const missingRequired = schema.required.filter((r: string) => 
-          normalized[r] === undefined || normalized[r] === null
+        const missingRequired = schema.required.filter(
+          (r: string) => normalized[r] === undefined || normalized[r] === null,
         );
         if (missingRequired.length > 0) {
-          throw new Error(`Missing required parameters: ${missingRequired.join(', ')}`);
+          throw new Error(
+            `Missing required parameters: ${missingRequired.join(", ")}`,
+          );
         }
       }
     } catch (error) {
@@ -334,14 +361,17 @@ export class ToolRegistry {
       const errorMessage = [
         `Tool "${toolName}" parameter validation failed:`,
         error instanceof Error ? error.message : String(error),
-        '',
-        'Tool schema:',
-        `  Required parameters: ${schema.required ? schema.required.join(', ') : 'none'}`,
-        `  Available parameters: ${Object.keys(schema.properties).join(', ')}`,
-        '',
-        'Provided parameters:',
-        ...Object.entries(args).map(([key, value]) => `  - ${key}: ${typeof value} = ${JSON.stringify(value)}`),
-      ].join('\n');
+        "",
+        "Tool schema:",
+        `  Required parameters: ${schema.required ? schema.required.join(", ") : "none"}`,
+        `  Available parameters: ${Object.keys(schema.properties).join(", ")}`,
+        "",
+        "Provided parameters:",
+        ...Object.entries(args).map(
+          ([key, value]) =>
+            `  - ${key}: ${typeof value} = ${JSON.stringify(value)}`,
+        ),
+      ].join("\n");
 
       throw new Error(errorMessage);
     }
@@ -354,15 +384,22 @@ export class ToolRegistry {
 
     return {
       totalTools: tools.length,
-      byServer: Array.from(this.serverTools.entries()).reduce((acc, [serverId, toolNames]) => {
-        acc[serverId] = toolNames.size;
-        return acc;
-      }, {} as Record<string, number>),
+      byServer: Array.from(this.serverTools.entries()).reduce(
+        (acc, [serverId, toolNames]) => {
+          acc[serverId] = toolNames.size;
+          return acc;
+        },
+        {} as Record<string, number>,
+      ),
       mostUsed: tools
-        .filter(tool => tool.metadata.usageCount && tool.metadata.usageCount > 0)
-        .sort((a, b) => (b.metadata.usageCount || 0) - (a.metadata.usageCount || 0))
+        .filter(
+          (tool) => tool.metadata.usageCount && tool.metadata.usageCount > 0,
+        )
+        .sort(
+          (a, b) => (b.metadata.usageCount || 0) - (a.metadata.usageCount || 0),
+        )
         .slice(0, 10)
-        .map(tool => ({
+        .map((tool) => ({
           name: tool.tool.name,
           serverId: tool.metadata.serverId,
           serverName: tool.metadata.serverName,

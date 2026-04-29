@@ -1,11 +1,11 @@
-import { logger } from "../core/logger";
+import { logger } from "../core/logger.js";
 /**
  * CloudIntentEngine Factory
  * Creates properly configured CloudIntentEngine instances using OrchApp configuration system
  */
 
-import { CloudIntentEngine } from '../ai/cloud-intent-engine';
-import { getAIConfig, AIConfig } from './config';
+import { CloudIntentEngine } from "../ai/cloud-intent-engine.js";
+import { getAIConfig, AIConfig } from "./config.js";
 
 export interface CloudIntentEngineOptions {
   /**
@@ -13,7 +13,7 @@ export interface CloudIntentEngineOptions {
    * If not provided, uses system configuration from ~/.intorch/config.json
    */
   aiConfig?: AIConfig;
-  
+
   /**
    * Execution configuration
    */
@@ -23,7 +23,7 @@ export interface CloudIntentEngineOptions {
     retryAttempts?: number;
     retryDelay?: number;
   };
-  
+
   /**
    * Fallback configuration
    */
@@ -32,12 +32,12 @@ export interface CloudIntentEngineOptions {
     askUserOnFailure?: boolean;
     defaultTools?: Record<string, any>;
   };
-  
+
   /**
    * Parameter mapping configuration
    */
   parameterMapping?: {
-    validationLevel?: 'strict' | 'warning' | 'none';
+    validationLevel?: "strict" | "warning" | "none";
     enableCompatibilityMappings?: boolean;
     logWarnings?: boolean;
     enforceRequired?: boolean;
@@ -50,74 +50,76 @@ export interface CloudIntentEngineOptions {
  * @returns Configured CloudIntentEngine instance
  */
 export async function createCloudIntentEngine(
-  options: CloudIntentEngineOptions = {}
+  options: CloudIntentEngineOptions = {},
 ): Promise<CloudIntentEngine> {
   // Get AI configuration from system or use provided override
   let aiConfig: AIConfig;
-  
+
   if (options.aiConfig) {
     aiConfig = options.aiConfig;
   } else {
     try {
       aiConfig = await getAIConfig();
     } catch (error) {
-      logger.warn('Failed to load AI configuration from system, using environment variables as fallback');
-      
+      logger.warn(
+        "Failed to load AI configuration from system, using environment variables as fallback",
+      );
+
       // Fallback to environment variables
       aiConfig = {
-        provider: process.env.LLM_PROVIDER as any || 'deepseek',
+        provider: (process.env.LLM_PROVIDER as any) || "deepseek",
         apiKey: process.env.LLM_API_KEY || process.env.DEEPSEEK_API_KEY,
-        model: process.env.LLM_MODEL || 'deepseek-chat'
+        model: process.env.LLM_MODEL || "deepseek-chat",
       };
     }
   }
-  
+
   // Validate AI configuration
   if (!aiConfig.provider || !aiConfig.apiKey) {
     throw new Error(
-      'AI configuration is incomplete. Please set provider and apiKey in ' +
-      '~/.intorch/config.json or provide them via environment variables.\n' +
-      'You can set configuration using: intorch config set provider <provider>\n' +
-      'And: intorch config set apiKey <your-api-key>'
+      "AI configuration is incomplete. Please set provider and apiKey in " +
+        "~/.intorch/config.json or provide them via environment variables.\n" +
+        "You can set configuration using: intorch config set provider <provider>\n" +
+        "And: intorch config set apiKey <your-api-key>",
     );
   }
-  
+
   // Build the CloudIntentEngine configuration
   const config = {
     llm: {
       provider: aiConfig.provider as any, // Type assertion to avoid import issues
       apiKey: aiConfig.apiKey,
-      model: aiConfig.model || 'gpt-3.5-turbo',
+      model: aiConfig.model || "gpt-3.5-turbo",
       temperature: 0.3,
       maxTokens: 1000,
       timeout: 30000,
-      maxRetries: 3
+      maxRetries: 3,
     },
     execution: {
       maxConcurrentTools: 3,
       timeout: 60000,
       retryAttempts: 2,
       retryDelay: 1000,
-      ...options.execution
+      ...options.execution,
     },
     fallback: {
       enableKeywordMatching: true,
       askUserOnFailure: false,
       defaultTools: {},
-      ...options.fallback
+      ...options.fallback,
     },
     parameterMapping: {
-      validationLevel: 'warning' as any, // Type assertion for compatibility
+      validationLevel: "warning" as any, // Type assertion for compatibility
       enableCompatibilityMappings: true,
       logWarnings: true,
       enforceRequired: false,
-      ...options.parameterMapping
-    }
+      ...options.parameterMapping,
+    },
   };
-  
+
   // Create the engine
   const engine = new CloudIntentEngine(config);
-  
+
   // The engine is initialized in the constructor - no separate initialize() call needed
   return engine;
 }
@@ -128,9 +130,9 @@ export async function createCloudIntentEngine(
 export class CloudIntentEngineFactory {
   private static instance: CloudIntentEngineFactory;
   private defaultEngine: CloudIntentEngine | null = null;
-  
+
   private constructor() {}
-  
+
   /**
    * Get singleton instance of the factory
    */
@@ -140,14 +142,16 @@ export class CloudIntentEngineFactory {
     }
     return CloudIntentEngineFactory.instance;
   }
-  
+
   /**
    * Create a new CloudIntentEngine instance
    */
-  public async createEngine(options: CloudIntentEngineOptions = {}): Promise<CloudIntentEngine> {
+  public async createEngine(
+    options: CloudIntentEngineOptions = {},
+  ): Promise<CloudIntentEngine> {
     return createCloudIntentEngine(options);
   }
-  
+
   /**
    * Get or create a default CloudIntentEngine instance
    */
@@ -157,7 +161,7 @@ export class CloudIntentEngineFactory {
     }
     return this.defaultEngine;
   }
-  
+
   /**
    * Reset the default engine (useful for testing)
    */
@@ -172,7 +176,9 @@ export const cloudIntentEngineFactory = CloudIntentEngineFactory.getInstance();
 /**
  * Convenience function to create a CloudIntentEngine
  */
-export async function getCloudIntentEngine(options?: CloudIntentEngineOptions): Promise<CloudIntentEngine> {
+export async function getCloudIntentEngine(
+  options?: CloudIntentEngineOptions,
+): Promise<CloudIntentEngine> {
   return cloudIntentEngineFactory.createEngine(options);
 }
 

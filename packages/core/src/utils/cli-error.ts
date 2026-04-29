@@ -1,6 +1,6 @@
 /**
  * Simple CLI Error Formatter
- * 
+ *
  * Provides consistent error formatting for CLI commands
  * without over-engineering the error handling system.
  */
@@ -11,7 +11,7 @@
  * @param emoji Optional emoji prefix (default: '❌')
  * @returns Formatted error message
  */
-export function formatError(message: string, emoji: string = '❌'): string {
+export function formatError(message: string, emoji: string = "❌"): string {
   return `${emoji} ${message}`;
 }
 
@@ -21,7 +21,7 @@ export function formatError(message: string, emoji: string = '❌'): string {
  * @param emoji Optional emoji prefix (default: '⚠️')
  * @returns Formatted warning message
  */
-export function formatWarning(message: string, emoji: string = '⚠️'): string {
+export function formatWarning(message: string, emoji: string = "⚠️"): string {
   return `${emoji} ${message}`;
 }
 
@@ -31,7 +31,7 @@ export function formatWarning(message: string, emoji: string = '⚠️'): string
  * @param emoji Optional emoji prefix (default: 'ℹ️')
  * @returns Formatted info message
  */
-export function formatInfo(message: string, emoji: string = 'ℹ️'): string {
+export function formatInfo(message: string, emoji: string = "ℹ️"): string {
   return `${emoji} ${message}`;
 }
 
@@ -41,35 +41,35 @@ export function formatInfo(message: string, emoji: string = 'ℹ️'): string {
  * @param emoji Optional emoji prefix (default: '✅')
  * @returns Formatted success message
  */
-export function formatSuccess(message: string, emoji: string = '✅'): string {
+export function formatSuccess(message: string, emoji: string = "✅"): string {
   return `${emoji} ${message}`;
 }
 
 /**
  * Print formatted error to console.error
  */
-export function printError(message: string, emoji: string = '❌'): void {
+export function printError(message: string, emoji: string = "❌"): void {
   console.error(formatError(message, emoji));
 }
 
 /**
  * Print formatted warning to console.warn
  */
-export function printWarning(message: string, emoji: string = '⚠️'): void {
+export function printWarning(message: string, emoji: string = "⚠️"): void {
   console.warn(formatWarning(message, emoji));
 }
 
 /**
  * Print formatted info to console.info
  */
-export function printInfo(message: string, emoji: string = 'ℹ️'): void {
+export function printInfo(message: string, emoji: string = "ℹ️"): void {
   console.info(formatInfo(message, emoji));
 }
 
 /**
  * Print formatted success to console.log
  */
-export function printSuccess(message: string, emoji: string = '✅'): void {
+export function printSuccess(message: string, emoji: string = "✅"): void {
   console.log(formatSuccess(message, emoji));
 }
 

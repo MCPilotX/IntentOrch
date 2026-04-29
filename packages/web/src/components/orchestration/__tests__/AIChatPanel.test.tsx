@@ -16,7 +16,7 @@ describe('AIChatPanel', () => {
     renderWithProviders(
       <AIChatPanel onSendMessage={() => {}} messages={[]} isAnalyzing={false} />
     );
-    expect(screen.getByPlaceholderText(/Type your intent/i)).toBeInTheDocument();
+    expect(screen.getByPlaceholderText(/Enter your intent/i)).toBeInTheDocument();
   });
 
   it('triggers onSendMessage when form is submitted', () => {
@@ -25,7 +25,7 @@ describe('AIChatPanel', () => {
       <AIChatPanel onSendMessage={onSendMessage} messages={[]} isAnalyzing={false} />
     );
     
-    const input = screen.getByPlaceholderText(/Type your intent/i);
+    const input = screen.getByPlaceholderText(/Enter your intent/i);
     fireEvent.change(input, { target: { value: 'Hello' } });
     fireEvent.keyDown(input, { key: 'Enter', code: 'Enter' });
     
@@ -58,6 +58,6 @@ describe('AIChatPanel', () => {
       <AIChatPanel onSendMessage={() => {}} messages={[]} isAnalyzing={true} />
     );
     
-    expect(screen.getByText(/Analyzing intent|Analyzing intent/i)).toBeInTheDocument();
+    expect(screen.getByText(/Analyzing intent/i)).toBeInTheDocument();
   });
 });

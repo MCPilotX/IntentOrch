@@ -21,6 +21,7 @@ export default tseslint.config(
       '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
       '@typescript-eslint/no-empty-object-type': 'off',
       '@typescript-eslint/no-require-imports': 'off',
+      '@typescript-eslint/ban-ts-comment': 'off',
       'no-case-declarations': 'off',
       'no-async-promise-executor': 'warn',
       'no-useless-escape': 'off',

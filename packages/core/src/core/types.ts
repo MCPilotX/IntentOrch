@@ -1,11 +1,11 @@
 // Import types from constants to avoid duplication
-import { AIProvider, RuntimeType } from './constants';
+import { AIProvider, RuntimeType } from "./constants.js";
 
 // Re-export types from constants
 export { AIProvider, RuntimeType };
 
 export interface DockerConnectionConfig {
-  type: 'local' | 'remote' | 'socket';
+  type: "local" | "remote" | "socket";
   host?: string;
   port?: number;
   socketPath?: string;
@@ -86,7 +86,7 @@ export interface DetectionResult {
   runtime: RuntimeType;
   confidence: number;
   evidence: DetectionEvidence;
-  source: 'legacy' | 'enhanced' | 'explicit';
+  source: "legacy" | "enhanced" | "explicit";
   suggestions?: string[];
   warning?: string;
 }
@@ -147,17 +147,17 @@ export interface ServiceConfig {
   path: string;
 
   // Runtime configuration (multi-level priority)
-  runtime?: RuntimeType;                    // User explicitly specified (highest priority)
-  detectedRuntime?: RuntimeType;           // Auto-detection result
-  detectionConfidence?: number;            // Detection confidence (0-1)
-  detectionSource?: 'legacy' | 'enhanced' | 'explicit';
+  runtime?: RuntimeType; // User explicitly specified (highest priority)
+  detectedRuntime?: RuntimeType; // Auto-detection result
+  detectionConfidence?: number; // Detection confidence (0-1)
+  detectionSource?: "legacy" | "enhanced" | "explicit";
   detectionEvidence?: DetectionEvidence;
 
   // Runtime specific configuration
   runtimeConfig?: RuntimeSpecificConfig;
 
   // Docker specific configuration
-  dockerHost?: string;                     // Referenced Docker host configuration
+  dockerHost?: string; // Referenced Docker host configuration
 
   // Backward compatibility fields
   entry?: string;

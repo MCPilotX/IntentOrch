@@ -154,7 +154,7 @@ export class JSONVisualFormatter extends BaseFormatter {
       }
     } else {
       for (const key in obj) {
-        if (obj.hasOwnProperty(key)) {
+        if (Object.prototype.hasOwnProperty.call(obj, key)) {
           const depth = this.getJsonDepth(obj[key], currentDepth + 1);
           maxDepth = Math.max(maxDepth, depth);
         }

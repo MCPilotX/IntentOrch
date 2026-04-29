@@ -95,7 +95,7 @@ npm run preview
 
 ## API集成
 
-Web控制台需要与OrchApp CLI后端API集成。默认API地址为 `http://localhost:3001/api`。
+Web控制台需要与IntentOrch Daemon后端API集成。默认API地址为 `http://localhost:9658`。
 
 ### 主要API端点
 

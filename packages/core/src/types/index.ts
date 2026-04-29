@@ -2,4 +2,4 @@
  * Types Module Exports
  */
 
-export type { LightweightManifest } from './lightweight-manifest';
+export type { LightweightManifest } from "./lightweight-manifest.js";

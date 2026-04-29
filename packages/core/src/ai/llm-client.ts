@@ -7,13 +7,13 @@
  * Supported providers: openai, anthropic, google, azure, deepseek, ollama
  */
 
-import { logger } from '../core/logger';
-import type { AIConfig, AIProvider } from '../core/types';
+import { logger } from "../core/logger.js";
+import type { AIConfig, AIProvider } from "../core/types.js";
 
 // ==================== Types ====================
 
 export interface LLMMessage {
-  role: 'system' | 'user' | 'assistant';
+  role: "system" | "user" | "assistant";
   content: string;
 }
 
@@ -21,16 +21,16 @@ export interface LLMRequestOptions {
   messages: LLMMessage[];
   temperature?: number;
   maxTokens?: number;
-  responseFormat?: { type: 'text' | 'json_object' };
+  responseFormat?: { type: "text" | "json_object" };
   functions?: Array<{
     name: string;
     description?: string;
     parameters: Record<string, any>;
   }>;
-  functionCall?: 'auto' | 'none' | { name: string };
+  functionCall?: "auto" | "none" | { name: string };
   /** NEW: Tools in OpenAI-compatible format for function calling */
   tools?: Array<{
-    type: 'function';
+    type: "function";
     function: {
       name: string;
       description: string;
@@ -38,7 +38,7 @@ export interface LLMRequestOptions {
     };
   }>;
   /** NEW: Tool choice strategy */
-  toolChoice?: 'auto' | 'none' | 'required';
+  toolChoice?: "auto" | "none" | "required";
 }
 
 export interface LLMResponse {
@@ -72,50 +72,50 @@ interface ProviderConfig {
 
 const PROVIDER_CONFIGS: Record<string, ProviderConfig> = {
   openai: {
-    baseUrl: 'https://api.openai.com/v1',
-    defaultModel: 'gpt-3.5-turbo',
+    baseUrl: "https://api.openai.com/v1",
+    defaultModel: "gpt-3.5-turbo",
     headers: (apiKey) => ({
-      'Authorization': `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
     }),
   },
   anthropic: {
-    baseUrl: 'https://api.anthropic.com/v1',
-    defaultModel: 'claude-3-haiku-20240307',
+    baseUrl: "https://api.anthropic.com/v1",
+    defaultModel: "claude-3-haiku-20240307",
     headers: (apiKey) => ({
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
-      'Content-Type': 'application/json',
+      "x-api-key": apiKey,
+      "anthropic-version": "2023-06-01",
+      "Content-Type": "application/json",
     }),
   },
   google: {
-    baseUrl: 'https://generativelanguage.googleapis.com/v1',
-    defaultModel: 'gemini-pro',
+    baseUrl: "https://generativelanguage.googleapis.com/v1",
+    defaultModel: "gemini-pro",
     headers: (apiKey) => ({
-      'Content-Type': 'application/json',
+      "Content-Type": "application/json",
     }),
   },
   azure: {
-    baseUrl: '', // Dynamic: uses apiEndpoint
-    defaultModel: 'gpt-35-turbo',
+    baseUrl: "", // Dynamic: uses apiEndpoint
+    defaultModel: "gpt-35-turbo",
     headers: (apiKey) => ({
-      'api-key': apiKey,
-      'Content-Type': 'application/json',
+      "api-key": apiKey,
+      "Content-Type": "application/json",
     }),
   },
   deepseek: {
-    baseUrl: 'https://api.deepseek.com/v1',
-    defaultModel: 'deepseek-chat',
+    baseUrl: "https://api.deepseek.com/v1",
+    defaultModel: "deepseek-chat",
     headers: (apiKey) => ({
-      'Authorization': `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
     }),
   },
   ollama: {
-    baseUrl: 'http://localhost:11434',
-    defaultModel: 'llama2',
+    baseUrl: "http://localhost:11434",
+    defaultModel: "llama2",
     headers: () => ({
-      'Content-Type': 'application/json',
+      "Content-Type": "application/json",
     }),
   },
 };
@@ -132,7 +132,7 @@ export class LLMClient {
   configure(config: AIConfig): void {
     this.config = config;
 
-    if (config.provider === 'none' || !config.provider) {
+    if (config.provider === "none" || !config.provider) {
       this.providerConfig = null;
       return;
     }
@@ -150,21 +150,25 @@ export class LLMClient {
    * Check if the client is configured and ready
    */
   isConfigured(): boolean {
-    return this.config !== null && this.config.provider !== 'none' && this.providerConfig !== null;
+    return (
+      this.config !== null &&
+      this.config.provider !== "none" &&
+      this.providerConfig !== null
+    );
   }
 
   /**
    * Get the current provider name
    */
-  getProvider(): AIProvider | 'none' {
-    return this.config?.provider || 'none';
+  getProvider(): AIProvider | "none" {
+    return this.config?.provider || "none";
   }
 
   /**
    * Get the current model name
    */
   getModel(): string {
-    return this.config?.model || this.providerConfig?.defaultModel || 'unknown';
+    return this.config?.model || this.providerConfig?.defaultModel || "unknown";
   }
 
   /**
@@ -172,7 +176,7 @@ export class LLMClient {
    */
   async testConnection(): Promise<ConnectionTestResult> {
     if (!this.config || !this.providerConfig) {
-      return { success: false, message: 'AI not configured' };
+      return { success: false, message: "AI not configured" };
     }
 
     const provider = this.config.provider;
@@ -180,23 +184,29 @@ export class LLMClient {
 
     try {
       switch (provider) {
-        case 'openai':
-          return this.testOpenAICompatible(apiKey!, 'models');
-        case 'anthropic':
+        case "openai":
+          return this.testOpenAICompatible(apiKey!, "models");
+        case "anthropic":
           return this.testAnthropic(apiKey!);
-        case 'google':
+        case "google":
           return this.testGoogle(apiKey!);
-        case 'azure':
+        case "azure":
           return this.testAzure(apiKey!);
-        case 'deepseek':
-          return this.testOpenAICompatible(apiKey!, 'models');
-        case 'ollama':
+        case "deepseek":
+          return this.testOpenAICompatible(apiKey!, "models");
+        case "ollama":
           return this.testOllama();
         default:
-          return { success: false, message: `Unsupported provider: ${provider}` };
+          return {
+            success: false,
+            message: `Unsupported provider: ${provider}`,
+          };
       }
     } catch (error: any) {
-      return { success: false, message: `Connection test failed: ${error.message}` };
+      return {
+        success: false,
+        message: `Connection test failed: ${error.message}`,
+      };
     }
   }
 
@@ -205,7 +215,9 @@ export class LLMClient {
    */
   async chat(options: LLMRequestOptions): Promise<LLMResponse> {
     if (!this.config || !this.providerConfig) {
-      throw new Error('AI provider not configured. Please call configure() first.');
+      throw new Error(
+        "AI provider not configured. Please call configure() first.",
+      );
     }
 
     const provider = this.config.provider;
@@ -214,17 +226,17 @@ export class LLMClient {
 
     try {
       switch (provider) {
-        case 'openai':
+        case "openai":
           return this.callOpenAICompatible(options, apiKey!, model);
-        case 'anthropic':
+        case "anthropic":
           return this.callAnthropic(options, apiKey!, model);
-        case 'google':
+        case "google":
           return this.callGoogle(options, apiKey!, model);
-        case 'azure':
+        case "azure":
           return this.callAzure(options, apiKey!, model);
-        case 'deepseek':
+        case "deepseek":
           return this.callOpenAICompatible(options, apiKey!, model);
-        case 'ollama':
+        case "ollama":
           return this.callOllama(options, model);
         default:
           throw new Error(`Unsupported provider: ${provider}`);
@@ -237,40 +249,52 @@ export class LLMClient {
 
   // ==================== Connection Tests ====================
 
-  private async testOpenAICompatible(apiKey: string, path: string): Promise<ConnectionTestResult> {
+  private async testOpenAICompatible(
+    apiKey: string,
+    path: string,
+  ): Promise<ConnectionTestResult> {
     const baseUrl = this.getBaseUrl();
     const response = await fetch(`${baseUrl}/${path}`, {
       headers: {
-        'Authorization': `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
       },
     });
 
     if (response.ok) {
-      return { success: true, message: `${this.config!.provider} connection OK` };
+      return {
+        success: true,
+        message: `${this.config!.provider} connection OK`,
+      };
     }
-    return { success: false, message: `API returned error: ${response.status}` };
+    return {
+      success: false,
+      message: `API returned error: ${response.status}`,
+    };
   }
 
   private async testAnthropic(apiKey: string): Promise<ConnectionTestResult> {
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
+    const response = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
       headers: {
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-        'Content-Type': 'application/json',
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+        "Content-Type": "application/json",
       },
       body: JSON.stringify({
         model: this.getModel(),
         max_tokens: 10,
-        messages: [{ role: 'user', content: 'Hello' }],
+        messages: [{ role: "user", content: "Hello" }],
       }),
     });
 
     if (response.ok) {
-      return { success: true, message: 'Anthropic connection OK' };
+      return { success: true, message: "Anthropic connection OK" };
     }
-    return { success: false, message: `API returned error: ${response.status}` };
+    return {
+      success: false,
+      message: `API returned error: ${response.status}`,
+    };
   }
 
   private async testGoogle(apiKey: string): Promise<ConnectionTestResult> {
@@ -279,43 +303,52 @@ export class LLMClient {
     );
 
     if (response.ok) {
-      return { success: true, message: 'Google Gemini connection OK' };
+      return { success: true, message: "Google Gemini connection OK" };
     }
-    return { success: false, message: `API returned error: ${response.status}` };
+    return {
+      success: false,
+      message: `API returned error: ${response.status}`,
+    };
   }
 
   private async testAzure(apiKey: string): Promise<ConnectionTestResult> {
     if (!this.config?.apiEndpoint) {
-      return { success: false, message: 'Missing API endpoint for Azure' };
+      return { success: false, message: "Missing API endpoint for Azure" };
     }
-    const apiVersion = this.config.apiVersion || '2024-02-15-preview';
-    const endpoint = this.config.apiEndpoint.replace(/\/$/, '');
+    const apiVersion = this.config.apiVersion || "2024-02-15-preview";
+    const endpoint = this.config.apiEndpoint.replace(/\/$/, "");
     const url = `${endpoint}/openai/deployments?api-version=${apiVersion}`;
 
     const response = await fetch(url, {
       headers: {
-        'api-key': apiKey,
-        'Content-Type': 'application/json',
+        "api-key": apiKey,
+        "Content-Type": "application/json",
       },
     });
 
     if (response.ok) {
-      return { success: true, message: 'Azure OpenAI connection OK' };
+      return { success: true, message: "Azure OpenAI connection OK" };
     }
-    return { success: false, message: `API returned error: ${response.status}` };
+    return {
+      success: false,
+      message: `API returned error: ${response.status}`,
+    };
   }
 
   private async testOllama(): Promise<ConnectionTestResult> {
-    const endpoint = this.config?.apiEndpoint || 'http://localhost:11434';
+    const endpoint = this.config?.apiEndpoint || "http://localhost:11434";
     const response = await fetch(`${endpoint}/api/tags`, {
-      method: 'GET',
-      headers: { 'Content-Type': 'application/json' },
+      method: "GET",
+      headers: { "Content-Type": "application/json" },
     });
 
     if (response.ok) {
       return { success: true, message: `Ollama connection OK (${endpoint})` };
     }
-    return { success: false, message: `Ollama service error: ${response.status}` };
+    return {
+      success: false,
+      message: `Ollama service error: ${response.status}`,
+    };
   }
 
   // ==================== Chat Completion Calls ====================
@@ -338,23 +371,23 @@ export class LLMClient {
     }
     if (options.functions && options.functions.length > 0) {
       requestBody.functions = options.functions;
-      requestBody.function_call = options.functionCall || 'auto';
+      requestBody.function_call = options.functionCall || "auto";
     }
     // NEW: Support tools parameter for function calling
     if (options.tools && options.tools.length > 0) {
       requestBody.tools = options.tools;
-      requestBody.tool_choice = options.toolChoice || 'auto';
+      requestBody.tool_choice = options.toolChoice || "auto";
       // DeepSeek V4 Pro strict mode: force LLM to strictly follow tool schema
-      if (options.toolChoice === 'required') {
+      if (options.toolChoice === "required") {
         requestBody.strict = true;
       }
     }
 
     const response = await fetch(`${baseUrl}/chat/completions`, {
-      method: 'POST',
+      method: "POST",
       headers: {
-        'Authorization': `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
       },
       body: JSON.stringify(requestBody),
     });
@@ -365,7 +398,7 @@ export class LLMClient {
 
     const raw = await response.json();
     return {
-      text: raw.choices?.[0]?.message?.content || '',
+      text: raw.choices?.[0]?.message?.content || "",
       raw,
       provider: this.config!.provider,
       model,
@@ -379,12 +412,12 @@ export class LLMClient {
     apiKey: string,
     model: string,
   ): Promise<LLMResponse> {
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
+    const response = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
       headers: {
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-        'Content-Type': 'application/json',
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+        "Content-Type": "application/json",
       },
       body: JSON.stringify({
         model,
@@ -400,9 +433,9 @@ export class LLMClient {
 
     const raw = await response.json();
     return {
-      text: raw.content?.[0]?.text || '',
+      text: raw.content?.[0]?.text || "",
       raw,
-      provider: 'anthropic',
+      provider: "anthropic",
       model,
     };
   }
@@ -415,12 +448,12 @@ export class LLMClient {
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1/models/${model}:generateContent?key=${apiKey}`,
       {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           contents: options.messages.map((msg) => ({
             parts: [{ text: msg.content }],
-            role: msg.role === 'user' ? 'user' : 'model',
+            role: msg.role === "user" ? "user" : "model",
           })),
           generationConfig: {
             temperature: options.temperature ?? 0.1,
@@ -436,9 +469,9 @@ export class LLMClient {
 
     const raw = await response.json();
     return {
-      text: raw.candidates?.[0]?.content?.parts?.[0]?.text || '',
+      text: raw.candidates?.[0]?.content?.parts?.[0]?.text || "",
       raw,
-      provider: 'google',
+      provider: "google",
       model,
     };
   }
@@ -448,8 +481,9 @@ export class LLMClient {
     apiKey: string,
     model: string,
   ): Promise<LLMResponse> {
-    const endpoint = this.config?.apiEndpoint || 'https://YOUR_RESOURCE.openai.azure.com';
-    const apiVersion = this.config?.apiVersion || '2024-02-15-preview';
+    const endpoint =
+      this.config?.apiEndpoint || "https://YOUR_RESOURCE.openai.azure.com";
+    const apiVersion = this.config?.apiVersion || "2024-02-15-preview";
     const url = `${endpoint}/openai/deployments/${model}/chat/completions?api-version=${apiVersion}`;
 
     const requestBody: any = {
@@ -460,14 +494,14 @@ export class LLMClient {
 
     if (options.functions && options.functions.length > 0) {
       requestBody.functions = options.functions;
-      requestBody.function_call = options.functionCall || 'auto';
+      requestBody.function_call = options.functionCall || "auto";
     }
 
     const response = await fetch(url, {
-      method: 'POST',
+      method: "POST",
       headers: {
-        'api-key': apiKey,
-        'Content-Type': 'application/json',
+        "api-key": apiKey,
+        "Content-Type": "application/json",
       },
       body: JSON.stringify(requestBody),
     });
@@ -478,9 +512,9 @@ export class LLMClient {
 
     const raw = await response.json();
     return {
-      text: raw.choices?.[0]?.message?.content || '',
+      text: raw.choices?.[0]?.message?.content || "",
       raw,
-      provider: 'azure',
+      provider: "azure",
       model,
     };
   }
@@ -489,15 +523,15 @@ export class LLMClient {
     options: LLMRequestOptions,
     model: string,
   ): Promise<LLMResponse> {
-    const endpoint = this.config?.apiEndpoint || 'http://localhost:11434';
+    const endpoint = this.config?.apiEndpoint || "http://localhost:11434";
     const lastMsg = options.messages[options.messages.length - 1];
 
     const response = await fetch(`${endpoint}/api/generate`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         model,
-        prompt: lastMsg?.content || '',
+        prompt: lastMsg?.content || "",
         stream: false,
         options: {
           temperature: options.temperature ?? 0.1,
@@ -512,9 +546,9 @@ export class LLMClient {
 
     const raw = await response.json();
     return {
-      text: raw.response || '',
+      text: raw.response || "",
       raw,
-      provider: 'ollama',
+      provider: "ollama",
       model,
     };
   }
@@ -523,7 +557,7 @@ export class LLMClient {
 
   private getBaseUrl(): string {
     if (this.config?.apiEndpoint) {
-      return this.config.apiEndpoint.replace(/\/+$/, '');
+      return this.config.apiEndpoint.replace(/\/+$/, "");
     }
     return this.providerConfig!.baseUrl;
   }

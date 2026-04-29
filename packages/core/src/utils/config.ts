@@ -1,11 +1,15 @@
 // This file is now a backward compatibility wrapper for the new ConfigService
 // It delegates to the new unified configuration system
 
-import type { AIConfig, AIProvider } from '../core/types';
-import { getConfigManager, getAIConfig as getAIConfigNew, getRegistryConfig as getRegistryConfigNew } from '../core/config-adapter';
+import type { AIConfig, AIProvider } from "../core/types.js";
+import {
+  getConfigManager,
+  getAIConfig as getAIConfigNew,
+  getRegistryConfig as getRegistryConfigNew,
+} from "../core/config-adapter.js";
 
 // Re-export types for backward compatibility
-export type { AIConfig } from '../core/types';
+export type { AIConfig } from "../core/types.js";
 
 // Define RegistryConfig type for backward compatibility
 export interface RegistryConfig {
@@ -18,7 +22,10 @@ export interface RegistryConfig {
 export { getConfigManager };
 
 // Re-export utility functions
-export { getAIConfigNew as getAIConfig, getRegistryConfigNew as getRegistryConfig };
+export {
+  getAIConfigNew as getAIConfig,
+  getRegistryConfigNew as getRegistryConfig,
+};
 
 // For backward compatibility, we also export a ConfigManager class
 // that delegates to the new system

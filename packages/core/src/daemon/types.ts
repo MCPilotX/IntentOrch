@@ -10,7 +10,7 @@ export interface ServerInfo {
   serverName: string;
   name: string;
   version: string;
-  status: 'running' | 'stopped' | 'error';
+  status: "running" | "stopped" | "error";
   startTime: number;
   logPath: string;
 }

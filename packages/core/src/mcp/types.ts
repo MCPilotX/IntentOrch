@@ -12,14 +12,14 @@ export interface MCPError {
 }
 
 export interface JSONRPCRequest {
-  jsonrpc: '2.0';
+  jsonrpc: "2.0";
   id: string | number | null;
   method: string;
   params?: any;
 }
 
 export interface JSONRPCResponse {
-  jsonrpc: '2.0';
+  jsonrpc: "2.0";
   id: string | number | null;
   result?: any;
   error?: MCPError;
@@ -63,7 +63,7 @@ export interface Tool {
   name: string;
   description: string;
   inputSchema: {
-    type: 'object';
+    type: "object";
     properties: Record<string, JSONSchemaProperty>;
     required?: string[];
     additionalProperties?: boolean;
@@ -83,7 +83,7 @@ export interface ToolCall {
 
 export interface ToolResult {
   content: Array<{
-    type: 'text' | 'image' | 'resource';
+    type: "text" | "image" | "resource";
     text?: string;
     data?: any;
   }>;
@@ -130,7 +130,7 @@ export interface PromptList {
 
 // ==================== Transport Layer Types ====================
 
-export type TransportType = 'stdio' | 'http' | 'sse';
+export type TransportType = "stdio" | "http" | "sse";
 
 export interface StdioLogFilterConfig {
   // Log patterns to ignore (regex strings)
@@ -158,7 +158,7 @@ export interface TransportConfig {
   cwd?: string;
   // Optional existing child process to connect to (for dynamic tool discovery)
   // When provided, the transport will use this process instead of spawning a new one
-  existingProcess?: import('child_process').ChildProcess;
+  existingProcess?: import("child_process").ChildProcess;
 }
 
 // ==================== Client Configuration ====================
@@ -172,16 +172,15 @@ export interface MCPClientConfig {
   serverName?: string;
 }
 
-
 // ==================== Event Types ====================
 
 export type MCPEventType =
-  | 'connected'
-  | 'disconnected'
-  | 'error'
-  | 'tools_updated'
-  | 'resources_updated'
-  | 'prompts_updated';
+  | "connected"
+  | "disconnected"
+  | "error"
+  | "tools_updated"
+  | "resources_updated"
+  | "prompts_updated";
 
 export interface MCPEvent {
   type: MCPEventType;
@@ -206,24 +205,24 @@ export interface MCPSession {
 
 export const MCP_METHODS = {
   // Tool related
-  TOOLS_LIST: 'tools/list',
-  TOOLS_CALL: 'tools/call',
+  TOOLS_LIST: "tools/list",
+  TOOLS_CALL: "tools/call",
 
   // Resource related
-  RESOURCES_LIST: 'resources/list',
-  RESOURCES_READ: 'resources/read',
-  RESOURCES_SUBSCRIBE: 'resources/subscribe',
-  RESOURCES_UNSUBSCRIBE: 'resources/unsubscribe',
+  RESOURCES_LIST: "resources/list",
+  RESOURCES_READ: "resources/read",
+  RESOURCES_SUBSCRIBE: "resources/subscribe",
+  RESOURCES_UNSUBSCRIBE: "resources/unsubscribe",
 
   // Prompt related
-  PROMPTS_LIST: 'prompts/list',
-  PROMPTS_GET: 'prompts/get',
+  PROMPTS_LIST: "prompts/list",
+  PROMPTS_GET: "prompts/get",
 
   // Logging related
-  LOGGING_SET_LEVEL: 'logging/setLevel',
+  LOGGING_SET_LEVEL: "logging/setLevel",
 
   // Notifications
-  NOTIFICATIONS_LIST: 'notifications/list',
+  NOTIFICATIONS_LIST: "notifications/list",
 } as const;
 
 export const MCP_ERROR_CODES = {

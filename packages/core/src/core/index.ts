@@ -4,7 +4,7 @@
  */
 
 // Export configuration management
-export { ConfigService, getConfigService } from './config-service';
+export { ConfigService, getConfigService } from "./config-service.js";
 
 // Export types
 export type {
@@ -15,7 +15,7 @@ export type {
   DetectionResult,
   DockerConnectionConfig,
   RuntimeSpecificConfig,
-} from './types';
+} from "./types.js";
 
 // Export constants
 export {
@@ -29,7 +29,7 @@ export {
   ConfigDefaults,
   ErrorMessages,
   DEFAULT_CONFIG,
-} from './constants';
+} from "./constants.js";
 
 // Export error handling
 export {
@@ -44,7 +44,7 @@ export {
   wrapError,
   isMCPilotError,
   shouldRetry,
-} from './error-handler';
+} from "./error-handler.js";
 
 // Export logger
-export { logger } from './logger';
+export { logger } from "./logger.js";

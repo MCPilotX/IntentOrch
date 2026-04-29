@@ -3,7 +3,7 @@
  * Standardized tool metadata for better integration with MCP service management tools
  */
 
-import { Tool } from './types';
+import { Tool } from "./types.js";
 
 export interface ToolCategory {
   id: string;
@@ -36,7 +36,7 @@ export interface ToolMetadata {
 
   // Input/output specifications
   inputSchema: {
-    type: 'object';
+    type: "object";
     properties: Record<string, any>;
     required?: string[];
     additionalProperties?: boolean;
@@ -129,64 +129,64 @@ export class ToolMetadataManager {
   // Predefined standard categories
   private readonly standardCategories: ToolCategory[] = [
     {
-      id: 'filesystem',
-      name: 'Filesystem',
-      description: 'Tools for file and directory operations',
-      icon: '📁',
+      id: "filesystem",
+      name: "Filesystem",
+      description: "Tools for file and directory operations",
+      icon: "📁",
     },
     {
-      id: 'network',
-      name: 'Network',
-      description: 'Tools for network communication and APIs',
-      icon: '🌐',
+      id: "network",
+      name: "Network",
+      description: "Tools for network communication and APIs",
+      icon: "🌐",
     },
     {
-      id: 'database',
-      name: 'Database',
-      description: 'Tools for database operations',
-      icon: '🗄️',
+      id: "database",
+      name: "Database",
+      description: "Tools for database operations",
+      icon: "🗄️",
     },
     {
-      id: 'ai',
-      name: 'Artificial Intelligence',
-      description: 'AI and machine learning tools',
-      icon: '🤖',
+      id: "ai",
+      name: "Artificial Intelligence",
+      description: "AI and machine learning tools",
+      icon: "🤖",
     },
     {
-      id: 'development',
-      name: 'Development',
-      description: 'Software development tools',
-      icon: '💻',
+      id: "development",
+      name: "Development",
+      description: "Software development tools",
+      icon: "💻",
     },
     {
-      id: 'system',
-      name: 'System',
-      description: 'System-level operations and utilities',
-      icon: '⚙️',
+      id: "system",
+      name: "System",
+      description: "System-level operations and utilities",
+      icon: "⚙️",
     },
     {
-      id: 'communication',
-      name: 'Communication',
-      description: 'Messaging and communication tools',
-      icon: '💬',
+      id: "communication",
+      name: "Communication",
+      description: "Messaging and communication tools",
+      icon: "💬",
     },
     {
-      id: 'security',
-      name: 'Security',
-      description: 'Security and authentication tools',
-      icon: '🔒',
+      id: "security",
+      name: "Security",
+      description: "Security and authentication tools",
+      icon: "🔒",
     },
     {
-      id: 'monitoring',
-      name: 'Monitoring',
-      description: 'Monitoring and observability tools',
-      icon: '📊',
+      id: "monitoring",
+      name: "Monitoring",
+      description: "Monitoring and observability tools",
+      icon: "📊",
     },
   ];
 
   constructor() {
     // Initialize with standard categories
-    this.standardCategories.forEach(category => {
+    this.standardCategories.forEach((category) => {
       this.categories.set(category.id, category);
     });
   }
@@ -217,7 +217,7 @@ export class ToolMetadataManager {
       tags,
       capabilities,
       inputSchema: tool.inputSchema,
-      version: '1.0.0',
+      version: "1.0.0",
       provider: serviceName,
       security: {
         authenticationRequired: false,
@@ -248,35 +248,56 @@ export class ToolMetadataManager {
 
     // Check for category keywords
     const categoryKeywords: Record<string, string[]> = {
-      filesystem: ['file', 'directory', 'folder', 'path', 'read', 'write', 'delete'],
-      network: ['http', 'api', 'request', 'url', 'network', 'web', 'fetch'],
-      database: ['database', 'db', 'query', 'sql', 'collection', 'document'],
-      ai: ['ai', 'llm', 'model', 'generate', 'embedding', 'vector', 'chat'],
-      development: ['git', 'github', 'pr', 'commit', 'code', 'build', 'test'],
-      system: ['command', 'execute', 'process', 'system', 'shell', 'terminal'],
-      communication: ['slack', 'email', 'message', 'notification', 'chat', 'send'],
-      security: ['auth', 'login', 'password', 'token', 'permission', 'access'],
-      monitoring: ['log', 'monitor', 'metric', 'alert', 'status', 'health'],
+      filesystem: [
+        "file",
+        "directory",
+        "folder",
+        "path",
+        "read",
+        "write",
+        "delete",
+      ],
+      network: ["http", "api", "request", "url", "network", "web", "fetch"],
+      database: ["database", "db", "query", "sql", "collection", "document"],
+      ai: ["ai", "llm", "model", "generate", "embedding", "vector", "chat"],
+      development: ["git", "github", "pr", "commit", "code", "build", "test"],
+      system: ["command", "execute", "process", "system", "shell", "terminal"],
+      communication: [
+        "slack",
+        "email",
+        "message",
+        "notification",
+        "chat",
+        "send",
+      ],
+      security: ["auth", "login", "password", "token", "permission", "access"],
+      monitoring: ["log", "monitor", "metric", "alert", "status", "health"],
     };
 
     // Find the best matching category
-    let bestMatch = this.categories.get('system')!; // Default to system
+    let bestMatch = this.categories.get("system")!; // Default to system
     let bestScore = 0;
 
     for (const [categoryId, keywords] of Object.entries(categoryKeywords)) {
       const category = this.categories.get(categoryId);
-      if (!category) {continue;}
+      if (!category) {
+        continue;
+      }
 
       let score = 0;
 
       // Check tool name
-      keywords.forEach(keyword => {
-        if (toolName.includes(keyword)) {score += 2;}
+      keywords.forEach((keyword) => {
+        if (toolName.includes(keyword)) {
+          score += 2;
+        }
       });
 
       // Check description
-      keywords.forEach(keyword => {
-        if (description.includes(keyword)) {score += 1;}
+      keywords.forEach((keyword) => {
+        if (description.includes(keyword)) {
+          score += 1;
+        }
       });
 
       if (score > bestScore) {
@@ -297,16 +318,44 @@ export class ToolMetadataManager {
 
     // Common capability patterns
     const capabilityPatterns = [
-      { id: 'read', name: 'Read', keywords: ['read', 'get', 'fetch', 'retrieve'] },
-      { id: 'write', name: 'Write', keywords: ['write', 'create', 'add', 'insert'] },
-      { id: 'update', name: 'Update', keywords: ['update', 'modify', 'edit', 'change'] },
-      { id: 'delete', name: 'Delete', keywords: ['delete', 'remove', 'erase'] },
-      { id: 'list', name: 'List', keywords: ['list', 'enumerate', 'show'] },
-      { id: 'search', name: 'Search', keywords: ['search', 'find', 'lookup'] },
-      { id: 'execute', name: 'Execute', keywords: ['execute', 'run', 'call', 'invoke'] },
-      { id: 'send', name: 'Send', keywords: ['send', 'post', 'publish', 'notify'] },
-      { id: 'receive', name: 'Receive', keywords: ['receive', 'get', 'obtain'] },
-      { id: 'analyze', name: 'Analyze', keywords: ['analyze', 'process', 'parse'] },
+      {
+        id: "read",
+        name: "Read",
+        keywords: ["read", "get", "fetch", "retrieve"],
+      },
+      {
+        id: "write",
+        name: "Write",
+        keywords: ["write", "create", "add", "insert"],
+      },
+      {
+        id: "update",
+        name: "Update",
+        keywords: ["update", "modify", "edit", "change"],
+      },
+      { id: "delete", name: "Delete", keywords: ["delete", "remove", "erase"] },
+      { id: "list", name: "List", keywords: ["list", "enumerate", "show"] },
+      { id: "search", name: "Search", keywords: ["search", "find", "lookup"] },
+      {
+        id: "execute",
+        name: "Execute",
+        keywords: ["execute", "run", "call", "invoke"],
+      },
+      {
+        id: "send",
+        name: "Send",
+        keywords: ["send", "post", "publish", "notify"],
+      },
+      {
+        id: "receive",
+        name: "Receive",
+        keywords: ["receive", "get", "obtain"],
+      },
+      {
+        id: "analyze",
+        name: "Analyze",
+        keywords: ["analyze", "process", "parse"],
+      },
     ];
 
     for (const pattern of capabilityPatterns) {
@@ -325,9 +374,9 @@ export class ToolMetadataManager {
     // If no capabilities detected, add a generic one
     if (capabilities.length === 0) {
       capabilities.push({
-        id: 'execute',
-        name: 'Execute',
-        description: 'Execute the tool',
+        id: "execute",
+        name: "Execute",
+        description: "Execute the tool",
       });
     }
 
@@ -343,20 +392,36 @@ export class ToolMetadataManager {
     // Add tags based on tool name patterns
     const toolName = tool.name.toLowerCase();
 
-    if (toolName.includes('_')) {
-      tags.push(...toolName.split('_').filter(part => part.length > 2));
+    if (toolName.includes("_")) {
+      tags.push(...toolName.split("_").filter((part) => part.length > 2));
     }
 
     // Add generic tags based on tool name patterns
     // No service-specific logic - works for ANY MCP service
-    if (toolName.includes('file')) {tags.push('file');}
-    if (toolName.includes('http')) {tags.push('http');}
-    if (toolName.includes('search')) {tags.push('search');}
-    if (toolName.includes('list')) {tags.push('list');}
-    if (toolName.includes('get')) {tags.push('get');}
-    if (toolName.includes('create')) {tags.push('create');}
-    if (toolName.includes('update')) {tags.push('update');}
-    if (toolName.includes('delete')) {tags.push('delete');}
+    if (toolName.includes("file")) {
+      tags.push("file");
+    }
+    if (toolName.includes("http")) {
+      tags.push("http");
+    }
+    if (toolName.includes("search")) {
+      tags.push("search");
+    }
+    if (toolName.includes("list")) {
+      tags.push("list");
+    }
+    if (toolName.includes("get")) {
+      tags.push("get");
+    }
+    if (toolName.includes("create")) {
+      tags.push("create");
+    }
+    if (toolName.includes("update")) {
+      tags.push("update");
+    }
+    if (toolName.includes("delete")) {
+      tags.push("delete");
+    }
 
     // Remove duplicates
     return Array.from(new Set(tags));
@@ -368,8 +433,8 @@ export class ToolMetadataManager {
   private generateDisplayName(toolName: string): string {
     // Convert snake_case or kebab-case to Title Case
     return toolName
-      .replace(/[_-]/g, ' ')
-      .replace(/\b\w/g, char => char.toUpperCase())
+      .replace(/[_-]/g, " ")
+      .replace(/\b\w/g, (char) => char.toUpperCase())
       .trim();
   }
 
@@ -383,7 +448,9 @@ export class ToolMetadataManager {
   /**
    * Update existing tool metadata
    */
-  async update(updates: Partial<ToolMetadata> & { toolName: string }): Promise<void> {
+  async update(
+    updates: Partial<ToolMetadata> & { toolName: string },
+  ): Promise<void> {
     const existing = this.metadata.get(updates.toolName);
     if (!existing) {
       throw new Error(`Tool metadata not found: ${updates.toolName}`);
@@ -408,28 +475,30 @@ export class ToolMetadataManager {
 
     if (filter) {
       if (filter.category) {
-        tools = tools.filter(t => t.category === filter.category);
+        tools = tools.filter((t) => t.category === filter.category);
       }
       if (filter.tags && filter.tags.length > 0) {
-        tools = tools.filter(t =>
-          filter.tags!.some(tag => t.tags.includes(tag)),
+        tools = tools.filter((t) =>
+          filter.tags!.some((tag) => t.tags.includes(tag)),
         );
       }
       if (filter.capabilities && filter.capabilities.length > 0) {
-        tools = tools.filter(t =>
-          filter.capabilities!.some(cap =>
-            t.capabilities.some(c => c.id === cap),
+        tools = tools.filter((t) =>
+          filter.capabilities!.some((cap) =>
+            t.capabilities.some((c) => c.id === cap),
           ),
         );
       }
       if (filter.provider) {
-        tools = tools.filter(t => t.provider === filter.provider);
+        tools = tools.filter((t) => t.provider === filter.provider);
       }
       if (filter.serviceId) {
-        tools = tools.filter(t => t.integration.serviceId === filter.serviceId);
+        tools = tools.filter(
+          (t) => t.integration.serviceId === filter.serviceId,
+        );
       }
       if (filter.deprecated !== undefined) {
-        tools = tools.filter(t => t.deprecated === filter.deprecated);
+        tools = tools.filter((t) => t.deprecated === filter.deprecated);
       }
     }
 
@@ -440,20 +509,25 @@ export class ToolMetadataManager {
    * Search tools by query
    */
   async search(query: string): Promise<ToolMetadata[]> {
-    const searchTerms = query.toLowerCase().split(/\s+/).filter(term => term.length > 0);
+    const searchTerms = query
+      .toLowerCase()
+      .split(/\s+/)
+      .filter((term) => term.length > 0);
 
-    return Array.from(this.metadata.values()).filter(tool => {
+    return Array.from(this.metadata.values()).filter((tool) => {
       const searchableText = [
         tool.toolName,
         tool.displayName,
         tool.description,
         tool.category,
         ...tool.tags,
-        ...tool.capabilities.map(c => c.name),
+        ...tool.capabilities.map((c) => c.name),
         tool.provider,
-      ].join(' ').toLowerCase();
+      ]
+        .join(" ")
+        .toLowerCase();
 
-      return searchTerms.every(term => searchableText.includes(term));
+      return searchTerms.every((term) => searchableText.includes(term));
     });
   }
 
@@ -475,7 +549,9 @@ export class ToolMetadataManager {
    * Get tools by category
    */
   async getToolsByCategory(categoryId: string): Promise<ToolMetadata[]> {
-    return Array.from(this.metadata.values()).filter(tool => tool.category === categoryId);
+    return Array.from(this.metadata.values()).filter(
+      (tool) => tool.category === categoryId,
+    );
   }
 
   /**
@@ -485,7 +561,8 @@ export class ToolMetadataManager {
     const metadata = this.metadata.get(toolName);
     if (metadata) {
       metadata.integration.lastUsed = Date.now();
-      metadata.integration.usageCount = (metadata.integration.usageCount || 0) + 1;
+      metadata.integration.usageCount =
+        (metadata.integration.usageCount || 0) + 1;
     }
   }
 
@@ -494,8 +571,14 @@ export class ToolMetadataManager {
    */
   async getMostUsedTools(limit: number = 10): Promise<ToolMetadata[]> {
     return Array.from(this.metadata.values())
-      .filter(tool => tool.integration.usageCount && tool.integration.usageCount > 0)
-      .sort((a, b) => (b.integration.usageCount || 0) - (a.integration.usageCount || 0))
+      .filter(
+        (tool) =>
+          tool.integration.usageCount && tool.integration.usageCount > 0,
+      )
+      .sort(
+        (a, b) =>
+          (b.integration.usageCount || 0) - (a.integration.usageCount || 0),
+      )
       .slice(0, limit);
   }
 
@@ -504,8 +587,10 @@ export class ToolMetadataManager {
    */
   async getRecentlyUsedTools(limit: number = 10): Promise<ToolMetadata[]> {
     return Array.from(this.metadata.values())
-      .filter(tool => tool.integration.lastUsed)
-      .sort((a, b) => (b.integration.lastUsed || 0) - (a.integration.lastUsed || 0))
+      .filter((tool) => tool.integration.lastUsed)
+      .sort(
+        (a, b) => (b.integration.lastUsed || 0) - (a.integration.lastUsed || 0),
+      )
       .slice(0, limit);
   }
 }

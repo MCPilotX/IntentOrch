@@ -1,5 +1,5 @@
-import os from 'os';
-import { execSync } from 'child_process';
+import os from "os";
+import { execSync } from "child_process";
 
 /**
  * Cross-platform process liveness check.
@@ -10,7 +10,7 @@ export function isProcessRunning(pid: number): boolean {
   if (pid <= 0) {
     return false;
   }
-  
+
   // Method 1: Try signal 0 (fastest)
   try {
     // On Windows and POSIX, signal 0 can be used to test for the existence of a process.
@@ -19,30 +19,30 @@ export function isProcessRunning(pid: number): boolean {
   } catch (error: any) {
     // ESRCH means the process does not exist.
     // EPERM means the process exists but we don't have permission to send a signal to it.
-    if (error.code === 'EPERM') {
+    if (error.code === "EPERM") {
       return true;
     }
     // If signal 0 fails with ESRCH, process doesn't exist
-    if (error.code === 'ESRCH') {
+    if (error.code === "ESRCH") {
       return false;
     }
     // For other errors, try other methods
   }
-  
+
   // Method 2: Try ps command (more reliable on Unix)
   try {
     if (isWindows()) {
       // Windows: use tasklist command
-      const output = execSync(`tasklist /FI "PID eq ${pid}"`, { 
-        encoding: 'utf-8',
-        stdio: ['pipe', 'pipe', 'ignore'] // Ignore stderr
+      const output = execSync(`tasklist /FI "PID eq ${pid}"`, {
+        encoding: "utf-8",
+        stdio: ["pipe", "pipe", "ignore"], // Ignore stderr
       });
       return output.includes(`${pid}`);
     } else {
       // Unix-like: use ps command with more reliable options
-      const output = execSync(`ps -p ${pid} -o pid= -o comm=`, { 
-        encoding: 'utf-8',
-        stdio: ['pipe', 'pipe', 'ignore'] // Ignore stderr
+      const output = execSync(`ps -p ${pid} -o pid= -o comm=`, {
+        encoding: "utf-8",
+        stdio: ["pipe", "pipe", "ignore"], // Ignore stderr
       });
       return output.trim().length > 0 && output.includes(`${pid}`);
     }
@@ -55,29 +55,33 @@ export function isProcessRunning(pid: number): boolean {
 /**
  * Enhanced process check with retry logic for recently started processes
  */
-export function isProcessRunningWithRetry(pid: number, maxRetries: number = 3, delayMs: number = 500): Promise<boolean> {
+export function isProcessRunningWithRetry(
+  pid: number,
+  maxRetries: number = 3,
+  delayMs: number = 500,
+): Promise<boolean> {
   return new Promise((resolve) => {
     let retries = 0;
-    
+
     const check = () => {
       if (isProcessRunning(pid)) {
         resolve(true);
         return;
       }
-      
+
       retries++;
       if (retries >= maxRetries) {
         resolve(false);
         return;
       }
-      
+
       setTimeout(check, delayMs);
     };
-    
+
     check();
   });
 }
 
 export function isWindows(): boolean {
-  return os.platform() === 'win32';
+  return os.platform() === "win32";
 }

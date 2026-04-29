@@ -12,13 +12,16 @@
  * - New: 1 LLM call (function calling) directly generates the plan with tool + params
  */
 
-import { logger } from '../core/logger';
-import { LLMClient, getLLMClient } from './llm-client';
-import type { AIConfig } from '../core/types';
-import type { Tool } from '../mcp/types';
-import { ParameterMapper, ValidationLevel } from '../mcp/parameter-mapper';
-import { Timeouts, LLMDefaults } from '../core/constants';
-import type { LLMMessage, LLMResponse as LLMClientResponse } from './llm-client';
+import { logger } from "../core/logger.js";
+import { LLMClient, getLLMClient } from "./llm-client.js";
+import type { AIConfig } from "../core/types.js";
+import type { Tool } from "../mcp/types.js";
+import { ParameterMapper, ValidationLevel } from "../mcp/parameter-mapper.js";
+import { Timeouts, LLMDefaults } from "../core/constants.js";
+import type {
+  LLMMessage,
+  LLMResponse as LLMClientResponse,
+} from "./llm-client.js";
 
 // ==================== Plan-then-Execute Types ====================
 
@@ -98,7 +101,7 @@ export interface PlanConfirmationCallback {
 
 export interface CloudIntentEngineConfig {
   llm: {
-    provider: AIConfig['provider'];
+    provider: AIConfig["provider"];
     apiKey?: string;
     endpoint?: string;
     model?: string;
@@ -161,7 +164,7 @@ export class CloudIntentEngine {
     this.llmClient = getLLMClient();
     this.llmClient.configure({
       provider: config.llm.provider,
-      apiKey: config.llm.apiKey || '',
+      apiKey: config.llm.apiKey || "",
       model: config.llm.model || LLMDefaults.MODEL,
       temperature: config.llm.temperature ?? LLMDefaults.TEMPERATURE,
       maxTokens: config.llm.maxTokens ?? LLMDefaults.MAX_TOKENS,
@@ -204,7 +207,9 @@ export class CloudIntentEngine {
       temperature?: number;
     },
   ): Promise<ToolExecutionPlan> {
-    logger.info(`[CloudIntentEngine] planQuery called: "${query.substring(0, 100)}..."`);
+    logger.info(
+      `[CloudIntentEngine] planQuery called: "${query.substring(0, 100)}..."`,
+    );
 
     const startTime = Date.now();
 
@@ -218,30 +223,33 @@ export class CloudIntentEngine {
       // Call LLM with function calling
       const response = await this.llmClient.chat({
         messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userMessage },
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userMessage },
         ],
         temperature: options?.temperature,
-        tools: this.availableTools.map(tool => ({
-          type: 'function' as const,
+        tools: this.availableTools.map((tool) => ({
+          type: "function" as const,
           function: {
             name: tool.name,
-            description: tool.description || '',
-            parameters: tool.inputSchema || { type: 'object', properties: {} },
+            description: tool.description || "",
+            parameters: tool.inputSchema || { type: "object", properties: {} },
           },
         })),
-        toolChoice: 'auto',
+        toolChoice: "auto",
       });
 
       // Parse the response into a plan
       const plan = this.parseResponseToPlan(query, response);
 
       const duration = Date.now() - startTime;
-      logger.info(`[CloudIntentEngine] Plan generated in ${duration}ms with ${plan.steps.length} steps`);
+      logger.info(
+        `[CloudIntentEngine] Plan generated in ${duration}ms with ${plan.steps.length} steps`,
+      );
 
       return plan;
     } catch (error: unknown) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
       logger.error(`[CloudIntentEngine] planQuery failed: ${errorMessage}`);
 
       // Return a fallback plan
@@ -273,7 +281,7 @@ export class CloudIntentEngine {
 
     // If the plan has no steps, auto-confirm
     if (plan.steps.length === 0) {
-      logger.info('[CloudIntentEngine] Plan has no steps, auto-confirming');
+      logger.info("[CloudIntentEngine] Plan has no steps, auto-confirming");
       return {
         ...plan,
         confirmed: true,
@@ -294,16 +302,21 @@ export class CloudIntentEngine {
         logger.info(`[CloudIntentEngine] Plan ${plan.id} confirmed by user`);
         return confirmedPlan;
       } else {
-        logger.info(`[CloudIntentEngine] Plan ${plan.id} rejected by user: ${response.feedback || 'no feedback'}`);
+        logger.info(
+          `[CloudIntentEngine] Plan ${plan.id} rejected by user: ${response.feedback || "no feedback"}`,
+        );
         return {
           ...plan,
           confirmed: false,
-          summary: `User cancelled the plan: ${response.feedback || 'User did not provide feedback'}`,
+          summary: `User cancelled the plan: ${response.feedback || "User did not provide feedback"}`,
         };
       }
     } catch (error: unknown) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      logger.error(`[CloudIntentEngine] Confirmation callback failed: ${errorMessage}`);
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
+      logger.error(
+        `[CloudIntentEngine] Confirmation callback failed: ${errorMessage}`,
+      );
       return {
         ...plan,
         confirmed: false,
@@ -322,31 +335,38 @@ export class CloudIntentEngine {
    */
   async executePlan(
     plan: ToolExecutionPlan,
-    toolExecutor: (toolName: string, params: Record<string, unknown>) => Promise<unknown>,
+    toolExecutor: (
+      toolName: string,
+      params: Record<string, unknown>,
+    ) => Promise<unknown>,
   ): Promise<PlanExecutionResult> {
-    logger.info(`[CloudIntentEngine] executePlan called for plan ${plan.id} with ${plan.steps.length} steps`);
+    logger.info(
+      `[CloudIntentEngine] executePlan called for plan ${plan.id} with ${plan.steps.length} steps`,
+    );
 
     const startTime = Date.now();
 
     if (!plan.confirmed) {
-      logger.warn('[CloudIntentEngine] Plan not confirmed, refusing to execute');
+      logger.warn(
+        "[CloudIntentEngine] Plan not confirmed, refusing to execute",
+      );
       return {
         success: false,
         plan,
         stepResults: [],
         totalDuration: 0,
-        finalResult: 'Plan has not been confirmed. Call confirmPlan() first.',
+        finalResult: "Plan has not been confirmed. Call confirmPlan() first.",
       };
     }
 
     if (plan.steps.length === 0) {
-      logger.warn('[CloudIntentEngine] Plan has no steps');
+      logger.warn("[CloudIntentEngine] Plan has no steps");
       return {
         success: true,
         plan,
         stepResults: [],
         totalDuration: 0,
-        finalResult: 'No steps to execute.',
+        finalResult: "No steps to execute.",
       };
     }
 
@@ -356,7 +376,7 @@ export class CloudIntentEngine {
       variables: new Map(),
     };
 
-    const stepResults: PlanExecutionResult['stepResults'] = [];
+    const stepResults: PlanExecutionResult["stepResults"] = [];
 
     // Topological sort to determine execution order
     const executionOrder = this.topologicalSortPlan(plan.steps);
@@ -367,17 +387,17 @@ export class CloudIntentEngine {
         plan,
         stepResults: [],
         totalDuration: Date.now() - startTime,
-        finalResult: 'Circular dependency detected in plan',
+        finalResult: "Circular dependency detected in plan",
       };
     }
 
     // Execute steps in order
     for (const stepId of executionOrder) {
-      const step = plan.steps.find(s => s.id === stepId);
+      const step = plan.steps.find((s) => s.id === stepId);
       if (!step) {
         stepResults.push({
           stepId,
-          toolName: 'unknown',
+          toolName: "unknown",
           success: false,
           error: `Step ${stepId} not found in plan`,
           duration: 0,
@@ -389,7 +409,10 @@ export class CloudIntentEngine {
 
       try {
         // Resolve parameters with variable substitution
-        const resolvedArgs = this.resolvePlanParameters(step.arguments, context);
+        const resolvedArgs = this.resolvePlanParameters(
+          step.arguments,
+          context,
+        );
 
         // Execute the tool
         const result = await toolExecutor(step.toolName, resolvedArgs);
@@ -407,10 +430,13 @@ export class CloudIntentEngine {
           duration,
         });
 
-        logger.info(`[CloudIntentEngine] Step ${step.id} (${step.toolName}) completed in ${duration}ms`);
+        logger.info(
+          `[CloudIntentEngine] Step ${step.id} (${step.toolName}) completed in ${duration}ms`,
+        );
       } catch (error: unknown) {
         const duration = Date.now() - stepStartTime;
-        const errorMessage = error instanceof Error ? error.message : String(error);
+        const errorMessage =
+          error instanceof Error ? error.message : String(error);
 
         stepResults.push({
           stepId: step.id,
@@ -420,7 +446,9 @@ export class CloudIntentEngine {
           duration,
         });
 
-        logger.error(`[CloudIntentEngine] Step ${step.id} (${step.toolName}) failed: ${errorMessage}`);
+        logger.error(
+          `[CloudIntentEngine] Step ${step.id} (${step.toolName}) failed: ${errorMessage}`,
+        );
 
         // Stop execution on first failure
         break;
@@ -428,7 +456,7 @@ export class CloudIntentEngine {
     }
 
     const totalDuration = Date.now() - startTime;
-    const success = stepResults.every(sr => sr.success);
+    const success = stepResults.every((sr) => sr.success);
     const finalResult = success
       ? stepResults[stepResults.length - 1]?.result
       : undefined;
@@ -450,7 +478,10 @@ export class CloudIntentEngine {
   async planAndExecute(
     query: string,
     confirmationCallback: PlanConfirmationCallback,
-    toolExecutor: (toolName: string, params: Record<string, unknown>) => Promise<unknown>,
+    toolExecutor: (
+      toolName: string,
+      params: Record<string, unknown>,
+    ) => Promise<unknown>,
     options?: {
       systemPrompt?: string;
       model?: string;
@@ -494,23 +525,25 @@ export class CloudIntentEngine {
   async processQueryWithHistory(
     conversationHistory: Array<{ role: string; content: string }>,
     options?: {
-      toolChoice?: 'auto' | 'none';
+      toolChoice?: "auto" | "none";
       model?: string;
       temperature?: number;
     },
   ): Promise<FunctionCallingResult> {
-    logger.debug(`[CloudIntentEngine] processQueryWithHistory called with ${conversationHistory.length} messages`);
+    logger.debug(
+      `[CloudIntentEngine] processQueryWithHistory called with ${conversationHistory.length} messages`,
+    );
 
     try {
       const response = await this.llmClient.chat({
         messages: conversationHistory as LLMMessage[],
         temperature: options?.temperature,
-        tools: this.availableTools.map(tool => ({
-          type: 'function' as const,
+        tools: this.availableTools.map((tool) => ({
+          type: "function" as const,
           function: {
             name: tool.name,
-            description: tool.description || '',
-            parameters: tool.inputSchema || { type: 'object', properties: {} },
+            description: tool.description || "",
+            parameters: tool.inputSchema || { type: "object", properties: {} },
           },
         })),
         toolChoice: options?.toolChoice,
@@ -518,8 +551,11 @@ export class CloudIntentEngine {
 
       return this.parseFunctionCallingResponse(response);
     } catch (error: unknown) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      logger.error(`[CloudIntentEngine] processQueryWithHistory failed: ${errorMessage}`);
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
+      logger.error(
+        `[CloudIntentEngine] processQueryWithHistory failed: ${errorMessage}`,
+      );
       return {
         hasToolCall: false,
         toolCalls: [],
@@ -537,22 +573,22 @@ export class CloudIntentEngine {
    */
   private buildSystemPrompt(): string {
     const toolsDescription = this.availableTools
-      .map(tool => {
+      .map((tool) => {
         const params = tool.inputSchema?.properties
           ? Object.entries(tool.inputSchema.properties)
               .map(([key, value]) => {
                 const prop = value as Record<string, unknown>;
-                return `  - ${key} (${(prop.type as string) || 'string'}): ${(prop.description as string) || ''}`;
+                return `  - ${key} (${(prop.type as string) || "string"}): ${(prop.description as string) || ""}`;
               })
-              .join('\n')
-          : '  No parameters';
+              .join("\n")
+          : "  No parameters";
 
         return `Tool: ${tool.name}
-Description: ${tool.description || 'No description'}
+Description: ${tool.description || "No description"}
 Parameters:
 ${params}`;
       })
-      .join('\n\n');
+      .join("\n\n");
 
     return `You are an intelligent assistant that generates structured execution plans.
 
@@ -587,20 +623,24 @@ Please generate a structured execution plan to fulfill this request.`;
    * Handles both the LLMClientResponse format (with toolCalls containing
    * {id, type, function: {name, arguments}}) and text-based JSON responses.
    */
-  private parseResponseToPlan(query: string, response: LLMClientResponse): ToolExecutionPlan {
+  private parseResponseToPlan(
+    query: string,
+    response: LLMClientResponse,
+  ): ToolExecutionPlan {
     const plan: ToolExecutionPlan = {
       id: `plan_${Date.now()}`,
       query,
       steps: [],
       confirmed: false,
       createdAt: new Date(),
-      summary: '',
+      summary: "",
     };
 
     // Build a tool name -> server name lookup from available tools
     const toolServerMap = new Map<string, string>();
     for (const tool of this.availableTools) {
-      const serverName = (tool as unknown as Record<string, unknown>).serverName as string | undefined;
+      const serverName = (tool as unknown as Record<string, unknown>)
+        .serverName as string | undefined;
       if (serverName && !toolServerMap.has(tool.name)) {
         toolServerMap.set(tool.name, serverName);
       }
@@ -626,21 +666,27 @@ Please generate a structured execution plan to fulfill this request.`;
         };
       });
 
-      plan.summary = `Plan with ${plan.steps.length} steps using ${plan.steps.map(s => s.toolName).join(', ')}`;
+      plan.summary = `Plan with ${plan.steps.length} steps using ${plan.steps.map((s) => s.toolName).join(", ")}`;
     } else if (response.text) {
       // Try to parse JSON from the response text
       try {
         const parsed = JSON.parse(response.text);
         if (parsed.steps && Array.isArray(parsed.steps)) {
-          plan.steps = parsed.steps.map((step: Record<string, unknown>, index: number) => ({
-            id: (step.id as string) || `step_${index + 1}`,
-            toolName: step.toolName as string,
-            serverName: (step.serverName as string) || toolServerMap.get(step.toolName as string),
-            description: (step.description as string) || `Step ${index + 1}`,
-            arguments: (step.arguments as Record<string, unknown>) || {},
-            dependsOn: (step.dependsOn as string[]) || [],
-          }));
-          plan.summary = (parsed.summary as string) || `Plan with ${plan.steps.length} steps`;
+          plan.steps = parsed.steps.map(
+            (step: Record<string, unknown>, index: number) => ({
+              id: (step.id as string) || `step_${index + 1}`,
+              toolName: step.toolName as string,
+              serverName:
+                (step.serverName as string) ||
+                toolServerMap.get(step.toolName as string),
+              description: (step.description as string) || `Step ${index + 1}`,
+              arguments: (step.arguments as Record<string, unknown>) || {},
+              dependsOn: (step.dependsOn as string[]) || [],
+            }),
+          );
+          plan.summary =
+            (parsed.summary as string) ||
+            `Plan with ${plan.steps.length} steps`;
         } else {
           plan.summary = response.text.substring(0, 200);
         }
@@ -656,7 +702,9 @@ Please generate a structured execution plan to fulfill this request.`;
   /**
    * Parse function calling response from LLMClientResponse format
    */
-  private parseFunctionCallingResponse(response: LLMClientResponse): FunctionCallingResult {
+  private parseFunctionCallingResponse(
+    response: LLMClientResponse,
+  ): FunctionCallingResult {
     const result: FunctionCallingResult = {
       hasToolCall: false,
       toolCalls: [],
@@ -666,7 +714,7 @@ Please generate a structured execution plan to fulfill this request.`;
 
     if (response.toolCalls && response.toolCalls.length > 0) {
       result.hasToolCall = true;
-      result.toolCalls = response.toolCalls.map(tc => {
+      result.toolCalls = response.toolCalls.map((tc) => {
         let args: Record<string, unknown> = {};
         try {
           args = JSON.parse(tc.function.arguments);
@@ -752,17 +800,27 @@ Please generate a structured execution plan to fulfill this request.`;
     const resolved: Record<string, unknown> = {};
 
     for (const [key, value] of Object.entries(args)) {
-      if (typeof value === 'string' && value.includes('{{')) {
+      if (typeof value === "string" && value.includes("{{")) {
         resolved[key] = this.resolveTemplateString(value, context);
-      } else if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
-        resolved[key] = this.resolvePlanParameters(value as Record<string, unknown>, context);
+      } else if (
+        typeof value === "object" &&
+        value !== null &&
+        !Array.isArray(value)
+      ) {
+        resolved[key] = this.resolvePlanParameters(
+          value as Record<string, unknown>,
+          context,
+        );
       } else if (Array.isArray(value)) {
-        resolved[key] = value.map(item => {
-          if (typeof item === 'string' && item.includes('{{')) {
+        resolved[key] = value.map((item) => {
+          if (typeof item === "string" && item.includes("{{")) {
             return this.resolveTemplateString(item, context);
           }
-          if (typeof item === 'object' && item !== null) {
-            return this.resolvePlanParameters(item as Record<string, unknown>, context);
+          if (typeof item === "object" && item !== null) {
+            return this.resolvePlanParameters(
+              item as Record<string, unknown>,
+              context,
+            );
           }
           return item;
         });
@@ -777,7 +835,10 @@ Please generate a structured execution plan to fulfill this request.`;
   /**
    * Resolve a template string with variable substitution
    */
-  private resolveTemplateString(template: string, context: ExecutionContext): string {
+  private resolveTemplateString(
+    template: string,
+    context: ExecutionContext,
+  ): string {
     return template.replace(/\{\{(.+?)\}\}/g, (match, expression) => {
       const expr = (expression as string).trim();
 
@@ -789,7 +850,9 @@ Please generate a structured execution plan to fulfill this request.`;
         const result = context.results.get(stepId);
 
         if (result === undefined) {
-          logger.warn(`[CloudIntentEngine] Template variable ${match} not found in context`);
+          logger.warn(
+            `[CloudIntentEngine] Template variable ${match} not found in context`,
+          );
           return match;
         }
 
@@ -799,7 +862,9 @@ Please generate a structured execution plan to fulfill this request.`;
           return value !== undefined ? String(value) : match;
         }
 
-        return typeof result === 'object' ? JSON.stringify(result) : String(result);
+        return typeof result === "object"
+          ? JSON.stringify(result)
+          : String(result);
       }
 
       // Check for variable reference: var.name
@@ -808,7 +873,9 @@ Please generate a structured execution plan to fulfill this request.`;
         const varName = varMatch[1];
         const value = context.variables.get(varName);
         if (value === undefined) {
-          logger.warn(`[CloudIntentEngine] Variable ${varName} not found in context`);
+          logger.warn(
+            `[CloudIntentEngine] Variable ${varName} not found in context`,
+          );
           return match;
         }
         return String(value);
@@ -824,14 +891,17 @@ Please generate a structured execution plan to fulfill this request.`;
    * Get a nested value from an object using dot notation
    */
   private getNestedValue(obj: unknown, path: string): unknown {
-    const keys = path.split('.');
+    const keys = path.split(".");
     let current: unknown = obj;
 
     for (const key of keys) {
       if (current === null || current === undefined) {
         return undefined;
       }
-      if (typeof current === 'object' && key in (current as Record<string, unknown>)) {
+      if (
+        typeof current === "object" &&
+        key in (current as Record<string, unknown>)
+      ) {
         current = (current as Record<string, unknown>)[key];
       } else {
         return undefined;
@@ -844,13 +914,19 @@ Please generate a structured execution plan to fulfill this request.`;
   /**
    * Describe a tool call for logging
    */
-  private describeToolCall(toolName: string, args: Record<string, unknown>): string {
+  private describeToolCall(
+    toolName: string,
+    args: Record<string, unknown>,
+  ): string {
     const paramSummary = Object.entries(args)
       .map(([key, value]) => {
-        const valueStr = typeof value === 'string' ? `"${value.substring(0, 50)}"` : String(value);
+        const valueStr =
+          typeof value === "string"
+            ? `"${value.substring(0, 50)}"`
+            : String(value);
         return `${key}=${valueStr}`;
       })
-      .join(', ');
+      .join(", ");
 
     return `${toolName}(${paramSummary})`;
   }

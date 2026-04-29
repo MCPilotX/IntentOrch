@@ -3,10 +3,8 @@
   "version": "0.8.0",
   "description": "Web dashboard for IntentOrch - MCP Ecosystem Orchestration Platform",
   "type": "module",
-  "main": "dist/index.html",
   "files": [
     "dist",
-    "public",
     "README.md"
   ],
   "scripts": {
@@ -22,7 +20,7 @@
   "dependencies": {
     "@headlessui/react": "^2.2.10",
     "@heroicons/react": "^2.2.0",
-    "@intentorch/core": "workspace:*",
+    "@intentorch/core": "^0.8.0",
     "@tanstack/react-query": "^5.99.0",
     "@tanstack/react-query-devtools": "^5.99.0",
     "axios": "^1.15.0",
@@ -70,7 +68,7 @@
     "vite"
   ],
   "author": "MCPilotX",
-  "license": "Apache 2.0",
+  "license": "Apache-2.0",
   "repository": {
     "type": "git",
     "url": "https://github.com/mcpilotx/intentorch.git",

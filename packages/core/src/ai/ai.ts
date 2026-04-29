@@ -8,16 +8,16 @@
  * This file will be removed in a future major version.
  */
 
-import chalk from 'chalk';
-import { logger } from '../core/logger';
-import { LLMClient, getLLMClient } from './llm-client';
-import type { AIConfig, AIProvider } from '../core/types';
+import chalk from "chalk";
+import { logger } from "../core/logger.js";
+import { LLMClient, getLLMClient } from "./llm-client.js";
+import type { AIConfig, AIProvider } from "../core/types.js";
 
 // ==================== Types (kept for backward compatibility) ====================
 
 // Query result
 export interface AskResult {
-  type: 'tool_call' | 'suggestions' | 'text' | 'text_response' | 'error';
+  type: "tool_call" | "suggestions" | "text" | "text_response" | "error";
   tool?: ToolCall;
   suggestions?: string[];
   message?: string;
@@ -29,7 +29,7 @@ export interface AskResult {
 }
 
 // Tool call (MCP standard format)
-export type ToolCall = import('../mcp/types').ToolCall;
+export type ToolCall = import("../mcp/types.js").ToolCall;
 
 // Intent analysis result
 export interface Intent {
@@ -44,11 +44,11 @@ export class AIError extends Error {
   constructor(
     public code: string,
     override message: string,
-    public category: 'config' | 'connection' | 'execution',
+    public category: "config" | "connection" | "execution",
     public suggestions: string[] = [],
   ) {
     super(message);
-    this.name = 'AIError';
+    this.name = "AIError";
   }
 }
 
@@ -65,7 +65,7 @@ export class AI {
 
   constructor() {
     this.llmClient = getLLMClient();
-    logger.info('[AI] Initializing AI service (Facade)');
+    logger.info("[AI] Initializing AI service (Facade)");
   }
 
   /**
@@ -76,27 +76,27 @@ export class AI {
 
     // Provider-specific validation
     switch (config.provider) {
-      case 'openai':
-      case 'anthropic':
-      case 'google':
-      case 'azure':
-      case 'deepseek': {
+      case "openai":
+      case "anthropic":
+      case "google":
+      case "azure":
+      case "deepseek": {
         if (!config.apiKey) {
           throw new AIError(
-            'AI_CONFIG_ERROR',
+            "AI_CONFIG_ERROR",
             `${config.provider} requires API key`,
-            'config',
-            ['Provide an API key in configuration'],
+            "config",
+            ["Provide an API key in configuration"],
           );
         }
         break;
       }
 
-      case 'ollama': {
+      case "ollama": {
         break;
       }
 
-      case 'none': {
+      case "none": {
         this.enabled = false;
         this.config = config;
         return;
@@ -104,10 +104,12 @@ export class AI {
 
       default:
         throw new AIError(
-          'AI_CONFIG_ERROR',
+          "AI_CONFIG_ERROR",
           `Unsupported provider: ${config.provider}`,
-          'config',
-          ['Supported providers: openai, anthropic, google, azure, deepseek, ollama'],
+          "config",
+          [
+            "Supported providers: openai, anthropic, google, azure, deepseek, ollama",
+          ],
         );
     }
 
@@ -116,7 +118,8 @@ export class AI {
     try {
       this.client = {
         provider: config.provider,
-        endpoint: config.apiEndpoint || this.getDefaultEndpoint(config.provider),
+        endpoint:
+          config.apiEndpoint || this.getDefaultEndpoint(config.provider),
         config,
       };
 
@@ -133,13 +136,13 @@ export class AI {
       logger.warn(`[AI] Client initialization failed: ${error.message}`);
       this.enabled = false;
       throw new AIError(
-        'AI_INIT_ERROR',
+        "AI_INIT_ERROR",
         `AI initialization failed: ${error.message}`,
-        'connection',
+        "connection",
         [
-          'Check network connection',
-          'Verify configuration',
-          'Run: mcp ai test to test connection',
+          "Check network connection",
+          "Verify configuration",
+          "Run: mcp ai test to test connection",
         ],
       );
     }
@@ -149,8 +152,8 @@ export class AI {
    * Test AI connection — delegates to LLMClient
    */
   async testConnection(): Promise<{ success: boolean; message: string }> {
-    if (!this.config || this.config.provider === 'none') {
-      return { success: false, message: 'AI not configured' };
+    if (!this.config || this.config.provider === "none") {
+      return { success: false, message: "AI not configured" };
     }
     return this.llmClient.testConnection();
   }
@@ -159,11 +162,15 @@ export class AI {
    * Generate embeddings — delegates to LLMClient (simplified)
    */
   async embed(text: string): Promise<number[]> {
-    if (!this.enabled || !this.config || this.config.provider === 'none') {
-      throw new Error('AI not configured. Embedding requires an AI provider with API key.');
+    if (!this.enabled || !this.config || this.config.provider === "none") {
+      throw new Error(
+        "AI not configured. Embedding requires an AI provider with API key.",
+      );
     }
     // Simplified: use LLMClient for embedding if available
-    logger.warn('[AI] embed() is deprecated. Use CloudIntentEngine for new code.');
+    logger.warn(
+      "[AI] embed() is deprecated. Use CloudIntentEngine for new code.",
+    );
     return [];
   }
 
@@ -173,20 +180,25 @@ export class AI {
   async ask(query: string): Promise<AskResult> {
     logger.info(`[AI] Processing query: "${query}"`);
 
-    if (!this.enabled || !this.config || this.config.provider === 'none') {
+    if (!this.enabled || !this.config || this.config.provider === "none") {
       throw new AIError(
-        'AI_NOT_CONFIGURED',
-        'AI provider not configured.',
-        'config',
-        ['Run: mcpilot.configureAI({ provider: "openai", apiKey: "YOUR_API_KEY" })'],
+        "AI_NOT_CONFIGURED",
+        "AI provider not configured.",
+        "config",
+        [
+          'Run: mcpilot.configureAI({ provider: "openai", apiKey: "YOUR_API_KEY" })',
+        ],
       );
     }
 
     if (!query || query.trim().length === 0) {
       return {
-        type: 'suggestions',
-        message: 'Please provide a query',
-        suggestions: ['Try asking something like: "list files in current directory"', 'Or: "start http service"'],
+        type: "suggestions",
+        message: "Please provide a query",
+        suggestions: [
+          'Try asking something like: "list files in current directory"',
+          'Or: "start http service"',
+        ],
       };
     }
 
@@ -195,16 +207,17 @@ export class AI {
       const response = await this.llmClient.chat({
         messages: [
           {
-            role: 'system',
-            content: 'You are a helpful AI assistant. Analyze the user query and respond helpfully.',
+            role: "system",
+            content:
+              "You are a helpful AI assistant. Analyze the user query and respond helpfully.",
           },
-          { role: 'user', content: query },
+          { role: "user", content: query },
         ],
         temperature: 0.3,
       });
 
       return {
-        type: 'text',
+        type: "text",
         text: response.text,
       };
     } catch (error: any) {
@@ -216,19 +229,24 @@ export class AI {
   /**
    * Generate text response using AI — delegates to LLMClient
    */
-  async generateText(query: string, options?: {
-    temperature?: number;
-    maxTokens?: number;
-    systemPrompt?: string;
-  }): Promise<string> {
+  async generateText(
+    query: string,
+    options?: {
+      temperature?: number;
+      maxTokens?: number;
+      systemPrompt?: string;
+    },
+  ): Promise<string> {
     logger.info(`[AI] Generating text for query: "${query}"`);
 
-    if (!this.enabled || !this.config || this.config.provider === 'none') {
+    if (!this.enabled || !this.config || this.config.provider === "none") {
       throw new AIError(
-        'AI_NOT_CONFIGURED',
-        'AI provider not configured.',
-        'config',
-        ['Run: mcpilot.configureAI({ provider: "openai", apiKey: "YOUR_API_KEY" })'],
+        "AI_NOT_CONFIGURED",
+        "AI provider not configured.",
+        "config",
+        [
+          'Run: mcpilot.configureAI({ provider: "openai", apiKey: "YOUR_API_KEY" })',
+        ],
       );
     }
 
@@ -236,11 +254,11 @@ export class AI {
       const response = await this.llmClient.chat({
         messages: [
           {
-            role: 'system',
-            content: options?.systemPrompt || 'You are a helpful AI assistant.',
+            role: "system",
+            content: options?.systemPrompt || "You are a helpful AI assistant.",
           },
           {
-            role: 'user',
+            role: "user",
             content: query,
           },
         ],
@@ -252,9 +270,9 @@ export class AI {
     } catch (error: any) {
       logger.error(`[AI] Text generation failed: ${error.message}`);
       throw new AIError(
-        'TEXT_GENERATION_FAILED',
+        "TEXT_GENERATION_FAILED",
         `Text generation failed: ${error.message}`,
-        'execution',
+        "execution",
       );
     }
   }
@@ -263,16 +281,20 @@ export class AI {
    * Parse intent from natural language query (simplified)
    */
   async parseIntent(query: string): Promise<Intent> {
-    logger.warn('[AI] parseIntent() is deprecated. Use CloudIntentEngine.planQuery() for new code.');
-    return { action: 'unknown', target: '', params: {}, confidence: 0 };
+    logger.warn(
+      "[AI] parseIntent() is deprecated. Use CloudIntentEngine.planQuery() for new code.",
+    );
+    return { action: "unknown", target: "", params: {}, confidence: 0 };
   }
 
   /**
    * Analyze intent with optional LLM fallback (simplified)
    */
   async analyzeIntent(query: string): Promise<Intent> {
-    logger.warn('[AI] analyzeIntent() is deprecated. Use CloudIntentEngine.planQuery() for new code.');
-    return { action: 'unknown', target: '', params: {}, confidence: 0 };
+    logger.warn(
+      "[AI] analyzeIntent() is deprecated. Use CloudIntentEngine.planQuery() for new code.",
+    );
+    return { action: "unknown", target: "", params: {}, confidence: 0 };
   }
 
   // ==================== Private Methods ====================
@@ -285,7 +307,7 @@ export class AI {
     ];
 
     return {
-      type: 'suggestions',
+      type: "suggestions",
       message: `I couldn't understand "${query}". Please try rephrasing.`,
       suggestions,
     };
@@ -293,13 +315,20 @@ export class AI {
 
   private getDefaultEndpoint(provider: AIProvider): string {
     switch (provider) {
-      case 'openai': return 'https://api.openai.com/v1';
-      case 'anthropic': return 'https://api.anthropic.com/v1';
-      case 'google': return 'https://generativelanguage.googleapis.com/v1';
-      case 'azure': return 'https://YOUR_RESOURCE.openai.azure.com';
-      case 'deepseek': return 'https://api.deepseek.com/v1';
-      case 'ollama': return 'http://localhost:11434';
-      default: return '';
+      case "openai":
+        return "https://api.openai.com/v1";
+      case "anthropic":
+        return "https://api.anthropic.com/v1";
+      case "google":
+        return "https://generativelanguage.googleapis.com/v1";
+      case "azure":
+        return "https://YOUR_RESOURCE.openai.azure.com";
+      case "deepseek":
+        return "https://api.deepseek.com/v1";
+      case "ollama":
+        return "http://localhost:11434";
+      default:
+        return "";
     }
   }
 }

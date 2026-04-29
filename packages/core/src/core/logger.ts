@@ -1,12 +1,12 @@
-import * as fs from 'fs';
-import * as path from 'path';
-import { LOGS_DIR } from './constants';
+import * as fs from "fs";
+import * as path from "path";
+import { LOGS_DIR } from "./constants.js";
 
 export enum LogLevel {
-  DEBUG = 'DEBUG',
-  INFO = 'INFO',
-  WARN = 'WARN',
-  ERROR = 'ERROR'
+  DEBUG = "DEBUG",
+  INFO = "INFO",
+  WARN = "WARN",
+  ERROR = "ERROR",
 }
 
 export class Logger {
@@ -21,7 +21,7 @@ export class Logger {
     }
 
     // Create date-named log file
-    const date = new Date().toISOString().split('T')[0];
+    const date = new Date().toISOString().split("T")[0];
     this.logFile = path.join(LOGS_DIR, `mcpilot-${date}.log`);
   }
 
@@ -37,13 +37,22 @@ export class Logger {
   }
 
   private shouldLog(level: LogLevel): boolean {
-    const levels = [LogLevel.DEBUG, LogLevel.INFO, LogLevel.WARN, LogLevel.ERROR];
+    const levels = [
+      LogLevel.DEBUG,
+      LogLevel.INFO,
+      LogLevel.WARN,
+      LogLevel.ERROR,
+    ];
     return levels.indexOf(level) >= levels.indexOf(this.logLevel);
   }
 
-  private formatMessage(level: LogLevel, message: string, context?: any): string {
+  private formatMessage(
+    level: LogLevel,
+    message: string,
+    context?: any,
+  ): string {
     const timestamp = new Date().toISOString();
-    const contextStr = context ? ` ${JSON.stringify(context)}` : '';
+    const contextStr = context ? ` ${JSON.stringify(context)}` : "";
     return `[${timestamp}] [${level}] ${message}${contextStr}`;
   }
 
@@ -57,13 +66,15 @@ export class Logger {
 
       // Ensure log file exists
       if (!fs.existsSync(this.logFile)) {
-        fs.writeFileSync(this.logFile, '', 'utf8');
+        fs.writeFileSync(this.logFile, "", "utf8");
       }
 
-      fs.appendFileSync(this.logFile, message + '\n', 'utf8');
+      fs.appendFileSync(this.logFile, message + "\n", "utf8");
     } catch (error: any) {
       // If file write fails, at least output to console
-      console.error(`Failed to write to log file ${this.logFile}: ${error.message}`);
+      console.error(
+        `Failed to write to log file ${this.logFile}: ${error.message}`,
+      );
     }
   }
 
@@ -115,7 +126,7 @@ export class Logger {
     // Safely record configuration updates, hide sensitive information
     const safeConfig = { ...config };
     if (safeConfig.apiKey) {
-      safeConfig.apiKey = '***' + safeConfig.apiKey.slice(-4);
+      safeConfig.apiKey = "***" + safeConfig.apiKey.slice(-4);
     }
     this.info(`Configuration updated: ${configType}`, { config: safeConfig });
   }

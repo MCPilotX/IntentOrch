@@ -202,7 +202,7 @@ const Dashboard: React.FC = () => {
         
         <div className={`flex items-center space-x-2 px-3 py-1.5 rounded-full border ${isAlive ? 'bg-green-50 border-green-200 text-green-700' : 'bg-red-50 border-red-200 text-red-700'}`}>
           <div className={`w-2.5 h-2.5 rounded-full ${isAlive ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`}></div>
-          <span className="text-sm font-medium">{isAlive ? 'Daemon Online' : 'Daemon Offline'}</span>
+          <span className="text-sm font-medium">{isAlive ? t('login.daemonConnected') : t('login.daemonDisconnected')}</span>
         </div>
       </div>
 
@@ -264,7 +264,7 @@ const Dashboard: React.FC = () => {
                       <button
                         onClick={() => handleStopProcess(process.pid)}
                         className="p-2 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
-                        title="Stop Process"
+                        title={t('processes.stopProcess')}
                       >
                         <StopCircle className="w-5 h-5" />
                       </button>

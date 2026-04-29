@@ -1,33 +1,38 @@
 #!/usr/bin/env node
 
-import { Command } from 'commander';
-import { configCommand } from './config';
-import { secretCommand } from './secret';
-import { pullCommand } from './pull';
-import { runCommand } from './run';
-import { startCommand } from './start';
-import { stopCommand } from './stop';
-import { psCommand } from './ps';
-import { listCommand } from './list';
-import { logsCommand } from './logs';
-import { workflowCommand } from './workflow';
-import { daemonCommand } from './daemon';
-import { dashboardCommand } from './dashboard';
-import { PROGRAM_NAME, PROGRAM_DESCRIPTION, PROGRAM_VERSION, closeSqliteDb } from '@intentorch/core';
+import { Command } from "commander";
+import { configCommand } from "./config.js";
+import { secretCommand } from "./secret.js";
+import { pullCommand } from "./pull.js";
+import { runCommand } from "./run.js";
+import { startCommand } from "./start.js";
+import { stopCommand } from "./stop.js";
+import { psCommand } from "./ps.js";
+import { listCommand } from "./list.js";
+import { logsCommand } from "./logs.js";
+import { workflowCommand } from "./workflow.js";
+import { daemonCommand } from "./daemon.js";
+import { dashboardCommand } from "./dashboard.js";
+import {
+  PROGRAM_NAME,
+  PROGRAM_DESCRIPTION,
+  PROGRAM_VERSION,
+  closeSqliteDb,
+} from "@intentorch/core";
 
 const program = new Command();
 
 // Ensure DB is closed on exit
-process.on('exit', () => {
+process.on("exit", () => {
   closeSqliteDb();
 });
 
-process.on('SIGINT', () => {
+process.on("SIGINT", () => {
   closeSqliteDb();
   process.exit(0);
 });
 
-process.on('SIGTERM', () => {
+process.on("SIGTERM", () => {
   closeSqliteDb();
   process.exit(0);
 });

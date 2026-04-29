@@ -2,10 +2,26 @@
  * Utilities Module Exports
  */
 
-export { AutoStartManager } from './auto-start-manager';
-export { CloudIntentEngineFactory } from './cloud-intent-engine-factory';
-export { ConfigManager, getConfigManager, getAIConfig, getRegistryConfig } from './config';
-export { getProcessesPath, getConfigPath, getLogsDir, getLogPath, getInTorchDir, ensureInTorchDir } from './paths';
-export { normalizeServerName, getDisplayName } from './server-name';
-export { isProcessRunning, isProcessRunningWithRetry, isWindows } from './system';
-export { OwnerProjectFormat } from './owner-project-format';
+export { AutoStartManager } from "./auto-start-manager.js";
+export { CloudIntentEngineFactory } from "./cloud-intent-engine-factory.js";
+export {
+  ConfigManager,
+  getConfigManager,
+  getAIConfig,
+  getRegistryConfig,
+} from "./config.js";
+export {
+  getProcessesPath,
+  getConfigPath,
+  getLogsDir,
+  getLogPath,
+  getInTorchDir,
+  ensureInTorchDir,
+} from "./paths.js";
+export { normalizeServerName, getDisplayName } from "./server-name.js";
+export {
+  isProcessRunning,
+  isProcessRunningWithRetry,
+  isWindows,
+} from "./system.js";
+export { OwnerProjectFormat } from "./owner-project-format.js";

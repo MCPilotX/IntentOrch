@@ -10,32 +10,32 @@
  * 5. Recovery strategies for retryable errors
  */
 
-import { logger } from '../core/logger';
-import type { Tool } from '../mcp/types';
+import { logger } from "../core/logger.js";
+import type { Tool } from "../mcp/types.js";
 
 // ==================== Type Definitions ====================
 
 export type ErrorCategory =
-  | 'connection'
-  | 'timeout'
-  | 'authentication'
-  | 'authorization'
-  | 'rate_limited'
-  | 'invalid_parameters'
-  | 'resource_not_found'
-  | 'server_error'
-  | 'network_error'
-  | 'protocol_error'
-  | 'unknown';
+  | "connection"
+  | "timeout"
+  | "authentication"
+  | "authorization"
+  | "rate_limited"
+  | "invalid_parameters"
+  | "resource_not_found"
+  | "server_error"
+  | "network_error"
+  | "protocol_error"
+  | "unknown";
 
 export type RecoveryStrategy =
-  | 'retry'
-  | 'retry_with_backoff'
-  | 'use_alternative_tool'
-  | 'skip_and_continue'
-  | 'report_to_user'
-  | 'reconnect'
-  | 'abort';
+  | "retry"
+  | "retry_with_backoff"
+  | "use_alternative_tool"
+  | "skip_and_continue"
+  | "report_to_user"
+  | "reconnect"
+  | "abort";
 
 export interface ErrorClassification {
   category: ErrorCategory;
@@ -92,9 +92,9 @@ const ERROR_PATTERNS: Array<{
       /pipe closed/i,
       /broken pipe/i,
     ],
-    category: 'connection',
+    category: "connection",
     isRetryable: true,
-    recoveryStrategy: 'reconnect',
+    recoveryStrategy: "reconnect",
   },
   {
     patterns: [
@@ -104,9 +104,9 @@ const ERROR_PATTERNS: Array<{
       /request timeout/i,
       /execution timeout/i,
     ],
-    category: 'timeout',
+    category: "timeout",
     isRetryable: true,
-    recoveryStrategy: 'retry_with_backoff',
+    recoveryStrategy: "retry_with_backoff",
   },
   {
     patterns: [
@@ -117,9 +117,9 @@ const ERROR_PATTERNS: Array<{
       /auth failed/i,
       /not authenticated/i,
     ],
-    category: 'authentication',
+    category: "authentication",
     isRetryable: false,
-    recoveryStrategy: 'report_to_user',
+    recoveryStrategy: "report_to_user",
   },
   {
     patterns: [
@@ -129,9 +129,9 @@ const ERROR_PATTERNS: Array<{
       /access denied/i,
       /insufficient permissions/i,
     ],
-    category: 'authorization',
+    category: "authorization",
     isRetryable: false,
-    recoveryStrategy: 'report_to_user',
+    recoveryStrategy: "report_to_user",
   },
   {
     patterns: [
@@ -141,9 +141,9 @@ const ERROR_PATTERNS: Array<{
       /throttled/i,
       /quota exceeded/i,
     ],
-    category: 'rate_limited',
+    category: "rate_limited",
     isRetryable: true,
-    recoveryStrategy: 'retry_with_backoff',
+    recoveryStrategy: "retry_with_backoff",
   },
   {
     patterns: [
@@ -154,9 +154,9 @@ const ERROR_PATTERNS: Array<{
       /must be provided/i,
       /required parameter/i,
     ],
-    category: 'invalid_parameters',
+    category: "invalid_parameters",
     isRetryable: false,
-    recoveryStrategy: 'report_to_user',
+    recoveryStrategy: "report_to_user",
   },
   {
     patterns: [
@@ -167,9 +167,9 @@ const ERROR_PATTERNS: Array<{
       /unable to find/i,
       /resource not found/i,
     ],
-    category: 'resource_not_found',
+    category: "resource_not_found",
     isRetryable: false,
-    recoveryStrategy: 'use_alternative_tool',
+    recoveryStrategy: "use_alternative_tool",
   },
   {
     patterns: [
@@ -180,9 +180,9 @@ const ERROR_PATTERNS: Array<{
       /something went wrong/i,
       /internal server error/i,
     ],
-    category: 'server_error',
+    category: "server_error",
     isRetryable: true,
-    recoveryStrategy: 'retry_with_backoff',
+    recoveryStrategy: "retry_with_backoff",
   },
   {
     patterns: [
@@ -193,9 +193,9 @@ const ERROR_PATTERNS: Array<{
       /fetch failed/i,
       /request failed/i,
     ],
-    category: 'network_error',
+    category: "network_error",
     isRetryable: true,
-    recoveryStrategy: 'retry_with_backoff',
+    recoveryStrategy: "retry_with_backoff",
   },
   {
     patterns: [
@@ -206,9 +206,9 @@ const ERROR_PATTERNS: Array<{
       /method not found/i,
       /invalid params/i,
     ],
-    category: 'protocol_error',
+    category: "protocol_error",
     isRetryable: false,
-    recoveryStrategy: 'report_to_user',
+    recoveryStrategy: "report_to_user",
   },
 ];
 
@@ -262,11 +262,11 @@ export class ErrorBoundary {
           success: true,
           result,
           classification: {
-            category: 'unknown',
+            category: "unknown",
             isRetryable: false,
-            recoveryStrategy: 'retry',
+            recoveryStrategy: "retry",
             confidence: 1,
-            details: 'Operation completed successfully',
+            details: "Operation completed successfully",
           },
           retryCount,
           recoveryAttempted,
@@ -307,10 +307,17 @@ export class ErrorBoundary {
         }
 
         // Attempt recovery for non-retryable errors
-        if (this.config.enableAutoRecovery && classification.recoveryStrategy !== 'retry' && classification.recoveryStrategy !== 'retry_with_backoff') {
+        if (
+          this.config.enableAutoRecovery &&
+          classification.recoveryStrategy !== "retry" &&
+          classification.recoveryStrategy !== "retry_with_backoff"
+        ) {
           recoveryAttempted = true;
           try {
-            recoverySuccessful = await this.attemptRecovery(classification, context);
+            recoverySuccessful = await this.attemptRecovery(
+              classification,
+              context,
+            );
           } catch (recoveryError: any) {
             if (this.config.verboseLogging) {
               logger.warn(
@@ -338,13 +345,13 @@ export class ErrorBoundary {
     const duration = Date.now() - startTime;
     return {
       success: false,
-      error: lastError || new Error('Unknown error'),
+      error: lastError || new Error("Unknown error"),
       classification: {
-        category: 'unknown',
+        category: "unknown",
         isRetryable: false,
-        recoveryStrategy: 'report_to_user',
+        recoveryStrategy: "report_to_user",
         confidence: 0,
-        details: 'Unknown error after all retries',
+        details: "Unknown error after all retries",
       },
       retryCount,
       recoveryAttempted,
@@ -376,12 +383,12 @@ export class ErrorBoundary {
 
     // Default: unknown error
     return {
-      category: 'unknown',
+      category: "unknown",
       isRetryable: false,
-      recoveryStrategy: 'report_to_user',
+      recoveryStrategy: "report_to_user",
       confidence: 0.3,
       details: message,
-      suggestedAction: 'Please check the error details and try again.',
+      suggestedAction: "Please check the error details and try again.",
     };
   }
 
@@ -398,13 +405,13 @@ export class ErrorBoundary {
     },
   ): Promise<boolean> {
     switch (classification.recoveryStrategy) {
-      case 'reconnect':
+      case "reconnect":
         return this.attemptReconnect(context);
-      case 'use_alternative_tool':
+      case "use_alternative_tool":
         return this.attemptAlternativeTool(context);
-      case 'skip_and_continue':
+      case "skip_and_continue":
         return true; // Skip is always successful
-      case 'report_to_user':
+      case "report_to_user":
         return false; // Cannot auto-recover, needs user intervention
       default:
         return false;
@@ -419,7 +426,9 @@ export class ErrorBoundary {
     operationName: string;
   }): Promise<boolean> {
     if (this.config.verboseLogging) {
-      logger.info(`[ErrorBoundary] Attempting reconnect for ${context.operationName}`);
+      logger.info(
+        `[ErrorBoundary] Attempting reconnect for ${context.operationName}`,
+      );
     }
     // Reconnect is handled by the caller (MCPClient)
     // Here we just log and return false to let the caller handle it
@@ -463,33 +472,33 @@ export class ErrorBoundary {
    */
   private getSuggestedAction(category: ErrorCategory): string {
     switch (category) {
-      case 'connection':
-        return 'Check if the MCP server is running and accessible. Try restarting the server.';
-      case 'timeout':
-        return 'The operation took too long. The server may be overloaded. Try again later.';
-      case 'authentication':
-        return 'Check your API key or authentication credentials. Update them in the configuration.';
-      case 'authorization':
-        return 'You do not have permission to perform this operation. Contact your administrator.';
-      case 'rate_limited':
-        return 'Too many requests. Wait a moment and try again.';
-      case 'invalid_parameters':
-        return 'The parameters provided are invalid. Check the tool documentation for correct parameter format.';
-      case 'resource_not_found':
-        return 'The requested resource was not found. Try using a different tool or check the resource path.';
-      case 'server_error':
-        return 'The server encountered an internal error. Try again later or contact the server administrator.';
-      case 'network_error':
-        return 'A network error occurred. Check your internet connection and try again.';
-      case 'protocol_error':
-        return 'A protocol error occurred. The server may be incompatible with the current MCP version.';
+      case "connection":
+        return "Check if the MCP server is running and accessible. Try restarting the server.";
+      case "timeout":
+        return "The operation took too long. The server may be overloaded. Try again later.";
+      case "authentication":
+        return "Check your API key or authentication credentials. Update them in the configuration.";
+      case "authorization":
+        return "You do not have permission to perform this operation. Contact your administrator.";
+      case "rate_limited":
+        return "Too many requests. Wait a moment and try again.";
+      case "invalid_parameters":
+        return "The parameters provided are invalid. Check the tool documentation for correct parameter format.";
+      case "resource_not_found":
+        return "The requested resource was not found. Try using a different tool or check the resource path.";
+      case "server_error":
+        return "The server encountered an internal error. Try again later or contact the server administrator.";
+      case "network_error":
+        return "A network error occurred. Check your internet connection and try again.";
+      case "protocol_error":
+        return "A protocol error occurred. The server may be incompatible with the current MCP version.";
       default:
-        return 'An unknown error occurred. Please check the error details and try again.';
+        return "An unknown error occurred. Please check the error details and try again.";
     }
   }
 
   private sleep(ms: number): Promise<void> {
-    return new Promise(resolve => setTimeout(resolve, ms));
+    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 }
 

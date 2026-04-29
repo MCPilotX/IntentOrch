@@ -1,20 +1,23 @@
-import { RuntimeAdapter } from './adapter';
-import { ServiceConfig } from '../core/types';
-import { execSync } from 'child_process';
+import { RuntimeAdapter } from "./adapter.js";
+import { ServiceConfig } from "../core/types.js";
+import { execSync } from "child_process";
 
 export class NodeAdapter implements RuntimeAdapter {
   getSpawnArgs(config: ServiceConfig): { command: string; args: string[] } {
     // Auto-detect runtime: try bun first, fallback to node
-    let command = 'bun';
+    let command = "bun";
     try {
-      execSync('which bun', { stdio: 'ignore' });
-      command = 'bun';
+      execSync("which bun", { stdio: "ignore" });
+      command = "bun";
     } catch {
-      command = 'node';
+      command = "node";
     }
 
-    const entry = config.entry || 'index.js';
-    const args = command === 'bun' ? [entry, ...(config.args || [])] : [entry, ...(config.args || [])];
+    const entry = config.entry || "index.js";
+    const args =
+      command === "bun"
+        ? [entry, ...(config.args || [])]
+        : [entry, ...(config.args || [])];
 
     return {
       command,

@@ -6,7 +6,7 @@
  * schema analysis, parameter extraction template building, and mapping suggestions.
  */
 
-import { logger } from '../core/logger';
+import { logger } from "../core/logger.js";
 
 // ==================== Type Definitions ====================
 
@@ -32,7 +32,7 @@ export interface DateParseResult {
 // Schema analysis types
 export interface ParameterExtractionField {
   name: string;
-  type: 'string' | 'number' | 'boolean' | 'array' | 'object';
+  type: "string" | "number" | "boolean" | "array" | "object";
   required: boolean;
   description: string;
   format?: string;
@@ -58,7 +58,7 @@ export interface ParameterExtractionTemplate {
 
 export interface ValidationIssue {
   field: string;
-  severity: 'error' | 'warning' | 'info';
+  severity: "error" | "warning" | "info";
   message: string;
   suggestedValue?: any;
 }
@@ -96,7 +96,10 @@ export class ParameterPostProcessor {
 
       // Pipeline step 1: Type conversion
       if (paramSchema) {
-        const typeResult = ParameterPostProcessor.convertType(processedValue, paramSchema);
+        const typeResult = ParameterPostProcessor.convertType(
+          processedValue,
+          paramSchema,
+        );
         if (typeResult.transformed) {
           transformations.push({
             parameter: paramName,
@@ -109,7 +112,10 @@ export class ParameterPostProcessor {
       }
 
       // Pipeline step 2: Date normalization
-      if (typeof processedValue === 'string' && ParameterPostProcessor.looksLikeDate(paramName, processedValue)) {
+      if (
+        typeof processedValue === "string" &&
+        ParameterPostProcessor.looksLikeDate(paramName, processedValue)
+      ) {
         const dateResult = ParameterPostProcessor.normalizeDate(processedValue);
         if (dateResult) {
           transformations.push({
@@ -124,7 +130,10 @@ export class ParameterPostProcessor {
 
       // Pipeline step 3: Enum matching
       if (paramSchema?.enum && Array.isArray(paramSchema.enum)) {
-        const enumResult = ParameterPostProcessor.fuzzyMatchEnum(processedValue, paramSchema.enum);
+        const enumResult = ParameterPostProcessor.fuzzyMatchEnum(
+          processedValue,
+          paramSchema.enum,
+        );
         if (enumResult.matched && enumResult.value !== processedValue) {
           transformations.push({
             parameter: paramName,
@@ -134,13 +143,18 @@ export class ParameterPostProcessor {
           });
           processedValue = enumResult.value;
         } else if (!enumResult.matched) {
-          warnings.push(`Parameter "${paramName}" value "${processedValue}" does not match any enum value: [${paramSchema.enum.join(', ')}]`);
+          warnings.push(
+            `Parameter "${paramName}" value "${processedValue}" does not match any enum value: [${paramSchema.enum.join(", ")}]`,
+          );
         }
       }
 
       // Pipeline step 4: Number range clipping
-      if (typeof processedValue === 'number' && paramSchema) {
-        const clipped = ParameterPostProcessor.clipNumberRange(processedValue, paramSchema);
+      if (typeof processedValue === "number" && paramSchema) {
+        const clipped = ParameterPostProcessor.clipNumberRange(
+          processedValue,
+          paramSchema,
+        );
         if (clipped !== processedValue) {
           transformations.push({
             parameter: paramName,
@@ -153,8 +167,11 @@ export class ParameterPostProcessor {
       }
 
       // Pipeline step 5: String normalization
-      if (typeof processedValue === 'string' && paramSchema) {
-        const normalized = ParameterPostProcessor.normalizeString(processedValue, paramSchema);
+      if (typeof processedValue === "string" && paramSchema) {
+        const normalized = ParameterPostProcessor.normalizeString(
+          processedValue,
+          paramSchema,
+        );
         if (normalized !== processedValue) {
           transformations.push({
             parameter: paramName,
@@ -179,78 +196,133 @@ export class ParameterPostProcessor {
     value: any,
     paramSchema: any,
   ): { value: any; transformed: boolean; reason: string } {
-    const targetType = paramSchema.type || 'string';
+    const targetType = paramSchema.type || "string";
 
     // Already correct type
     if (typeof value === targetType) {
-      return { value, transformed: false, reason: '' };
+      return { value, transformed: false, reason: "" };
     }
 
     switch (targetType) {
-      case 'string':
-        if (typeof value === 'number') {
-          return { value: String(value), transformed: true, reason: `Converted number to string` };
+      case "string":
+        if (typeof value === "number") {
+          return {
+            value: String(value),
+            transformed: true,
+            reason: `Converted number to string`,
+          };
         }
-        if (typeof value === 'boolean') {
-          return { value: String(value), transformed: true, reason: `Converted boolean to string` };
+        if (typeof value === "boolean") {
+          return {
+            value: String(value),
+            transformed: true,
+            reason: `Converted boolean to string`,
+          };
         }
-        if (typeof value === 'object' && value !== null) {
+        if (typeof value === "object" && value !== null) {
           // Intelligent Object-to-String extraction for cross-tool data flow
-          const extracted = ParameterPostProcessor.extractCoreValue(value, paramSchema);
+          const extracted = ParameterPostProcessor.extractCoreValue(
+            value,
+            paramSchema,
+          );
           if (extracted !== null) {
-            return { value: extracted, transformed: true, reason: `Extracted core value from object for parameter ${paramSchema.title || 'unnamed'}` };
+            return {
+              value: extracted,
+              transformed: true,
+              reason: `Extracted core value from object for parameter ${paramSchema.title || "unnamed"}`,
+            };
           }
-          return { value: JSON.stringify(value), transformed: true, reason: `Converted object to JSON string` };
+          return {
+            value: JSON.stringify(value),
+            transformed: true,
+            reason: `Converted object to JSON string`,
+          };
         }
         break;
 
-      case 'number':
-        if (typeof value === 'string') {
+      case "number":
+        if (typeof value === "string") {
           const trimmed = value.trim();
           // Handle percentage
-          if (trimmed.endsWith('%')) {
+          if (trimmed.endsWith("%")) {
             const parsed = parseFloat(trimmed);
             if (!isNaN(parsed)) {
-              return { value: parsed / 100, transformed: true, reason: `Parsed percentage "${trimmed}" to ${parsed / 100}` };
+              return {
+                value: parsed / 100,
+                transformed: true,
+                reason: `Parsed percentage "${trimmed}" to ${parsed / 100}`,
+              };
             }
           }
           const parsed = Number(trimmed);
           if (!isNaN(parsed)) {
-            return { value: parsed, transformed: true, reason: `Parsed string "${trimmed}" to number ${parsed}` };
+            return {
+              value: parsed,
+              transformed: true,
+              reason: `Parsed string "${trimmed}" to number ${parsed}`,
+            };
           }
         }
-        if (typeof value === 'boolean') {
-          return { value: value ? 1 : 0, transformed: true, reason: `Converted boolean to number` };
+        if (typeof value === "boolean") {
+          return {
+            value: value ? 1 : 0,
+            transformed: true,
+            reason: `Converted boolean to number`,
+          };
         }
         break;
 
-      case 'boolean':
-        if (typeof value === 'string') {
+      case "boolean":
+        if (typeof value === "string") {
           const lower = value.toLowerCase().trim();
-          if (['true', '1', 'yes', 'on', 'y'].includes(lower)) {
-            return { value: true, transformed: true, reason: `Parsed "${value}" as true` };
+          if (["true", "1", "yes", "on", "y"].includes(lower)) {
+            return {
+              value: true,
+              transformed: true,
+              reason: `Parsed "${value}" as true`,
+            };
           }
-          if (['false', '0', 'no', 'off', 'n'].includes(lower)) {
-            return { value: false, transformed: true, reason: `Parsed "${value}" as false` };
+          if (["false", "0", "no", "off", "n"].includes(lower)) {
+            return {
+              value: false,
+              transformed: true,
+              reason: `Parsed "${value}" as false`,
+            };
           }
         }
-        if (typeof value === 'number') {
-          return { value: value !== 0, transformed: true, reason: `Converted number ${value} to boolean` };
+        if (typeof value === "number") {
+          return {
+            value: value !== 0,
+            transformed: true,
+            reason: `Converted number ${value} to boolean`,
+          };
         }
         break;
 
-      case 'array':
+      case "array":
         if (!Array.isArray(value)) {
-          return { value: [value], transformed: true, reason: `Wrapped non-array value in array` };
+          return {
+            value: [value],
+            transformed: true,
+            reason: `Wrapped non-array value in array`,
+          };
         }
         break;
 
-      case 'object':
-        if (typeof value === 'string') {
+      case "object":
+        if (typeof value === "string") {
           try {
             const parsed = JSON.parse(value);
-            if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
-              return { value: parsed, transformed: true, reason: `Parsed JSON string to object` };
+            if (
+              typeof parsed === "object" &&
+              parsed !== null &&
+              !Array.isArray(parsed)
+            ) {
+              return {
+                value: parsed,
+                transformed: true,
+                reason: `Parsed JSON string to object`,
+              };
             }
           } catch {
             // Not valid JSON
@@ -259,39 +331,56 @@ export class ParameterPostProcessor {
         break;
     }
 
-    return { value, transformed: false, reason: '' };
+    return { value, transformed: false, reason: "" };
   }
 
   /**
    * Extract a core string value from an object (e.g., code, id, name)
    */
   private static extractCoreValue(obj: any, _paramSchema: any): string | null {
-    if (!obj || typeof obj !== 'object') return null;
+    if (!obj || typeof obj !== "object") return null;
 
     // Common keys that usually represent the "core" identifier in various services
     const coreKeys = [
-      'station_code', 'stationCode', 'station_id', 'stationId',
-      'code', 'id', 'identifier', 'uuid', 'uid',
-      'name', 'title', 'value', 'key'
+      "station_code",
+      "stationCode",
+      "station_id",
+      "stationId",
+      "code",
+      "id",
+      "identifier",
+      "uuid",
+      "uid",
+      "name",
+      "title",
+      "value",
+      "key",
     ];
 
     // 1. Check direct keys
     for (const key of coreKeys) {
-      if (typeof obj[key] === 'string' && obj[key].length > 0) {
+      if (typeof obj[key] === "string" && obj[key].length > 0) {
         return obj[key];
       }
     }
 
     // 2. Handle nested objects (like {"city": {"station_code": "GZQ"}})
     const values = Object.values(obj);
-    if (values.length === 1 && typeof values[0] === 'object' && values[0] !== null) {
+    if (
+      values.length === 1 &&
+      typeof values[0] === "object" &&
+      values[0] !== null
+    ) {
       return ParameterPostProcessor.extractCoreValue(values[0], _paramSchema);
     }
 
     // 3. Search for any key that ends with "code" or "id"
     for (const key of Object.keys(obj)) {
-      if ((key.toLowerCase().endsWith('code') || key.toLowerCase().endsWith('id')) && 
-          typeof obj[key] === 'string') {
+      if (
+        (key.toLowerCase().endsWith("code") ||
+          key.toLowerCase().endsWith("id")) &&
+        typeof obj[key] === "string"
+      ) {
         return obj[key];
       }
     }
@@ -304,13 +393,12 @@ export class ParameterPostProcessor {
    */
   static looksLikeDate(paramName: string, value: string): boolean {
     const paramNameLower = paramName.toLowerCase();
-    const isDateParam = (
-      paramNameLower.includes('date') ||
-      paramNameLower.includes('time') ||
-      paramNameLower.includes('day') ||
-      paramNameLower.includes('schedule') ||
-      paramNameLower.includes('deadline')
-    );
+    const isDateParam =
+      paramNameLower.includes("date") ||
+      paramNameLower.includes("time") ||
+      paramNameLower.includes("day") ||
+      paramNameLower.includes("schedule") ||
+      paramNameLower.includes("deadline");
 
     if (!isDateParam) {
       return false;
@@ -318,8 +406,8 @@ export class ParameterPostProcessor {
 
     // Check if value contains date-like patterns
     const datePatterns = [
-      /^\d{4}[-/]\d{1,2}[-/]\d{1,2}$/,           // 2024-12-25, 2024/12/25
-      /^\d{1,2}[-/]\d{1,2}[-/]\d{4}$/,           // 12-25-2024, 12/25/2024
+      /^\d{4}[-/]\d{1,2}[-/]\d{1,2}$/, // 2024-12-25, 2024/12/25
+      /^\d{1,2}[-/]\d{1,2}[-/]\d{4}$/, // 12-25-2024, 12/25/2024
       /^(today|tomorrow|yesterday)$/i,
       /^next\s+(week|month|year|monday|tuesday|wednesday|thursday|friday|saturday|sunday)$/i,
       /^last\s+(week|month|year|monday|tuesday|wednesday|thursday|friday|saturday|sunday)$/i,
@@ -328,7 +416,7 @@ export class ParameterPostProcessor {
       /^(in\s+)?\d{1,2}\s+(days?|weeks?|months?|years?)$/i,
     ];
 
-    return datePatterns.some(p => p.test(value.trim()));
+    return datePatterns.some((p) => p.test(value.trim()));
   }
 
   /**
@@ -337,21 +425,21 @@ export class ParameterPostProcessor {
   static normalizeDate(value: string): string | null {
     const trimmed = value.trim().toLowerCase();
     const now = new Date();
-    const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
 
     // Relative dates
-    if (trimmed === 'today') return today;
+    if (trimmed === "today") return today;
 
-    if (trimmed === 'tomorrow') {
+    if (trimmed === "tomorrow") {
       const tomorrow = new Date(now);
       tomorrow.setDate(tomorrow.getDate() + 1);
-      return `${tomorrow.getFullYear()}-${String(tomorrow.getMonth() + 1).padStart(2, '0')}-${String(tomorrow.getDate()).padStart(2, '0')}`;
+      return `${tomorrow.getFullYear()}-${String(tomorrow.getMonth() + 1).padStart(2, "0")}-${String(tomorrow.getDate()).padStart(2, "0")}`;
     }
 
-    if (trimmed === 'yesterday') {
+    if (trimmed === "yesterday") {
       const yesterday = new Date(now);
       yesterday.setDate(yesterday.getDate() - 1);
-      return `${yesterday.getFullYear()}-${String(yesterday.getMonth() + 1).padStart(2, '0')}-${String(yesterday.getDate()).padStart(2, '0')}`;
+      return `${yesterday.getFullYear()}-${String(yesterday.getMonth() + 1).padStart(2, "0")}-${String(yesterday.getDate()).padStart(2, "0")}`;
     }
 
     // "next monday", "next week", etc.
@@ -359,22 +447,29 @@ export class ParameterPostProcessor {
     if (nextMatch) {
       const target = nextMatch[1].toLowerCase();
       const dayMap: Record<string, number> = {
-        'monday': 1, 'tuesday': 2, 'wednesday': 3, 'thursday': 4,
-        'friday': 5, 'saturday': 6, 'sunday': 0,
+        monday: 1,
+        tuesday: 2,
+        wednesday: 3,
+        thursday: 4,
+        friday: 5,
+        saturday: 6,
+        sunday: 0,
       };
 
-      if (target === 'week') {
+      if (target === "week") {
         const nextWeek = new Date(now);
-        nextWeek.setDate(nextWeek.getDate() + (7 - nextWeek.getDay() + 1) % 7 + 7);
-        return `${nextWeek.getFullYear()}-${String(nextWeek.getMonth() + 1).padStart(2, '0')}-${String(nextWeek.getDate()).padStart(2, '0')}`;
+        nextWeek.setDate(
+          nextWeek.getDate() + ((7 - nextWeek.getDay() + 1) % 7) + 7,
+        );
+        return `${nextWeek.getFullYear()}-${String(nextWeek.getMonth() + 1).padStart(2, "0")}-${String(nextWeek.getDate()).padStart(2, "0")}`;
       }
 
-      if (target === 'month') {
+      if (target === "month") {
         const nextMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
-        return `${nextMonth.getFullYear()}-${String(nextMonth.getMonth() + 1).padStart(2, '0')}-${String(nextMonth.getDate()).padStart(2, '0')}`;
+        return `${nextMonth.getFullYear()}-${String(nextMonth.getMonth() + 1).padStart(2, "0")}-${String(nextMonth.getDate()).padStart(2, "0")}`;
       }
 
-      if (target === 'year') {
+      if (target === "year") {
         return `${now.getFullYear() + 1}-01-01`;
       }
 
@@ -385,51 +480,61 @@ export class ParameterPostProcessor {
         if (daysUntil <= 0) daysUntil += 7;
         const nextDate = new Date(now);
         nextDate.setDate(nextDate.getDate() + daysUntil);
-        return `${nextDate.getFullYear()}-${String(nextDate.getMonth() + 1).padStart(2, '0')}-${String(nextDate.getDate()).padStart(2, '0')}`;
+        return `${nextDate.getFullYear()}-${String(nextDate.getMonth() + 1).padStart(2, "0")}-${String(nextDate.getDate()).padStart(2, "0")}`;
       }
     }
 
     // "X days/weeks/months from now" or "in X days/weeks/months"
-    const fromNowMatch = trimmed.match(/(?:in\s+)?(\d+)\s+(day|days|week|weeks|month|months|year|years)(?:\s+(from\s+now|later))?/i);
+    const fromNowMatch = trimmed.match(
+      /(?:in\s+)?(\d+)\s+(day|days|week|weeks|month|months|year|years)(?:\s+(from\s+now|later))?/i,
+    );
     if (fromNowMatch) {
       const amount = parseInt(fromNowMatch[1]);
       const unit = fromNowMatch[2].toLowerCase();
       const future = new Date(now);
 
-      if (unit.startsWith('day')) future.setDate(future.getDate() + amount);
-      else if (unit.startsWith('week')) future.setDate(future.getDate() + amount * 7);
-      else if (unit.startsWith('month')) future.setMonth(future.getMonth() + amount);
-      else if (unit.startsWith('year')) future.setFullYear(future.getFullYear() + amount);
+      if (unit.startsWith("day")) future.setDate(future.getDate() + amount);
+      else if (unit.startsWith("week"))
+        future.setDate(future.getDate() + amount * 7);
+      else if (unit.startsWith("month"))
+        future.setMonth(future.getMonth() + amount);
+      else if (unit.startsWith("year"))
+        future.setFullYear(future.getFullYear() + amount);
 
-      return `${future.getFullYear()}-${String(future.getMonth() + 1).padStart(2, '0')}-${String(future.getDate()).padStart(2, '0')}`;
+      return `${future.getFullYear()}-${String(future.getMonth() + 1).padStart(2, "0")}-${String(future.getDate()).padStart(2, "0")}`;
     }
 
     // "X days/weeks/months ago"
-    const agoMatch = trimmed.match(/(\d+)\s+(day|days|week|weeks|month|months|year|years)\s+ago/i);
+    const agoMatch = trimmed.match(
+      /(\d+)\s+(day|days|week|weeks|month|months|year|years)\s+ago/i,
+    );
     if (agoMatch) {
       const amount = parseInt(agoMatch[1]);
       const unit = agoMatch[2].toLowerCase();
       const past = new Date(now);
 
-      if (unit.startsWith('day')) past.setDate(past.getDate() - amount);
-      else if (unit.startsWith('week')) past.setDate(past.getDate() - amount * 7);
-      else if (unit.startsWith('month')) past.setMonth(past.getMonth() - amount);
-      else if (unit.startsWith('year')) past.setFullYear(past.getFullYear() - amount);
+      if (unit.startsWith("day")) past.setDate(past.getDate() - amount);
+      else if (unit.startsWith("week"))
+        past.setDate(past.getDate() - amount * 7);
+      else if (unit.startsWith("month"))
+        past.setMonth(past.getMonth() - amount);
+      else if (unit.startsWith("year"))
+        past.setFullYear(past.getFullYear() - amount);
 
-      return `${past.getFullYear()}-${String(past.getMonth() + 1).padStart(2, '0')}-${String(past.getDate()).padStart(2, '0')}`;
+      return `${past.getFullYear()}-${String(past.getMonth() + 1).padStart(2, "0")}-${String(past.getDate()).padStart(2, "0")}`;
     }
 
     // YYYY-MM-DD or YYYY/MM/DD
     const ymdMatch = trimmed.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/);
     if (ymdMatch) {
-      return `${ymdMatch[1]}-${String(ymdMatch[2]).padStart(2, '0')}-${String(ymdMatch[3]).padStart(2, '0')}`;
+      return `${ymdMatch[1]}-${String(ymdMatch[2]).padStart(2, "0")}-${String(ymdMatch[3]).padStart(2, "0")}`;
     }
 
     // MM/DD/YYYY or DD/MM/YYYY
     const mdyMatch = trimmed.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/);
     if (mdyMatch) {
       // Assume MM/DD/YYYY for simplicity
-      return `${mdyMatch[3]}-${String(mdyMatch[1]).padStart(2, '0')}-${String(mdyMatch[2]).padStart(2, '0')}`;
+      return `${mdyMatch[3]}-${String(mdyMatch[1]).padStart(2, "0")}-${String(mdyMatch[2]).padStart(2, "0")}`;
     }
 
     return null;
@@ -451,7 +556,7 @@ export class ParameterPostProcessor {
 
     // Case-insensitive match
     const caseInsensitive = enumValues.find(
-      v => String(v).toLowerCase() === strValue,
+      (v) => String(v).toLowerCase() === strValue,
     );
     if (caseInsensitive !== undefined) {
       return { value: caseInsensitive, matched: true, confidence: 0.95 };
@@ -459,7 +564,9 @@ export class ParameterPostProcessor {
 
     // Substring match (enum contains value or value contains enum)
     const substringMatch = enumValues.find(
-      v => String(v).toLowerCase().includes(strValue) || strValue.includes(String(v).toLowerCase()),
+      (v) =>
+        String(v).toLowerCase().includes(strValue) ||
+        strValue.includes(String(v).toLowerCase()),
     );
     if (substringMatch !== undefined) {
       return { value: substringMatch, matched: true, confidence: 0.8 };
@@ -467,11 +574,14 @@ export class ParameterPostProcessor {
 
     // Levenshtein distance match (within 2 edits)
     const levenshteinMatch = enumValues
-      .map(v => ({
+      .map((v) => ({
         value: v,
-        distance: ParameterPostProcessor.levenshteinDistance(strValue, String(v).toLowerCase()),
+        distance: ParameterPostProcessor.levenshteinDistance(
+          strValue,
+          String(v).toLowerCase(),
+        ),
       }))
-      .filter(m => m.distance <= 2)
+      .filter((m) => m.distance <= 2)
       .sort((a, b) => a.distance - b.distance);
 
     if (levenshteinMatch.length > 0) {
@@ -488,10 +598,7 @@ export class ParameterPostProcessor {
   /**
    * Clip number to valid range
    */
-  static clipNumberRange(
-    value: number,
-    paramSchema: any,
-  ): number {
+  static clipNumberRange(value: number, paramSchema: any): number {
     let result = value;
 
     if (paramSchema.minimum !== undefined && result < paramSchema.minimum) {
@@ -507,14 +614,14 @@ export class ParameterPostProcessor {
   /**
    * Normalize string value
    */
-  static normalizeString(
-    value: string,
-    paramSchema: any,
-  ): string {
+  static normalizeString(value: string, paramSchema: any): string {
     let result = value.trim();
 
     // Truncate to max length
-    if (paramSchema.maxLength !== undefined && result.length > paramSchema.maxLength) {
+    if (
+      paramSchema.maxLength !== undefined &&
+      result.length > paramSchema.maxLength
+    ) {
       result = result.substring(0, paramSchema.maxLength);
     }
 
@@ -541,8 +648,8 @@ export class ParameterPostProcessor {
         } else {
           matrix[i][j] = Math.min(
             matrix[i - 1][j - 1] + 1, // substitution
-            matrix[i][j - 1] + 1,     // insertion
-            matrix[i - 1][j] + 1,     // deletion
+            matrix[i][j - 1] + 1, // insertion
+            matrix[i - 1][j] + 1, // deletion
           );
         }
       }
@@ -578,7 +685,9 @@ export class ParameterPostProcessor {
       toolName,
       fields,
       requiredFields: required,
-      hasNestedStructure: fields.some(f => f.type === 'object' && (f.nestedFields?.length ?? 0) > 0),
+      hasNestedStructure: fields.some(
+        (f) => f.type === "object" && (f.nestedFields?.length ?? 0) > 0,
+      ),
 
       toPromptString(): string {
         return ParameterPostProcessor.templateToPromptString(this);
@@ -598,9 +707,9 @@ export class ParameterPostProcessor {
   ): ParameterExtractionField {
     const field: ParameterExtractionField = {
       name,
-      type: schema.type || 'string',
+      type: schema.type || "string",
       required: isRequired,
-      description: schema.description || '',
+      description: schema.description || "",
       format: schema.format,
       pattern: schema.pattern,
       enumValues: schema.enum,
@@ -613,10 +722,12 @@ export class ParameterPostProcessor {
     };
 
     // Parse nested object properties
-    if (field.type === 'object' && schema.properties) {
+    if (field.type === "object" && schema.properties) {
       const nestedRequired = schema.required || [];
       field.nestedFields = [];
-      for (const [nestedName, nestedSchema] of Object.entries(schema.properties)) {
+      for (const [nestedName, nestedSchema] of Object.entries(
+        schema.properties,
+      )) {
         const nested = ParameterPostProcessor.parseSchemaField(
           nestedName,
           nestedSchema as any,
@@ -627,9 +738,9 @@ export class ParameterPostProcessor {
     }
 
     // Parse array item schema
-    if (field.type === 'array' && schema.items) {
+    if (field.type === "array" && schema.items) {
       const items = schema.items as any;
-      if (items.type === 'object' && items.properties) {
+      if (items.type === "object" && items.properties) {
         const itemRequired = items.required || [];
         field.nestedFields = [];
         for (const [itemName, itemSchema] of Object.entries(items.properties)) {
@@ -660,7 +771,7 @@ export class ParameterPostProcessor {
 
       // Required constraint
       if (field.required) {
-        constraints.push('required');
+        constraints.push("required");
       }
 
       // Format constraint
@@ -670,7 +781,7 @@ export class ParameterPostProcessor {
 
       // Enum constraint
       if (field.enumValues && field.enumValues.length > 0) {
-        const enumStr = field.enumValues.map(v => `"${v}"`).join(', ');
+        const enumStr = field.enumValues.map((v) => `"${v}"`).join(", ");
         constraints.push(`allowed values: [${enumStr}]`);
       }
 
@@ -699,22 +810,26 @@ export class ParameterPostProcessor {
       }
 
       // Description
-      const desc = field.description ? ` - ${field.description}` : '';
+      const desc = field.description ? ` - ${field.description}` : "";
 
       // Build field line
-      let fieldLine = `  - ${field.name} (${constraints.join(', ')})${desc}`;
+      let fieldLine = `  - ${field.name} (${constraints.join(", ")})${desc}`;
 
       // Add nested fields
       if (field.nestedFields && field.nestedFields.length > 0) {
-        fieldLine += ':';
+        fieldLine += ":";
         lines.push(fieldLine);
         for (const nested of field.nestedFields) {
           const nestedConstraints: string[] = [nested.type];
-          if (nested.required) nestedConstraints.push('required');
+          if (nested.required) nestedConstraints.push("required");
           if (nested.description) {
-            lines.push(`    - ${nested.name} (${nestedConstraints.join(', ')}) - ${nested.description}`);
+            lines.push(
+              `    - ${nested.name} (${nestedConstraints.join(", ")}) - ${nested.description}`,
+            );
           } else {
-            lines.push(`    - ${nested.name} (${nestedConstraints.join(', ')})`);
+            lines.push(
+              `    - ${nested.name} (${nestedConstraints.join(", ")})`,
+            );
           }
         }
       } else {
@@ -722,7 +837,7 @@ export class ParameterPostProcessor {
       }
     }
 
-    return lines.join('\n');
+    return lines.join("\n");
   }
 
   /**
@@ -739,10 +854,13 @@ export class ParameterPostProcessor {
       const value = extractedParams[field.name];
 
       // Check required fields
-      if (field.required && (value === null || value === undefined || value === '')) {
+      if (
+        field.required &&
+        (value === null || value === undefined || value === "")
+      ) {
         issues.push({
           field: field.name,
-          severity: 'error',
+          severity: "error",
           message: `Required parameter "${field.name}" is missing`,
           suggestedValue: field.defaultValue,
         });
@@ -755,12 +873,15 @@ export class ParameterPostProcessor {
       }
 
       // Type validation and correction
-      const typeResult = ParameterPostProcessor.validateAndCorrectType(value, field);
+      const typeResult = ParameterPostProcessor.validateAndCorrectType(
+        value,
+        field,
+      );
       if (typeResult.wasCorrected) {
         correctedParams[field.name] = typeResult.corrected;
         issues.push({
           field: field.name,
-          severity: 'warning',
+          severity: "warning",
           message: `Parameter "${field.name}" was corrected: ${typeResult.correctionNote}`,
           suggestedValue: typeResult.corrected,
         });
@@ -776,28 +897,28 @@ export class ParameterPostProcessor {
           correctedParams[field.name] = enumResult.corrected;
           issues.push({
             field: field.name,
-            severity: 'info',
+            severity: "info",
             message: `Parameter "${field.name}" matched to enum value: ${enumResult.correctionNote}`,
             suggestedValue: enumResult.corrected,
           });
         } else if (!field.enumValues.includes(correctedParams[field.name])) {
           issues.push({
             field: field.name,
-            severity: 'error',
-            message: `Parameter "${field.name}" value "${correctedParams[field.name]}" is not in allowed values: [${field.enumValues.join(', ')}]`,
+            severity: "error",
+            message: `Parameter "${field.name}" value "${correctedParams[field.name]}" is not in allowed values: [${field.enumValues.join(", ")}]`,
             suggestedValue: field.enumValues[0],
           });
         }
       }
 
       // Range validation
-      if (typeof correctedParams[field.name] === 'number') {
+      if (typeof correctedParams[field.name] === "number") {
         const numValue = correctedParams[field.name] as number;
         if (field.minimum !== undefined && numValue < field.minimum) {
           correctedParams[field.name] = field.minimum;
           issues.push({
             field: field.name,
-            severity: 'warning',
+            severity: "warning",
             message: `Parameter "${field.name}" value ${numValue} is below minimum ${field.minimum}, corrected to ${field.minimum}`,
             suggestedValue: field.minimum,
           });
@@ -806,7 +927,7 @@ export class ParameterPostProcessor {
           correctedParams[field.name] = field.maximum;
           issues.push({
             field: field.name,
-            severity: 'warning',
+            severity: "warning",
             message: `Parameter "${field.name}" value ${numValue} exceeds maximum ${field.maximum}, corrected to ${field.maximum}`,
             suggestedValue: field.maximum,
           });
@@ -814,20 +935,26 @@ export class ParameterPostProcessor {
       }
 
       // String length validation
-      if (typeof correctedParams[field.name] === 'string') {
+      if (typeof correctedParams[field.name] === "string") {
         const strValue = correctedParams[field.name] as string;
-        if (field.minLength !== undefined && strValue.length < field.minLength) {
+        if (
+          field.minLength !== undefined &&
+          strValue.length < field.minLength
+        ) {
           issues.push({
             field: field.name,
-            severity: 'error',
+            severity: "error",
             message: `Parameter "${field.name}" length ${strValue.length} is below minimum ${field.minLength}`,
           });
         }
-        if (field.maxLength !== undefined && strValue.length > field.maxLength) {
+        if (
+          field.maxLength !== undefined &&
+          strValue.length > field.maxLength
+        ) {
           correctedParams[field.name] = strValue.substring(0, field.maxLength);
           issues.push({
             field: field.name,
-            severity: 'warning',
+            severity: "warning",
             message: `Parameter "${field.name}" truncated from ${strValue.length} to ${field.maxLength} characters`,
             suggestedValue: correctedParams[field.name],
           });
@@ -840,7 +967,7 @@ export class ParameterPostProcessor {
             if (!regex.test(strValue)) {
               issues.push({
                 field: field.name,
-                severity: 'error',
+                severity: "error",
                 message: `Parameter "${field.name}" value "${strValue}" does not match pattern: ${field.pattern}`,
               });
             }
@@ -852,7 +979,7 @@ export class ParameterPostProcessor {
     }
 
     return {
-      valid: issues.filter(i => i.severity === 'error').length === 0,
+      valid: issues.filter((i) => i.severity === "error").length === 0,
       issues,
       correctedParams,
     };
@@ -874,8 +1001,8 @@ export class ParameterPostProcessor {
 
     // Type conversion attempts
     switch (targetType) {
-      case 'string':
-        if (typeof value === 'number' || typeof value === 'boolean') {
+      case "string":
+        if (typeof value === "number" || typeof value === "boolean") {
           return {
             corrected: String(value),
             correctionNote: `Converted ${typeof value} to string: "${value}"`,
@@ -884,8 +1011,8 @@ export class ParameterPostProcessor {
         }
         break;
 
-      case 'number':
-        if (typeof value === 'string') {
+      case "number":
+        if (typeof value === "string") {
           const parsed = Number(value);
           if (!isNaN(parsed)) {
             return {
@@ -895,7 +1022,7 @@ export class ParameterPostProcessor {
             };
           }
         }
-        if (typeof value === 'boolean') {
+        if (typeof value === "boolean") {
           return {
             corrected: value ? 1 : 0,
             correctionNote: `Converted boolean to number: ${value ? 1 : 0}`,
@@ -904,17 +1031,25 @@ export class ParameterPostProcessor {
         }
         break;
 
-      case 'boolean':
-        if (typeof value === 'string') {
+      case "boolean":
+        if (typeof value === "string") {
           const lower = value.toLowerCase();
-          if (['true', '1', 'yes', 'on'].includes(lower)) {
-            return { corrected: true, correctionNote: `Converted string "${value}" to boolean: true`, wasCorrected: true };
+          if (["true", "1", "yes", "on"].includes(lower)) {
+            return {
+              corrected: true,
+              correctionNote: `Converted string "${value}" to boolean: true`,
+              wasCorrected: true,
+            };
           }
-          if (['false', '0', 'no', 'off'].includes(lower)) {
-            return { corrected: false, correctionNote: `Converted string "${value}" to boolean: false`, wasCorrected: true };
+          if (["false", "0", "no", "off"].includes(lower)) {
+            return {
+              corrected: false,
+              correctionNote: `Converted string "${value}" to boolean: false`,
+              wasCorrected: true,
+            };
           }
         }
-        if (typeof value === 'number') {
+        if (typeof value === "number") {
           return {
             corrected: value !== 0,
             correctionNote: `Converted number ${value} to boolean: ${value !== 0}`,
@@ -923,15 +1058,19 @@ export class ParameterPostProcessor {
         }
         break;
 
-      case 'array':
-        if (!Array.isArray(value) && typeof value === 'string') {
+      case "array":
+        if (!Array.isArray(value) && typeof value === "string") {
           return {
             corrected: [value],
             correctionNote: `Wrapped string "${value}" in array`,
             wasCorrected: true,
           };
         }
-        if (!Array.isArray(value) && typeof value === 'object' && value !== null) {
+        if (
+          !Array.isArray(value) &&
+          typeof value === "object" &&
+          value !== null
+        ) {
           return {
             corrected: [value],
             correctionNote: `Wrapped object in array`,
@@ -940,11 +1079,11 @@ export class ParameterPostProcessor {
         }
         break;
 
-      case 'object':
-        if (typeof value === 'string') {
+      case "object":
+        if (typeof value === "string") {
           try {
             const parsed = JSON.parse(value);
-            if (typeof parsed === 'object' && parsed !== null) {
+            if (typeof parsed === "object" && parsed !== null) {
               return {
                 corrected: parsed,
                 correctionNote: `Parsed JSON string to object`,
@@ -964,10 +1103,7 @@ export class ParameterPostProcessor {
   /**
    * Fuzzy match a value against enum values (returns CorrectionResult)
    */
-  static matchEnumValue(
-    value: any,
-    enumValues: any[],
-  ): CorrectionResult {
+  static matchEnumValue(value: any, enumValues: any[]): CorrectionResult {
     if (enumValues.includes(value)) {
       return { corrected: value, wasCorrected: false };
     }
@@ -976,7 +1112,7 @@ export class ParameterPostProcessor {
 
     // Try exact case-insensitive match
     const caseInsensitive = enumValues.find(
-      v => String(v).toLowerCase() === strValue,
+      (v) => String(v).toLowerCase() === strValue,
     );
     if (caseInsensitive !== undefined) {
       return {
@@ -988,7 +1124,9 @@ export class ParameterPostProcessor {
 
     // Try substring match
     const substringMatch = enumValues.find(
-      v => String(v).toLowerCase().includes(strValue) || strValue.includes(String(v).toLowerCase()),
+      (v) =>
+        String(v).toLowerCase().includes(strValue) ||
+        strValue.includes(String(v).toLowerCase()),
     );
     if (substringMatch !== undefined) {
       return {
@@ -999,12 +1137,12 @@ export class ParameterPostProcessor {
     }
 
     // Try common boolean/truthy alias mapping
-    const truthyValues = ['true', '1', 'yes', 'on', 'y'];
-    const falsyValues = ['false', '0', 'no', 'off', 'n'];
+    const truthyValues = ["true", "1", "yes", "on", "y"];
+    const falsyValues = ["false", "0", "no", "off", "n"];
 
     if (truthyValues.includes(strValue)) {
       const truthyMatch = enumValues.find(
-        v => String(v).toLowerCase() === 'true' || v === true || v === 1,
+        (v) => String(v).toLowerCase() === "true" || v === true || v === 1,
       );
       if (truthyMatch !== undefined) {
         return {
@@ -1017,7 +1155,7 @@ export class ParameterPostProcessor {
 
     if (falsyValues.includes(strValue)) {
       const falsyMatch = enumValues.find(
-        v => String(v).toLowerCase() === 'false' || v === false || v === 0,
+        (v) => String(v).toLowerCase() === "false" || v === false || v === 0,
       );
       if (falsyMatch !== undefined) {
         return {
@@ -1034,35 +1172,37 @@ export class ParameterPostProcessor {
   /**
    * Smart correct a parameter value based on its schema
    */
-  static smartCorrectValue(
-    value: any,
-    paramSchema: any,
-  ): CorrectionResult {
-    if (!paramSchema || typeof paramSchema !== 'object') {
+  static smartCorrectValue(value: any, paramSchema: any): CorrectionResult {
+    if (!paramSchema || typeof paramSchema !== "object") {
       return { corrected: value, wasCorrected: false };
     }
 
-    const type = paramSchema.type || 'string';
+    const type = paramSchema.type || "string";
 
     // Type correction
-    const typeResult = ParameterPostProcessor.validateAndCorrectType(
-      value,
-      { name: '', type, required: false, description: '' },
-    );
+    const typeResult = ParameterPostProcessor.validateAndCorrectType(value, {
+      name: "",
+      type,
+      required: false,
+      description: "",
+    });
     if (typeResult.wasCorrected) {
       return typeResult;
     }
 
     // Enum correction
     if (paramSchema.enum && Array.isArray(paramSchema.enum)) {
-      const enumResult = ParameterPostProcessor.matchEnumValue(value, paramSchema.enum);
+      const enumResult = ParameterPostProcessor.matchEnumValue(
+        value,
+        paramSchema.enum,
+      );
       if (enumResult.wasCorrected) {
         return enumResult;
       }
     }
 
     // Number range correction
-    if (typeof value === 'number') {
+    if (typeof value === "number") {
       let corrected = value;
       let note: string | undefined;
 
@@ -1081,11 +1221,14 @@ export class ParameterPostProcessor {
     }
 
     // String length correction
-    if (typeof value === 'string') {
+    if (typeof value === "string") {
       let corrected = value;
       let note: string | undefined;
 
-      if (paramSchema.maxLength !== undefined && value.length > paramSchema.maxLength) {
+      if (
+        paramSchema.maxLength !== undefined &&
+        value.length > paramSchema.maxLength
+      ) {
         corrected = value.substring(0, paramSchema.maxLength);
         note = `String truncated from ${value.length} to ${paramSchema.maxLength} characters`;
       }
@@ -1104,18 +1247,30 @@ export class ParameterPostProcessor {
   static getMappingSuggestions(
     inputSchema: any,
   ): Array<{ sourceName: string; targetName: string; reason: string }> {
-    const suggestions: Array<{ sourceName: string; targetName: string; reason: string }> = [];
+    const suggestions: Array<{
+      sourceName: string;
+      targetName: string;
+      reason: string;
+    }> = [];
     const properties = inputSchema?.properties || {};
 
     const commonAliases: Record<string, string[]> = {
-      'path': ['name', 'filename', 'file', 'directory', 'folder', 'filepath', 'location'],
-      'name': ['path', 'filename', 'title', 'label'],
-      'query': ['search', 'q', 'filter', 'term', 'keyword'],
-      'id': ['identifier', 'uuid', 'guid', 'uid', 'key'],
-      'content': ['data', 'text', 'body', 'message', 'value'],
-      'date': ['time', 'datetime', 'timestamp'],
-      'limit': ['count', 'number', 'size', 'max'],
-      'active': ['enabled', 'disabled', 'on', 'off'],
+      path: [
+        "name",
+        "filename",
+        "file",
+        "directory",
+        "folder",
+        "filepath",
+        "location",
+      ],
+      name: ["path", "filename", "title", "label"],
+      query: ["search", "q", "filter", "term", "keyword"],
+      id: ["identifier", "uuid", "guid", "uid", "key"],
+      content: ["data", "text", "body", "message", "value"],
+      date: ["time", "datetime", "timestamp"],
+      limit: ["count", "number", "size", "max"],
+      active: ["enabled", "disabled", "on", "off"],
     };
 
     for (const [paramName] of Object.entries(properties)) {

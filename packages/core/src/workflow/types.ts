@@ -17,7 +17,7 @@ export interface Workflow {
 
 export interface WorkflowInput {
   id: string;
-  type: 'string' | 'number' | 'boolean';
+  type: "string" | "number" | "boolean";
   description?: string;
   default?: any;
   required?: boolean;
@@ -27,7 +27,7 @@ export interface WorkflowStep {
   id: string;
   type?: string; // Added for frontend compatibility: 'server' | 'tool' | 'condition' | 'loop'
   serverName?: string; // Made optional to support serverId
-  serverId?: string;   // Added to support older format
+  serverId?: string; // Added to support older format
   toolName: string;
   parameters: Record<string, any>;
   if?: string; // Condition expression, e.g., "{{analysis.score > 5}}"
