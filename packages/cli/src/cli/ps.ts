@@ -20,6 +20,9 @@ interface ProcessInfo {
   startTime: number;
   status: string;
   logPath: string;
+  external?: boolean;
+  transportType?: string;
+  url?: string;
 }
 
 function renderProcessTable(
@@ -33,7 +36,7 @@ function renderProcessTable(
   }
 
   const table = new Table({
-    head: ["PID", "Status", "Server Name", "Version", "Started At"],
+    head: ["PID", "Status", "Type", "Server Name", "Version", "Started At"],
     style: { head: ["cyan"], border: ["gray"] },
   });
 
@@ -53,16 +56,21 @@ function renderProcessTable(
     }
 
     if (p.status === "running") {
-      statusText = `✅ ${statusText}`;
+      statusText = `\u2705 ${statusText}`;
     } else if (p.status === "stopped") {
-      statusText = `⏹️ ${statusText}`;
+      statusText = `\u23F9\uFE0F ${statusText}`;
     } else {
-      statusText = `❌ ${statusText}`;
+      statusText = `\u274C ${statusText}`;
     }
+
+    const transportType = p.external
+      ? (p.transportType || "EXT").toUpperCase()
+      : "STDIO";
 
     table.push([
       p.pid.toString(),
       statusText,
+      transportType,
       displayName,
       p.version || p.manifest.version,
       startTime,
@@ -99,7 +107,7 @@ export function psCommand(): Command {
           renderProcessTable(
             processes as ProcessInfo[],
             "MCP SERVER PROCESSES (LOCAL MODE)",
-            "⚠️  Note: Showing local processes only (not managed by daemon)",
+            "Note: Showing local processes only (not managed by daemon)",
           );
           return;
         }
@@ -109,12 +117,12 @@ export function psCommand(): Command {
           const client = new DaemonClient();
           const isDaemonRunning = await client.isDaemonRunning();
           if (!isDaemonRunning) {
-            console.error("❌ Daemon is not running.");
-            console.error("\n💡 To start the daemon:");
-            console.error("   intorch daemon start");
-            console.error("\n💡 Or use local mode:");
-            console.error("   intorch ps --no-daemon");
-            return; // Exit gracefully
+            console.error("Daemon is not running.");
+            console.error("\nTo start the daemon:");
+            console.error(`   ${PROGRAM_NAME} daemon start`);
+            console.error("\nOr use local mode:");
+            console.error(`   ${PROGRAM_NAME} ps --no-daemon`);
+            return;
           }
 
           const response = await client.listServers();
@@ -170,27 +178,29 @@ export function psCommand(): Command {
                 ? s.status
                 : "unknown",
               logPath: String(s.logPath || ""),
+              external: Boolean(s.external),
+              transportType: s.transportType ? String(s.transportType) : undefined,
+              url: s.url ? String(s.url) : undefined,
             };
           });
 
           renderProcessTable(processes, "MCP SERVER PROCESSES (DAEMON MODE)");
         } catch (daemonError) {
           const error = daemonError as Error;
-          console.error("❌ Daemon mode failed:", error.message);
+          console.error("Daemon mode failed:", error.message);
 
-          // Provide specific guidance based on error type
           if (
             error.message.includes("Cannot read properties of undefined") ||
             error.message.includes("includes")
           ) {
             console.error(
-              "\n💡 This indicates a data format issue with the daemon.",
+              "\nThis indicates a data format issue with the daemon.",
             );
             console.error("   Possible causes:");
             console.error("   1. Daemon returned invalid data");
             console.error("   2. Network connectivity issue");
             console.error("   3. Daemon version mismatch");
-            console.error("\n💡 Try restarting the daemon:");
+            console.error("\nTry restarting the daemon:");
             console.error(
               `   ${PROGRAM_NAME} daemon stop && ${PROGRAM_NAME} daemon start`,
             );
@@ -199,22 +209,21 @@ export function psCommand(): Command {
             error.message.includes("ECONNREFUSED") ||
             error.message.includes("network")
           ) {
-            console.error("\n💡 Cannot connect to daemon.");
+            console.error("\nCannot connect to daemon.");
             console.error("   Make sure the daemon is running:");
             console.error(`   ${PROGRAM_NAME} daemon start`);
           } else {
-            console.error("\n💡 Please start the daemon first:");
+            console.error("\nPlease start the daemon first:");
             console.error(`   ${PROGRAM_NAME} daemon start`);
           }
 
-          console.error("\n💡 Or use local mode as fallback:");
+          console.error("\nOr use local mode as fallback:");
           console.error(`   ${PROGRAM_NAME} ps --no-daemon`);
 
-          // Don't throw, just exit gracefully
           process.exit(1);
         }
       } catch (error) {
-        console.error("❌ Failed to list processes:", (error as Error).message);
+        console.error("Failed to list processes:", (error as Error).message);
         process.exit(1);
       }
     });

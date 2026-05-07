@@ -2,6 +2,7 @@ import fs from "fs/promises";
 import { getProcessesPath, ensureInTorchDir } from "../utils/paths.js";
 import { ProcessInfo, ProcessStore } from "./types.js";
 import { isProcessRunning } from "../utils/system.js";
+import { MCPClient } from "../mcp/client.js";
 
 export class ProcessStoreManager {
   private storePath: string;
@@ -94,10 +95,12 @@ export class ProcessStoreManager {
     }
 
     // If process is marked as running, verify it's actually running
-    if (process.status === "running" && !isProcessRunning(pid)) {
-      // Process is not alive, update status
-      process.status = "stopped";
-      await this.save(store);
+    if (process.status === "running") {
+      const isAlive = await this.isProcessAlive(process);
+      if (!isAlive) {
+        process.status = "stopped";
+        await this.save(store);
+      }
     }
 
     return process;
@@ -109,13 +112,13 @@ export class ProcessStoreManager {
     const store = await this.load();
 
     // Helper function to check if a process is actually running
-    const isActuallyRunning = (process: ProcessInfo): boolean => {
+    const isActuallyRunning = async (process: ProcessInfo): Promise<boolean> => {
       if (process.status !== "running") {
         return false;
       }
       // Verify the process is actually running
-      if (!isProcessRunning(process.pid)) {
-        // Process is not alive, update status
+      const isAlive = await this.isProcessAlive(process);
+      if (!isAlive) {
         process.status = "stopped";
         return false;
       }
@@ -123,11 +126,10 @@ export class ProcessStoreManager {
     };
 
     // First, try exact match on serverName
-    const exactMatch = store.processes.find(
-      (p) => p.serverName === serverName && isActuallyRunning(p),
-    );
-    if (exactMatch) {
-      return exactMatch;
+    for (const p of store.processes) {
+      if (p.serverName === serverName && (await isActuallyRunning(p))) {
+        return p;
+      }
     }
 
     // Support for owner/project format (e.g., "Joooook/12306-mcp")
@@ -137,11 +139,10 @@ export class ProcessStoreManager {
         const projectName = parts[1]; // e.g., "12306-mcp"
 
         // Try exact match with project name
-        const projectMatch = store.processes.find(
-          (p) => p.serverName === projectName && isActuallyRunning(p),
-        );
-        if (projectMatch) {
-          return projectMatch;
+        for (const p of store.processes) {
+          if (p.serverName === projectName && (await isActuallyRunning(p))) {
+            return p;
+          }
         }
 
         // Try variations of project name
@@ -155,32 +156,42 @@ export class ProcessStoreManager {
         ];
 
         for (const name of possibleNames) {
-          const variationMatch = store.processes.find(
-            (p) => p.serverName === name && isActuallyRunning(p),
-          );
-          if (variationMatch) {
-            return variationMatch;
+          for (const p of store.processes) {
+            if (p.serverName === name && (await isActuallyRunning(p))) {
+              return p;
+            }
           }
         }
       }
     }
 
     // If no exact match, try to find by manifest.name (alias discovery)
-    // This helps when workflow references a server by its manifest name rather than the serverName used to start it
-    const aliasMatch = store.processes.find(
-      (p) =>
-        isActuallyRunning(p) && p.manifest && p.manifest.name === serverName,
-    );
+    for (const p of store.processes) {
+      if (
+        (await isActuallyRunning(p)) &&
+        p.manifest &&
+        p.manifest.name === serverName
+      ) {
+        // Save store if any processes were updated
+        const needsSave = store.processes.some(
+          (proc) => proc.status === "stopped",
+        );
+        if (needsSave) {
+          await this.save(store);
+        }
+        return p;
+      }
+    }
 
     // Save store if any processes were updated
     const needsSave = store.processes.some(
-      (p) => p.status === "stopped" && isProcessRunning(p.pid) === false,
+      (p) => p.status === "stopped",
     );
     if (needsSave) {
       await this.save(store);
     }
 
-    return aliasMatch;
+    return undefined;
   }
 
   async listProcesses(): Promise<ProcessInfo[]> {
@@ -188,39 +199,37 @@ export class ProcessStoreManager {
     let changed = false;
 
     // Filter out invalid processes
-    const validProcesses = store.processes.filter((p) => {
+    const validProcesses: ProcessInfo[] = [];
+    for (const p of store.processes) {
       // Keep processes that are running or recently stopped
       if (p.status === "running") {
-        if (!isProcessRunning(p.pid)) {
-          // Process is not alive
+        const isAlive = await this.isProcessAlive(p);
+        if (!isAlive) {
           p.status = "stopped";
           changed = true;
           // Keep stopped processes for a while
-          return true;
+          validProcesses.push(p);
+        } else {
+          validProcesses.push(p);
         }
-        return true;
-      }
-
-      // For stopped processes, check if they should be cleaned up
-      if (p.status === "stopped") {
-        // Clean up obviously invalid PIDs
-        if (p.pid <= 0) {
+      } else if (p.status === "stopped") {
+        // Clean up obviously invalid PIDs (only for non-external services)
+        if (!p.external && p.pid <= 0) {
           changed = true;
-          return false; // Remove invalid PID
+          continue; // Remove invalid PID
         }
 
         // Clean up old stopped processes (older than 1 hour)
         const age = Date.now() - p.startTime;
         if (age > 3600000) {
-          // 1 hour
           changed = true;
-          return false;
+          continue;
         }
-        return true;
+        validProcesses.push(p);
+      } else {
+        validProcesses.push(p);
       }
-
-      return true;
-    });
+    }
 
     if (changed) {
       store.processes = validProcesses;
@@ -239,5 +248,44 @@ export class ProcessStoreManager {
     const store = await this.load();
     store.processes = store.processes.filter((p) => p.status === "running");
     await this.save(store);
+  }
+
+  /**
+   * Check if a process is alive based on its type.
+   * For external services (HTTP/SSE), try to connect to the URL.
+   * For managed processes, check PID.
+   */
+  private async isProcessAlive(process: ProcessInfo): Promise<boolean> {
+    if (process.external) {
+      return this.checkExternalServiceAlive(process);
+    }
+    return isProcessRunning(process.pid);
+  }
+
+  /**
+   * Check if an external service (HTTP/SSE) is still alive by attempting to connect.
+   */
+  private async checkExternalServiceAlive(process: ProcessInfo): Promise<boolean> {
+    if (!process.url || !process.transportType) {
+      return false;
+    }
+
+    try {
+      const client = new MCPClient({
+        transport: {
+          type: process.transportType as "http" | "sse",
+          url: process.url,
+        },
+        timeout: 3000,
+        maxRetries: 1,
+        serverName: process.name,
+      });
+
+      await client.connect();
+      await client.disconnect();
+      return true;
+    } catch {
+      return false;
+    }
   }
 }

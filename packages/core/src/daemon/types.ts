@@ -13,6 +13,9 @@ export interface ServerInfo {
   status: "running" | "stopped" | "error";
   startTime: number;
   logPath: string;
+  external?: boolean;
+  transportType?: string;
+  url?: string;
 }
 
 export interface StartServerRequest {

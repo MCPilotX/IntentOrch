@@ -892,6 +892,9 @@ CRITICAL: Some tools are "helper" tools that only prepare data for other tools (
     }
   }
 
+  // Track URLs we've already attempted to connect to (for SSE/HTTP services)
+  private connectedUrls: Set<string> = new Set();
+
   private async connectToRunningServers(
     options: UnifiedExecutionOptions,
   ): Promise<void> {
@@ -967,6 +970,16 @@ CRITICAL: Some tools are "helper" tools that only prepare data for other tools (
           // Try to connect to each manifest
           for (const { name: serverName, manifest } of manifestsToTry) {
             if (this.connectedServers.has(serverName)) continue;
+            
+            // Check URL-level dedup for SSE/HTTP services
+            const transportUrl = manifest.transport?.url;
+            if (transportUrl && this.connectedUrls.has(transportUrl)) {
+              logger.debug(
+                `[ExecuteService] Already connected to URL ${transportUrl}, skipping ${serverName}`,
+              );
+              continue;
+            }
+            
             try {
               logger.debug(
                 `[ExecuteService] Attempting to connect to cached server: ${serverName}`,
@@ -1013,6 +1026,15 @@ CRITICAL: Some tools are "helper" tools that only prepare data for other tools (
         }
 
         if (manifest) {
+          // Check URL-level dedup for SSE/HTTP services
+          const transportUrl = manifest.transport?.url;
+          if (transportUrl && this.connectedUrls.has(transportUrl)) {
+            logger.debug(
+              `[ExecuteService] Already connected to URL ${transportUrl}, skipping ${server.serverName}`,
+            );
+            continue;
+          }
+          
           await this.connectToServer(server.serverName, manifest);
         }
       } catch (error: any) {
@@ -1095,14 +1117,34 @@ CRITICAL: Some tools are "helper" tools that only prepare data for other tools (
         }
       }
 
-      const client = new MCPClient({
-        transport: {
+      // Determine transport type from manifest
+      const transportType = manifest.transport?.type || "stdio";
+      
+      let transportConfig: any;
+      if (transportType === "sse") {
+        transportConfig = {
+          type: "sse" as const,
+          url: manifest.transport?.url || `http://localhost:${manifest.runtime?.port || 3000}/sse`,
+          headers: manifest.transport?.headers,
+        };
+      } else if (transportType === "http") {
+        transportConfig = {
+          type: "http" as const,
+          url: manifest.transport?.url || `http://localhost:${manifest.runtime?.port || 3000}`,
+          headers: manifest.transport?.headers,
+        };
+      } else {
+        transportConfig = {
           type: "stdio" as const,
           command: manifest.runtime.command,
           args: manifest.runtime.args || [],
           env: envVars,
           existingProcess: existingProcess,
-        },
+        };
+      }
+
+      const client = new MCPClient({
+        transport: transportConfig,
         serverName: serverName,
       });
 
@@ -1119,6 +1161,11 @@ CRITICAL: Some tools are "helper" tools that only prepare data for other tools (
         name: serverName,
         client,
       });
+
+      // Record the URL for deduplication (SSE/HTTP services)
+      if (manifest.transport?.url) {
+        this.connectedUrls.add(manifest.transport.url);
+      }
 
       logger.debug(`[ExecuteService] Connected to server: ${serverName}`);
     } catch (error: any) {

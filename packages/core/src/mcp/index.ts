@@ -17,6 +17,11 @@ export * from "./tool-registry.js";
 // Export tool metadata standardization
 export * from "./tool-metadata.js";
 
+// Export transports
+export * from "./stdio-transport.js";
+export * from "./http-transport.js";
+export * from "./sse-transport.js";
+
 // ==================== Utility Functions ====================
 
 /**

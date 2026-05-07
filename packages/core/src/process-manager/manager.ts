@@ -35,12 +35,21 @@ export class ProcessManager {
     if (runningServer) {
       // Server is already running, return the existing PID
       logger.info(
-        `ℹ️  Server "${manifest.name}" is already running (PID: ${runningServer.pid})`,
+        `Server "${manifest.name}" is already running (PID: ${runningServer.pid})`,
       );
       logger.info(
         `   Returning existing process instead of creating a new one`,
       );
       return runningServer.pid;
+    }
+
+    // Determine transport type (default to stdio for backward compatibility)
+    const transportType = manifest.transport?.type || "stdio";
+    const isExternalService = ["http", "sse"].includes(transportType);
+
+    // For external services (HTTP/SSE), connect to existing service instead of spawning
+    if (isExternalService) {
+      return this.startExternalService(manifest, serverNameOrUrl);
     }
 
     // Check required secrets
@@ -51,9 +60,8 @@ export class ProcessManager {
       for (const envName of manifest.runtime.env) {
         const value = await secretManager.get(envName);
         if (!value) {
-          // Friendly error message with clear guidance
           throw new Error(
-            `❌ Startup failed: Server "${manifest.name}" requires secret [${envName}] which is not set.\n` +
+            `Startup failed: Server "${manifest.name}" requires secret [${envName}] which is not set.\n` +
               `   Please set the secret by running:\n` +
               `   ${PROGRAM_NAME} secret set ${envName} <your-value>\n` +
               `   Example: ${PROGRAM_NAME} secret set ${envName} "your-secret-value-here"`,
@@ -64,61 +72,31 @@ export class ProcessManager {
     }
 
     // Prepare log file
-    // We'll use child.pid once it's started, but we need to pass a fd to spawn.
-    // However, we don't know the PID until it starts.
-    // For background processes, we'll open a temporary log file or use a predicted PID (not reliable).
-    // Better: spawn first with pipe, then redirect in the child, but we want detached.
-    // Standard approach: open file with a placeholder name or use a unique ID.
-    // Since we want log per PID, we can start the process, get its PID, then redirect?
-    // No, spawn needs the fd.
-    // Let's use a temporary filename and rename it, or just use PID.log.
-    // Most OS provide the PID immediately after spawn.
-
-    // Actually, we can't get PID before spawn.
-    // We'll use a temporary log file and then rename it in the parent?
-    // Or just use a unique ID.
-    // Use a unique temp log path with random suffix to avoid collisions
-    // getLogPath expects a number, so we use a large random number unlikely to collide
     const tempLogId = Date.now() + Math.floor(Math.random() * 100000);
     const tempLogPath = getLogPath(tempLogId);
     const logFile = fs.openSync(tempLogPath, "a");
 
-    // Start process as detached so it can continue after CLI exits
-    // For MCP Servers, we need to handle different types:
-    // 1. Stdio servers (communicate via stdin/stdout) - need to keep stdio open
-    // 2. HTTP servers (listen on a port) - can ignore stdio
-    // Determine transport type (default to stdio for backward compatibility)
-    const transportType = manifest.transport?.type || "stdio";
+    // Determine if this is a network-based server (HTTP, SSE, WebSocket, etc.)
+    const isNetworkServer = ["http", "sse", "websocket", "tcp"].includes(
+      transportType,
+    );
 
     let spawnOptions: any = {
       env: { ...process.env, ...envVars },
       shell: false,
     };
 
-    // Determine if this is a network-based server (HTTP, SSE, WebSocket, etc.)
-    // These servers don't need stdin as they communicate via network
-    const isNetworkServer = ["http", "sse", "websocket", "tcp"].includes(
-      transportType,
-    );
-
     if (isNetworkServer) {
-      // Network servers can be fully detached and don't need stdin
       spawnOptions = {
         ...spawnOptions,
         stdio: ["ignore", logFile, logFile],
         detached: true,
       };
     } else {
-      // Stdio servers need to keep stdin/stdout open for MCP protocol communication
-      // stdin: pipe (for sending JSON-RPC requests)
-      // stdout: pipe (for receiving JSON-RPC responses via MCP protocol)
-      // stderr: logFile (for logging/debug output)
-      // We keep the process attached to maintain stdio connection
-      // but also want it to survive parent exit
       spawnOptions = {
         ...spawnOptions,
         stdio: ["pipe", "pipe", logFile],
-        detached: true, // Still detached, but we keep stdio pipes open
+        detached: true,
       };
     }
 
@@ -128,7 +106,6 @@ export class ProcessManager {
       spawnOptions,
     );
 
-    // Only close stdin for network servers, not for stdio servers
     if (isNetworkServer && child.stdin) {
       child.stdin.end();
     }
@@ -141,7 +118,6 @@ export class ProcessManager {
       fs.closeSync(logFile);
       fs.renameSync(tempLogPath, finalLogPath);
     } catch (e) {
-      // If rename fails (e.g. file busy), clean up the temp file
       try {
         fs.unlinkSync(tempLogPath);
       } catch (e2) {
@@ -149,8 +125,6 @@ export class ProcessManager {
       }
     }
 
-    // For detached processes, the exit event may not fire reliably
-    // We'll rely on the store's process checking logic
     child.on("exit", async (code) => {
       try {
         const status = code === 0 ? "stopped" : "error";
@@ -161,26 +135,14 @@ export class ProcessManager {
       }
     });
 
-    // Unref the child process so parent can exit independently
-    // But keep a reference to track it
     this.processes.set(pid, child);
     child.unref();
 
-    // Wait a moment to see if the process stays alive
-    // Use longer wait for stdio servers as they may take time to initialize
     const waitTime = isNetworkServer ? 1000 : 2000;
     await new Promise((resolve) => setTimeout(resolve, waitTime));
 
-    // Check if process is still running with retry logic
-    // For stdio servers, they might appear to exit if no client connects
-    // but they're actually waiting for connections
     const isAlive = await isProcessRunningWithRetry(pid, 3, 500);
-
-    // Also check child process status for additional confirmation
     const childAlive = child.exitCode === null && child.signalCode === null;
-
-    // Final determination: consider process alive if either check passes
-    // This handles edge cases where detached processes lose the child reference
     const finalIsAlive = isAlive || childAlive;
 
     const processInfo: ProcessInfo = {
@@ -198,22 +160,20 @@ export class ProcessManager {
       logPath: finalLogPath,
     };
 
-    // Store process information
     await this.store.addProcess(processInfo);
 
     if (finalIsAlive) {
       logger.info(
-        `✓ Started ${manifest.name} v${manifest.version} (PID: ${pid})`,
+        `Started ${manifest.name} v${manifest.version} (PID: ${pid})`,
       );
       logger.info(`  Logs: ${finalLogPath}`);
       logger.info(`  Status: Running (detached process)`);
 
-      // Try to discover tools dynamically if server supports it
       await this.discoverToolsIfSupported(serverNameOrUrl, manifest, child);
     } else {
       const exitCode = child.exitCode;
       const signalCode = child.signalCode;
-      logger.info(`⚠️  Process ${pid} exited immediately`);
+      logger.info(`Process ${pid} exited immediately`);
       logger.info(`  Exit code: ${exitCode !== null ? exitCode : "N/A"}`);
       logger.info(`  Signal: ${signalCode || "N/A"}`);
       logger.info(`  Check logs: ${finalLogPath}`);
@@ -221,7 +181,6 @@ export class ProcessManager {
         `  Note: Some MCP servers may exit if they require stdio communication`,
       );
 
-      // If process exited immediately, update status in store
       await this.store.updateProcess(pid, { status: "stopped" });
     }
 
@@ -229,8 +188,101 @@ export class ProcessManager {
   }
 
   /**
+   * Start an external service (HTTP/SSE) by connecting to it rather than spawning a process.
+   * The service must already be running externally.
+   */
+  private async startExternalService(
+    manifest: any,
+    serverNameOrUrl: string,
+  ): Promise<number> {
+    const transportType = manifest.transport?.type || manifest.runtime?.type || "sse";
+    const url = manifest.transport?.url || manifest.runtime?.url;
+
+    if (!url) {
+      throw new Error(
+        `External service "${manifest.name}" is missing URL configuration.\n` +
+        `   Please add a "url" field to the transport config in the manifest.`,
+      );
+    }
+
+    logger.info(
+      `Connecting to external service ${manifest.name} (${transportType.toUpperCase()}: ${url})...`,
+    );
+
+    // Try to connect to the service to verify it's available
+    const client = new MCPClient({
+      transport: {
+        type: transportType,
+        url: url,
+      },
+      timeout: 5000,
+      maxRetries: 1,
+      serverName: manifest.name,
+    });
+
+    try {
+      await client.connect();
+
+      // Health check: call tools/list to verify the service is responsive
+      const tools = await client.listTools();
+      await client.disconnect();
+
+      // Generate a virtual PID (negative number based on URL hash)
+      const virtualPid = this.generateVirtualPid(url);
+
+      const processInfo: ProcessInfo = {
+        pid: virtualPid,
+        serverName: serverNameOrUrl,
+        name: manifest.name,
+        version: manifest.version,
+        manifest: {
+          name: manifest.name,
+          version: manifest.version,
+          runtime: manifest.runtime,
+        },
+        startTime: Date.now(),
+        status: "running",
+        external: true,
+        transportType: transportType,
+        url: url,
+      };
+
+      await this.store.addProcess(processInfo);
+
+      logger.info(
+        `Connected to external service ${manifest.name} (${transportType.toUpperCase()}: ${url})`,
+      );
+      logger.info(`  Discovered ${tools.length} tool(s)`);
+
+      return virtualPid;
+    } catch (error: any) {
+      throw new Error(
+        `Cannot connect to external service "${manifest.name}"\n\n` +
+        `  This service is configured as ${transportType.toUpperCase()} type and must be started manually.\n` +
+        `  Connection URL: ${url}\n\n` +
+        `  Please ensure the service is running first, then try again.\n` +
+        `  Example: node mock-mcp-server.js`,
+      );
+    }
+  }
+
+  /**
+   * Generate a virtual PID for external services based on URL hash.
+   * Uses negative numbers to distinguish from real PIDs.
+   */
+  private generateVirtualPid(url: string): number {
+    let hash = 0;
+    for (let i = 0; i < url.length; i++) {
+      const char = url.charCodeAt(i);
+      hash = ((hash << 5) - hash) + char;
+      hash = hash & hash; // Convert to 32bit integer
+    }
+    // Ensure negative and within reasonable range
+    return -(Math.abs(hash) % 100000 + 1);
+  }
+
+  /**
    * Discover tools from a running MCP server via MCP protocol's tools/list
-   * This enables dynamic tool discovery even when mcp.json has no tools defined
    */
   private async discoverToolsIfSupported(
     serverName: string,
@@ -238,7 +290,6 @@ export class ProcessManager {
     childProcess: ChildProcess,
   ): Promise<void> {
     try {
-      // Check if manifest already has tools defined (static mode)
       const hasToolsInManifest =
         (manifest.tools && manifest.tools.length > 0) ||
         (manifest.capabilities?.tools &&
@@ -246,17 +297,15 @@ export class ProcessManager {
 
       if (hasToolsInManifest) {
         logger.info(
-          `ℹ️  Server has static tool definitions, skipping dynamic discovery`,
+          `Server has static tool definitions, skipping dynamic discovery`,
         );
         return;
       }
 
       logger.info(
-        `🔍 Attempting dynamic tool discovery for ${manifest.name}...`,
+        `Attempting dynamic tool discovery for ${manifest.name}...`,
       );
 
-      // Create an MCPClient connected to the already-running child process
-      // This avoids spawning a second process and communicates via the existing stdio
       const client = new MCPClient({
         transport: {
           type: "stdio",
@@ -269,27 +318,22 @@ export class ProcessManager {
         serverName: manifest.name,
       });
 
-      // Listen for stderr from the MCP server (for debugging)
       client.on("stderr", (msg: string) => {
         logger.debug(`[${manifest.name}] ${msg}`);
       });
 
       try {
         await client.connect();
-
-        // Call tools/list via MCP protocol
         const tools = await client.listTools();
 
         if (tools && tools.length > 0) {
           logger.info(
-            `✓ Dynamically discovered ${tools.length} tools from ${manifest.name}`,
+            `Dynamically discovered ${tools.length} tools from ${manifest.name}`,
           );
 
-          // Register discovered tools to the ToolRegistry
           const toolRegistry = getToolRegistry();
           await toolRegistry.registerDynamicTools(serverName, tools);
 
-          // Log discovered tools (first 3)
           for (const tool of tools.slice(0, 3)) {
             logger.info(`  - ${tool.name}: ${tool.description}`);
           }
@@ -297,14 +341,13 @@ export class ProcessManager {
             logger.info(`  ... and ${tools.length - 3} more`);
           }
         } else {
-          logger.info(`ℹ️  Server ${manifest.name} returned no tools`);
+          logger.info(`Server ${manifest.name} returned no tools`);
         }
 
-        // Disconnect the client after discovery
         await client.disconnect();
       } catch (connectError: any) {
         logger.warn(
-          `⚠️  Dynamic tool discovery failed for ${manifest.name}: ${connectError.message}`,
+          `Dynamic tool discovery failed for ${manifest.name}: ${connectError.message}`,
         );
         logger.info(
           `   Tools can still be used via direct MCP protocol calls when needed`,
@@ -312,18 +355,27 @@ export class ProcessManager {
       }
     } catch (error: any) {
       logger.error(
-        `⚠️  Tool discovery error for ${manifest.name}:`,
+        `Tool discovery error for ${manifest.name}:`,
         error.message,
       );
-      // Don't throw - tool discovery failure shouldn't stop server startup
     }
   }
 
   async stop(pid: number): Promise<void> {
+    // Check if this is an external service
+    const processInfo = await this.store.getProcess(pid);
+
+    if (processInfo?.external) {
+      // External service: just remove the record, don't kill the process
+      await this.store.updateProcess(pid, { status: "stopped" });
+      logger.info(`Deregistered external service ${processInfo.name}`);
+      return;
+    }
+
     const process = this.processes.get(pid);
     if (process) {
       process.kill("SIGTERM");
-      await new Promise((resolve) => setTimeout(resolve, 1000)); // Wait for process to exit
+      await new Promise((resolve) => setTimeout(resolve, 1000));
 
       if (process.exitCode === null) {
         process.kill("SIGKILL");
@@ -331,38 +383,32 @@ export class ProcessManager {
 
       await this.store.updateProcess(pid, { status: "stopped" });
       this.processes.delete(pid);
-      logger.info(`✓ Stopped process ${pid}`);
+      logger.info(`Stopped process ${pid}`);
     } else {
-      // If process is not in memory, try to kill it using system command
       try {
         const { exec } = await import("child_process");
         const { promisify } = await import("util");
         const execAsync = promisify(exec);
 
-        // Try SIGTERM first
         try {
           await execAsync(`kill ${pid}`);
           await new Promise((resolve) => setTimeout(resolve, 1000));
 
-          // Check if process is still running
           try {
             await execAsync(`kill -0 ${pid} 2>/dev/null`);
-            // If kill -0 succeeds, process is still running, use SIGKILL
             await execAsync(`kill -9 ${pid}`);
           } catch {
-            // Process is already dead, good
+            // Process is already dead
           }
         } catch (error) {
-          // kill command failed, maybe process doesn't exist
           logger.info(`Process ${pid} may not exist or already stopped`);
         }
 
-        logger.info(`✓ Stopped process ${pid} using system kill command`);
+        logger.info(`Stopped process ${pid} using system kill command`);
       } catch (error) {
-        logger.info(`⚠️ Could not kill process ${pid}: ${error}`);
+        logger.info(`Could not kill process ${pid}: ${error}`);
       }
 
-      // Update storage status
       await this.store.updateProcess(pid, { status: "stopped" });
     }
   }
@@ -383,16 +429,10 @@ export class ProcessManager {
     return this.store.getProcessByServerName(serverName);
   }
 
-  /**
-   * Get the actual ChildProcess handle for a PID if it's managed by this instance
-   */
   getProcessHandle(pid: number): ChildProcess | undefined {
     return this.processes.get(pid);
   }
 
-  /**
-   * Get the actual ChildProcess handle for a server name if it's managed by this instance
-   */
   async getProcessHandleByServerName(
     serverName: string,
   ): Promise<ChildProcess | undefined> {
@@ -414,10 +454,8 @@ export class ProcessManager {
   }
 
   async cleanup(): Promise<void> {
-    // Clean up stopped process records
     await this.store.clearStoppedProcesses();
 
-    // Clean up exited processes in memory
     for (const [pid, process] of this.processes.entries()) {
       if (process.exitCode !== null) {
         this.processes.delete(pid);

@@ -29,6 +29,8 @@ import {
   globalErrorBoundary,
 } from "../kernel/error-boundary.js";
 import { StdioTransport } from "./stdio-transport.js";
+import { HttpTransport } from "./http-transport.js";
+import { SseTransport } from "./sse-transport.js";
 import { MCPTransport } from "./transport.js";
 
 // ==================== MCP Client ====================
@@ -69,6 +71,16 @@ export class MCPClient extends EventEmitter {
         env: config.transport.env as Record<string, string> | undefined,
         existingProcess: config.transport.existingProcess,
       });
+    } else if (config.transport.type === "http") {
+      this.transport = new HttpTransport({
+        url: config.transport.url!,
+        headers: config.transport.headers,
+      });
+    } else if (config.transport.type === "sse") {
+      this.transport = new SseTransport({
+        url: config.transport.url!,
+        headers: config.transport.headers,
+      });
     } else {
       throw new Error(
         `Transport type ${config.transport.type} is not supported yet`,
@@ -90,18 +102,6 @@ export class MCPClient extends EventEmitter {
 
         if (this.config.autoConnect) {
           await this.refreshTools();
-        }
-
-        // Health check
-        try {
-          const tools = await this.listTools();
-          logger.debug(
-            `[MCPClient] Health check passed: ${tools.length} tools available`,
-          );
-        } catch (healthError: any) {
-          logger.warn(
-            `[MCPClient] Health check failed: ${healthError.message}`,
-          );
         }
       },
       {

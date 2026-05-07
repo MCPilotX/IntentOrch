@@ -22,6 +22,10 @@ export interface ProcessInfo {
   stdout?: string;
   stderr?: string;
   logPath?: string;
+  // External service fields (for HTTP/SSE transport types)
+  external?: boolean;
+  transportType?: string;
+  url?: string;
 }
 
 export interface ProcessStore {
