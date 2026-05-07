@@ -29,12 +29,13 @@ import {
   globalErrorBoundary,
 } from "../kernel/error-boundary.js";
 import { StdioTransport } from "./stdio-transport.js";
+import { MCPTransport } from "./transport.js";
 
 // ==================== MCP Client ====================
 
 export class MCPClient extends EventEmitter {
   private config: MCPClientConfig;
-  private transport: StdioTransport;
+  private transport: MCPTransport;
   private connected: boolean = false;
   private requestId: number = 0;
   private pendingRequests: Map<
@@ -61,12 +62,18 @@ export class MCPClient extends EventEmitter {
       ...config,
     };
 
-    this.transport = new StdioTransport({
-      command: config.transport.command || "npx",
-      args: config.transport.args || [],
-      env: config.transport.env as Record<string, string> | undefined,
-      existingProcess: config.transport.existingProcess,
-    });
+    if (config.transport.type === "stdio") {
+      this.transport = new StdioTransport({
+        command: config.transport.command || "npx",
+        args: config.transport.args || [],
+        env: config.transport.env as Record<string, string> | undefined,
+        existingProcess: config.transport.existingProcess,
+      });
+    } else {
+      throw new Error(
+        `Transport type ${config.transport.type} is not supported yet`,
+      );
+    }
     this.setupTransportListeners();
   }
 
