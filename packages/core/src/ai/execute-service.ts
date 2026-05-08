@@ -1054,22 +1054,22 @@ CRITICAL: Some tools are "helper" tools that only prepare data for other tools (
     }
 
     try {
+      // Determine transport type from manifest
+      const transportType = manifest.transport?.type || "stdio";
+      const isExternal = ["sse", "http", "websocket", "tcp"].includes(transportType);
+
       // Try to find an existing process handle from ProcessManager
       const processManager = getProcessManager();
-      const existingProcess =
-        await processManager.getProcessHandleByServerName(serverName);
+      const runningInfo = await processManager.getByServerName(serverName);
+      
+      let existingProcess: any = null;
 
-      if (existingProcess) {
-        logger.debug(
-          `[ExecuteService] Found existing process handle for ${serverName}, reusing it`,
-        );
-      } else {
-        // If no existing process handle in memory, check if there's a running process in store
-        // and stop it first to avoid port/stdio conflicts when spawning a new one
-        const runningInfo = await processManager.getByServerName(serverName);
-        if (runningInfo && runningInfo.status === "running") {
+      if (!isExternal) {
+        existingProcess = await processManager.getProcessHandleByServerName(serverName);
+
+        if (!existingProcess && runningInfo && runningInfo.status === "running") {
           logger.debug(
-            `[ExecuteService] Found running process ${runningInfo.pid} for ${serverName} in store, stopping it first`,
+            `[ExecuteService] Found running local process ${runningInfo.pid} for ${serverName} in store, stopping it first to avoid conflicts`,
           );
           try {
             await processManager.stop(runningInfo.pid);
@@ -1088,6 +1088,8 @@ CRITICAL: Some tools are "helper" tools that only prepare data for other tools (
         string,
         string
       >;
+      
+      // ... (rest of env var logic)
       if (manifest.runtime.env && manifest.runtime.env.length > 0) {
         logger.debug(
           `[ExecuteService] Manifest requires env vars: ${manifest.runtime.env.join(", ")}`,

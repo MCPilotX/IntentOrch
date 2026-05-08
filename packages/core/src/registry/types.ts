@@ -14,6 +14,7 @@ export interface Manifest {
     type: "stdio" | "http" | "sse" | "websocket" | "tcp"; // Communication transport type
     port?: number; // Port for HTTP transport
     url?: string; // URL for HTTP/SSE transport
+    headers?: Record<string, string>; // Optional headers for HTTP/SSE transport
   };
   capabilities?: {
     tools?: any[]; // Tools array (can be ToolMetadata or string[])

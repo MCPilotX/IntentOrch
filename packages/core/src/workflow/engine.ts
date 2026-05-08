@@ -206,20 +206,45 @@ export class WorkflowEngine {
       // Fetch manifest for the server
       const manifest = await registryClient.fetchManifest(serverName);
 
-      if (!manifest || !manifest.runtime || !manifest.runtime.command) {
-        throw new Error(
-          `Invalid manifest for server ${serverName}: missing runtime configuration`,
-        );
+      if (!manifest) {
+        throw new Error(`Manifest not found for server ${serverName}`);
       }
 
-      // Create MCP client with transport configuration from manifest
-      const client = new MCPClient({
-        transport: {
+      // Determine transport type from manifest
+      const transportType = manifest.transport?.type || "stdio";
+      let transportConfig: any;
+
+      if (transportType === "sse" || transportType === "http") {
+        const url = manifest.transport?.url || (manifest.runtime as any)?.url;
+        if (!url) {
+          throw new Error(
+            `Invalid manifest for server ${serverName}: missing URL for ${transportType} transport`,
+          );
+        }
+        transportConfig = {
+          type: transportType,
+          url: url,
+          headers: manifest.transport?.headers,
+        };
+      } else {
+        // Default to stdio
+        if (!manifest.runtime || !manifest.runtime.command) {
+          throw new Error(
+            `Invalid manifest for server ${serverName}: missing runtime configuration for stdio transport`,
+          );
+        }
+        transportConfig = {
           type: "stdio",
           command: manifest.runtime.command,
           args: manifest.runtime.args || [],
           env: { ...process.env } as Record<string, string>,
-        },
+        };
+      }
+
+      // Create MCP client with transport configuration
+      const client = new MCPClient({
+        transport: transportConfig,
+        serverName: serverName,
       });
 
       // Handle transport errors to prevent process crash
@@ -236,7 +261,7 @@ export class WorkflowEngine {
       this.clients.set(serverName, client);
 
       logger.info(
-        `✅ MCP client created and connected for server: ${serverName}`,
+        `✅ MCP client created and connected for server: ${serverName} (${transportType})`,
       );
     } catch (error: any) {
       logger.error(

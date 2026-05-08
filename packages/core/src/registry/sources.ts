@@ -825,8 +825,42 @@ export class DirectRegistrySource implements RegistrySource {
     }
 
     // HTTP/HTTPS URL
-    const response = await axios.get(serverNameOrUrl);
-    return response.data;
+    try {
+      const response = await axios.get(serverNameOrUrl);
+      const data = response.data;
+
+      // If it looks like a manifest, return it
+      if (data && typeof data === "object" && (data.name || data.mcpServers || data.runtime)) {
+        return data;
+      }
+
+      // If it's not a manifest but we got a response, it might be an SSE endpoint
+      // that doesn't return JSON on GET. But axios.get might have succeeded.
+      throw new Error("Response is not a valid manifest");
+    } catch (error: any) {
+      // If it's a 405 or other error, it might still be an SSE/HTTP endpoint
+      // Check if the URL ends with /sse or contains sse
+      const isLikelySse = serverNameOrUrl.toLowerCase().includes("sse");
+      
+      if (isLikelySse) {
+        logger.info(`[DirectRegistrySource] URL looks like an SSE endpoint, generating virtual manifest: ${serverNameOrUrl}`);
+        return {
+          name: serverNameOrUrl.split("/").pop() || "remote-sse-service",
+          version: "1.0.0",
+          description: `Remote SSE service at ${serverNameOrUrl}`,
+          runtime: {
+            type: "remote",
+            command: "",
+          },
+          transport: {
+            type: "sse",
+            url: serverNameOrUrl,
+          },
+        };
+      }
+
+      throw error;
+    }
   }
 }
 
