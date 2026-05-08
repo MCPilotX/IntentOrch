@@ -99,7 +99,17 @@ export class SseTransport extends EventEmitter implements MCPTransport {
       throw new Error("Transport not connected");
     }
 
-    const url = this.postUrl || this.config.url; 
+    // Resolve the post URL: if it's a relative path, resolve it against the base URL
+    let url = this.postUrl || this.config.url;
+    if (this.postUrl && this.postUrl.startsWith('/')) {
+      try {
+        const baseUrl = new URL(this.config.url);
+        url = `${baseUrl.origin}${this.postUrl}`;
+      } catch {
+        // If base URL is invalid, fall back to original behavior
+        logger.warn(`[SseTransport] Could not resolve base URL from ${this.config.url}, using postUrl as-is`);
+      }
+    }
 
     try {
       const response = await axios.post(url, message, {

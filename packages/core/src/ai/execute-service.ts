@@ -1090,7 +1090,7 @@ CRITICAL: Some tools are "helper" tools that only prepare data for other tools (
       >;
       
       // ... (rest of env var logic)
-      if (manifest.runtime.env && manifest.runtime.env.length > 0) {
+      if (manifest.runtime?.env && manifest.runtime.env.length > 0) {
         logger.debug(
           `[ExecuteService] Manifest requires env vars: ${manifest.runtime.env.join(", ")}`,
         );
@@ -1119,9 +1119,6 @@ CRITICAL: Some tools are "helper" tools that only prepare data for other tools (
         }
       }
 
-      // Determine transport type from manifest
-      const transportType = manifest.transport?.type || "stdio";
-      
       let transportConfig: any;
       if (transportType === "sse") {
         transportConfig = {

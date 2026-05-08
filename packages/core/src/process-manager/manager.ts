@@ -239,6 +239,7 @@ export class ProcessManager {
           name: manifest.name,
           version: manifest.version,
           runtime: manifest.runtime,
+          transport: manifest.transport,
         },
         startTime: Date.now(),
         status: "running",

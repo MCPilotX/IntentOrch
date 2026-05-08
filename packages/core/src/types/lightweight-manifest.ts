@@ -70,7 +70,7 @@ export function isLightweightManifest(
  * Convert full manifest to lightweight manifest
  */
 export function toLightweightManifest(fullManifest: any): LightweightManifest {
-  return {
+  const manifest: LightweightManifest = {
     name: fullManifest.name,
     version: fullManifest.version,
     runtime: {
@@ -86,6 +86,13 @@ export function toLightweightManifest(fullManifest: any): LightweightManifest {
       minMCPVersion: fullManifest.compatibility?.minMCPVersion || "1.0.0",
     },
   };
+
+  // Preserve transport configuration (important for SSE/HTTP services)
+  if (fullManifest.transport) {
+    (manifest as any).transport = fullManifest.transport;
+  }
+
+  return manifest;
 }
 
 /**

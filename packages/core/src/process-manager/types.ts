@@ -13,6 +13,11 @@ export interface ProcessInfo {
       env?: string[];
       cwd?: string;
     };
+    transport?: {
+      type: "stdio" | "http" | "sse" | "websocket" | "tcp";
+      url?: string;
+      headers?: Record<string, string>;
+    };
   };
   startTime: number;
   startedAt?: string; // ISO string for web compatibility
