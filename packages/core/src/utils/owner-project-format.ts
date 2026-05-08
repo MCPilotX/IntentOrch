@@ -86,9 +86,23 @@ export function toOwnerProjectFormat(serverName: string): OwnerProjectFormat {
   }
 
   // 0. Handle URL format - extract service name from URL first
-  if (serverName.startsWith("http://") || serverName.startsWith("https://")) {
+  if (
+    serverName.startsWith("http://") ||
+    serverName.startsWith("https://") ||
+    serverName.startsWith("file://")
+  ) {
     try {
       const url = new URL(serverName);
+
+      // For file:// protocol, extract the filename as the display name
+      if (serverName.startsWith("file://")) {
+        const pathname = url.pathname;
+        // Extract just the filename without extension
+        const fileName = pathname.split("/").filter(Boolean).pop() || "local-service";
+        const baseName = fileName.replace(/\.json$/i, "");
+        return buildResult(`local/${baseName}`);
+      }
+
       const pathname = url.pathname;
 
       // Remove /mcp.json suffix first, then .json suffix

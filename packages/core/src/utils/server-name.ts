@@ -34,7 +34,11 @@ export function normalizeServerName(serverName: string): string {
   // Determine prefix based on source
   let source = "github"; // default
 
-  if (serverName.startsWith("http://") || serverName.startsWith("https://")) {
+  if (
+    serverName.startsWith("http://") ||
+    serverName.startsWith("https://") ||
+    serverName.startsWith("file://")
+  ) {
     // URL format - determine source from URL
     if (serverName.includes("gitee.com")) {
       source = "gitee";
