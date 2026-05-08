@@ -215,8 +215,8 @@ export class ProcessManager {
         type: transportType,
         url: url,
       },
-      timeout: 5000,
-      maxRetries: 1,
+      timeout: 15000, // Increased from 5s to 15s
+      maxRetries: 2, // Increased retries
       serverName: manifest.name,
     });
 

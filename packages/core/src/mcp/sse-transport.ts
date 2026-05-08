@@ -1,5 +1,6 @@
 import { EventEmitter } from "events";
 import { EventSource } from "eventsource";
+import axios from "axios";
 import { MCPTransport } from "./transport.js";
 import { JSONRPCRequest } from "./types.js";
 import { logger } from "../core/logger.js";
@@ -71,9 +72,10 @@ export class SseTransport extends EventEmitter implements MCPTransport {
             this.emit("connected");
             
             // Small delay to ensure server-side setup is complete before first POST
+            // In WSL/Remote scenarios, giving the server 1s to stabilize often fixes ECONNRESET
             setTimeout(() => {
               resolve();
-            }, 500);
+            }, 1000);
           }
         });
 
@@ -112,41 +114,46 @@ export class SseTransport extends EventEmitter implements MCPTransport {
       throw new Error("Transport not connected");
     }
 
-    // Resolve the post URL: if it's a relative path, resolve it against the base URL
+    // Resolve the post URL: if it's a relative path, resolve it against the ACTUAL connected URL
     let url = this.postUrl || this.config.url;
     try {
-      const baseUrl = new URL(this.config.url);
+      // Use the actual URL from the eventSource if available (handles redirects)
+      const base = this.eventSource?.url ? new URL(this.eventSource.url) : new URL(this.config.url);
       if (this.postUrl) {
-        // If postUrl is absolute, URL constructor handles it; if relative, it resolves against baseUrl
-        url = new URL(this.postUrl, baseUrl.href).href;
+        url = new URL(this.postUrl, base.href).href;
       }
     } catch (e) {
       logger.warn(`[SseTransport] URL resolution failed, using fallback: ${e}`);
     }
 
-    logger.debug(`[SseTransport] POSTing to ${url}: ${JSON.stringify(message).substring(0, 200)}`);
+    logger.debug(`[SseTransport] POSTing to ${url} (ID: ${message.id})`);
 
     try {
-      const response = await axios.post(url, message, {
+      // Use standard fetch to avoid any axios-specific header/proxy issues
+      // This is exactly how the official SDK implements it
+      const response = await fetch(url, {
+        method: "POST",
         headers: {
           "Content-Type": "application/json",
-          ...this.config.headers,
         },
-        timeout: 10000,
-        // Don't validate status here, handle it below
-        validateStatus: () => true,
+        body: JSON.stringify(message),
       });
 
-      if (response.status >= 400) {
-        logger.error(`[SseTransport] POST failed with status ${response.status}: ${JSON.stringify(response.data)}`);
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => "Unknown error");
+        logger.error(`[SseTransport] POST failed with status ${response.status}: ${errorText}`);
         this.emit("error", new Error(`POST failed with status ${response.status}`));
         return;
       }
 
-      // If the server returns a JSON-RPC response directly in the HTTP response
-      if (response.data && typeof response.data === 'object' && response.data.jsonrpc === '2.0') {
-        logger.debug(`[SseTransport] Received direct response from POST`);
-        this.emit("message", response.data);
+      // If the server returns a JSON-RPC response directly in the HTTP response body
+      const contentType = response.headers.get("content-type") || "";
+      if (contentType.includes("application/json")) {
+        const data = await response.json();
+        if (data && typeof data === 'object' && data.jsonrpc === '2.0') {
+          logger.debug(`[SseTransport] Received direct response from POST`);
+          this.emit("message", data);
+        }
       }
     } catch (error: any) {
       logger.error(`[SseTransport] POST failed: ${error.message}`);

@@ -438,8 +438,8 @@ export class MCPClient extends EventEmitter {
     });
   }
 
-  private generateRequestId(): string {
-    return `req_${++this.requestId}_${Date.now()}`;
+  private generateRequestId(): number {
+    return ++this.requestId;
   }
 
   // ==================== Transport Layer Event Handling ====================
