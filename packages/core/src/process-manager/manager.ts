@@ -220,6 +220,11 @@ export class ProcessManager {
       serverName: manifest.name,
     });
 
+    // Add error listener to prevent process crash on async connection errors
+    client.on("error", (error) => {
+      logger.error(`[ProcessManager] Error from external service "${manifest.name}":`, error);
+    });
+
     try {
       await client.connect();
 

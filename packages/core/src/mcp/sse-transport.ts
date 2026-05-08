@@ -1,5 +1,4 @@
 import { EventEmitter } from "events";
-import axios from "axios";
 import { EventSource } from "eventsource";
 import { MCPTransport } from "./transport.js";
 import { JSONRPCRequest } from "./types.js";
@@ -22,10 +21,17 @@ export class SseTransport extends EventEmitter implements MCPTransport {
   async connect(): Promise<void> {
     if (this._connected) return;
 
+    logger.info(`[SseTransport] Connecting to SSE endpoint: ${this.config.url}`);
+
     return new Promise((resolve, reject) => {
       try {
+        const headers = {
+          "Accept": "text/event-stream",
+          ...this.config.headers,
+        };
+        
         this.eventSource = new EventSource(this.config.url, {
-          headers: this.config.headers,
+          headers: headers,
         } as any);
 
         if (!this.eventSource) {
@@ -34,15 +40,17 @@ export class SseTransport extends EventEmitter implements MCPTransport {
         }
 
         this.eventSource.onerror = (error: any) => {
-          logger.error(`[SseTransport] SSE error:`, error);
+          const errorMsg = error && typeof error === 'object' ? JSON.stringify(error) : String(error);
+          logger.error(`[SseTransport] SSE error: ${errorMsg}`);
           if (!this._connected) {
-            reject(new Error("Failed to connect to SSE endpoint"));
+            reject(new Error(`Failed to connect to SSE endpoint: ${errorMsg}`));
           } else {
-            this.emit("error", new Error("SSE connection error"));
+            this.emit("error", new Error(`SSE connection error: ${errorMsg}`));
           }
         };
 
         this.eventSource.onmessage = (event: any) => {
+          logger.info(`[SseTransport] Message received: ${event.data.substring(0, 500)}${event.data.length > 500 ? '...' : ''}`);
           try {
             const message = JSON.parse(event.data);
             this.emit("message", message);
@@ -54,20 +62,25 @@ export class SseTransport extends EventEmitter implements MCPTransport {
         // Standard MCP SSE 'endpoint' event to tell client where to post
         this.eventSource.addEventListener("endpoint", (event: any) => {
           this.postUrl = event.data;
-          logger.debug(`[SseTransport] Outbound endpoint received: ${this.postUrl}`);
+          logger.info(`[SseTransport] Outbound endpoint received: ${this.postUrl}`);
           
           // Mark as connected and resolve only after receiving the endpoint event
           // This ensures postUrl is available before any send() calls
           if (!this._connected) {
             this._connected = true;
             this.emit("connected");
-            resolve();
+            
+            // Small delay to ensure server-side setup is complete before first POST
+            setTimeout(() => {
+              resolve();
+            }, 500);
           }
         });
 
         // Also handle the case where the server sends the endpoint in the initial connection
         // Some servers send endpoint as the first event before onopen
         this.eventSource.onopen = () => {
+          logger.info(`[SseTransport] SSE connection opened for ${this.config.url}`);
           // If endpoint already received, we're good
           if (this.postUrl) {
             if (!this._connected) {
@@ -101,15 +114,17 @@ export class SseTransport extends EventEmitter implements MCPTransport {
 
     // Resolve the post URL: if it's a relative path, resolve it against the base URL
     let url = this.postUrl || this.config.url;
-    if (this.postUrl && this.postUrl.startsWith('/')) {
-      try {
-        const baseUrl = new URL(this.config.url);
-        url = `${baseUrl.origin}${this.postUrl}`;
-      } catch {
-        // If base URL is invalid, fall back to original behavior
-        logger.warn(`[SseTransport] Could not resolve base URL from ${this.config.url}, using postUrl as-is`);
+    try {
+      const baseUrl = new URL(this.config.url);
+      if (this.postUrl) {
+        // If postUrl is absolute, URL constructor handles it; if relative, it resolves against baseUrl
+        url = new URL(this.postUrl, baseUrl.href).href;
       }
+    } catch (e) {
+      logger.warn(`[SseTransport] URL resolution failed, using fallback: ${e}`);
     }
+
+    logger.debug(`[SseTransport] POSTing to ${url}: ${JSON.stringify(message).substring(0, 200)}`);
 
     try {
       const response = await axios.post(url, message, {
@@ -117,11 +132,20 @@ export class SseTransport extends EventEmitter implements MCPTransport {
           "Content-Type": "application/json",
           ...this.config.headers,
         },
+        timeout: 10000,
+        // Don't validate status here, handle it below
+        validateStatus: () => true,
       });
-      
-      // If the server returns a JSON-RPC response directly in the HTTP response,
-      // emit it as a message for the MCPClient to process
+
+      if (response.status >= 400) {
+        logger.error(`[SseTransport] POST failed with status ${response.status}: ${JSON.stringify(response.data)}`);
+        this.emit("error", new Error(`POST failed with status ${response.status}`));
+        return;
+      }
+
+      // If the server returns a JSON-RPC response directly in the HTTP response
       if (response.data && typeof response.data === 'object' && response.data.jsonrpc === '2.0') {
+        logger.debug(`[SseTransport] Received direct response from POST`);
         this.emit("message", response.data);
       }
     } catch (error: any) {

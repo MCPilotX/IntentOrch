@@ -249,9 +249,7 @@ export class WorkflowEngine {
 
       // Handle transport errors to prevent process crash
       client.on("error", (error) => {
-        logger.warn(
-          `⚠️ MCP Client error for ${serverName}: ${error.message || error}`,
-        );
+        logger.error(`[WorkflowEngine] MCP Client error for "${serverName}":`, error);
       });
 
       // Connect the client

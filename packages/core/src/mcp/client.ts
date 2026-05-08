@@ -508,7 +508,18 @@ export class MCPClient extends EventEmitter {
       data,
       timestamp: Date.now(),
     };
-    this.emit(type, event);
+    
+    // Safely emit 'error' to avoid ERR_UNHANDLED_ERROR if no listeners are attached
+    if (type === "error") {
+      if (this.listenerCount("error") > 0) {
+        this.emit("error", event);
+      } else {
+        logger.error(`[MCPClient] Unhandled error:`, data);
+      }
+    } else {
+      this.emit(type, event);
+    }
+    
     this.emit("event", event);
   }
 
