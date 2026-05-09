@@ -144,7 +144,7 @@ const ToolCallModal: React.FC<ToolCallModalProps> = ({ isOpen, onClose, serverNa
                   : 'bg-gray-50 dark:bg-gray-900 border-gray-200 dark:border-gray-800 text-gray-800 dark:text-gray-200'
               }`}>
                 {error ? error : (
-                  <pre>{JSON.stringify(result, null, 2)}</pre>
+                  <pre className="whitespace-pre-wrap break-all">{JSON.stringify(result, null, 2)}</pre>
                 )}
               </div>
             </div>

@@ -57,7 +57,7 @@ const MessageContentRenderer: React.FC<MessageContentRendererProps> = ({ content
             {bodyData.map((row, i) => (
               <tr key={i} className={i % 2 === 0 ? 'bg-white dark:bg-gray-900' : 'bg-gray-50/50 dark:bg-gray-800/30'}>
                 {row.map((cell, j) => (
-                  <td key={j} className="px-4 py-2.5 text-sm text-gray-700 dark:text-gray-300 whitespace-nowrap">
+                  <td key={j} className="px-4 py-2.5 text-sm text-gray-700 dark:text-gray-300 whitespace-normal break-words">
                     {cell}
                   </td>
                 ))}

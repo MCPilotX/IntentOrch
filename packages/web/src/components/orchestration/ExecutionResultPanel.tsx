@@ -190,7 +190,7 @@ const ExecutionResultPanel: React.FC<ExecutionResultPanelProps> = ({
                         {showRawOutput ? 'Formatted' : 'Raw'}
                       </button>
                     </div>
-                    <pre className="text-xs bg-gray-50 dark:bg-gray-900/50 p-3 rounded-lg overflow-x-auto border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 max-h-48 overflow-y-auto">
+                    <pre className="text-xs bg-gray-50 dark:bg-gray-900/50 p-3 rounded-lg overflow-x-auto border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 max-h-48 overflow-y-auto whitespace-pre-wrap break-all">
                       {showRawOutput ? JSON.stringify(result.output, null, 2) : result.output}
                     </pre>
                   </div>
@@ -199,7 +199,7 @@ const ExecutionResultPanel: React.FC<ExecutionResultPanelProps> = ({
                 {result.result && (
                   <div>
                     <span className="text-xs font-medium text-gray-500 mb-1 block">Result</span>
-                    <pre className="text-xs bg-gray-50 dark:bg-gray-900/50 p-3 rounded-lg overflow-x-auto border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 max-h-48 overflow-y-auto">
+                    <pre className="text-xs bg-gray-50 dark:bg-gray-900/50 p-3 rounded-lg overflow-x-auto border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 max-h-48 overflow-y-auto whitespace-pre-wrap break-all">
                       {JSON.stringify(result.result, null, 2)}
                     </pre>
                   </div>
