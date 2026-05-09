@@ -31,6 +31,12 @@ export interface ProcessInfo {
   external?: boolean;
   transportType?: string;
   url?: string;
+  // Tools discovered from the server (for display in web UI)
+  tools?: Array<{
+    name: string;
+    description: string;
+    inputSchema?: any;
+  }>;
 }
 
 export interface ProcessStore {

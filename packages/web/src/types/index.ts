@@ -32,10 +32,15 @@ export interface MCPServer {
     name: string;
     description: string;
     parameters?: Record<string, any>;
+    inputSchema?: any;
   }>;
   status: 'not_pulled' | 'pulled' | 'running' | 'stopped' | 'error';
   pulledAt?: string;
   lastStartedAt?: string;
+  // External service fields (for HTTP/SSE transport types)
+  transportType?: string;
+  url?: string;
+  external?: boolean;
 }
 
 // Map Core ProcessInfo to Web's simplified ProcessInfo if needed, 

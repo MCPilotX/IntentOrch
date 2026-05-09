@@ -122,7 +122,10 @@ class ApiService {
         capabilities: manifest.capabilities || server.capabilities || {},
         tools: server.tools || [],
         status: server.status || 'stopped',
-        lastStartedAt: server.startTime ? new Date(server.startTime).toISOString() : undefined
+        lastStartedAt: server.startTime ? new Date(server.startTime).toISOString() : undefined,
+        transportType: server.transportType,
+        url: server.url,
+        external: server.external,
       };
     });
   }

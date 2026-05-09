@@ -241,6 +241,15 @@ export class ProcessManager {
       // Generate a virtual PID (negative number based on URL hash)
       const virtualPid = this.generateVirtualPid(url);
 
+      // Convert tools to a serializable format for ProcessInfo
+      const serializableTools = tools && tools.length > 0
+        ? tools.map(t => ({
+            name: t.name,
+            description: t.description || '',
+            inputSchema: t.inputSchema || null,
+          }))
+        : undefined;
+
       const processInfo: ProcessInfo = {
         pid: virtualPid,
         serverName: serverNameOrUrl,
@@ -257,6 +266,7 @@ export class ProcessManager {
         external: true,
         transportType: transportType,
         url: url,
+        tools: serializableTools,
       };
 
       await this.store.addProcess(processInfo);

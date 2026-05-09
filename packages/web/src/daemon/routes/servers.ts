@@ -243,23 +243,60 @@ async function handleServerTools(res: http.ServerResponse, serverName: string): 
       return true;
     }
 
+    // If the server already has tools cached in process info, return them directly
+    if (serverProcess.tools && serverProcess.tools.length > 0) {
+      console.log(`[Daemon] Returning ${serverProcess.tools.length} cached tools for ${serverName}`);
+      sendJson(res, 200, serverProcess.tools);
+      return true;
+    }
+
     const registryClient = getRegistryClient();
     let manifest = await registryClient.getCachedManifest(serverName);
     if (!manifest) manifest = serverProcess.manifest;
 
-    if (!manifest || !manifest.runtime) {
-      sendJson(res, 500, { error: 'Internal Server Error', message: `No runtime configuration found for server "${serverName}"` });
+    if (!manifest) {
+      sendJson(res, 500, { error: 'Internal Server Error', message: `No manifest found for server "${serverName}"` });
       return true;
     }
 
-    const client = new MCPClient({
-      transport: {
-        type: 'stdio',
-        command: manifest.runtime.command,
-        args: manifest.runtime.args || [],
-        env: { ...process.env } as Record<string, string>
+    // Determine transport type from manifest or process info
+    const transportType = manifest.transport?.type || serverProcess.transportType || 'stdio';
+    const isExternalService = transportType === 'sse' || transportType === 'http';
+
+    let client: MCPClient;
+
+    if (isExternalService) {
+      // For SSE/HTTP services, use URL-based transport
+      const url = manifest.transport?.url || serverProcess.url;
+      if (!url) {
+        sendJson(res, 500, { error: 'Internal Server Error', message: `No URL found for ${transportType} server "${serverName}"` });
+        return true;
       }
-    });
+      client = new MCPClient({
+        transport: {
+          type: transportType as 'sse' | 'http',
+          url: url,
+        },
+        timeout: 15000,
+        serverName: serverName,
+      });
+    } else {
+      // For stdio services, use command-based transport
+      if (!manifest.runtime) {
+        sendJson(res, 500, { error: 'Internal Server Error', message: `No runtime configuration found for server "${serverName}"` });
+        return true;
+      }
+      client = new MCPClient({
+        transport: {
+          type: 'stdio',
+          command: manifest.runtime.command,
+          args: manifest.runtime.args || [],
+          env: { ...process.env } as Record<string, string>
+        },
+        timeout: 15000,
+        serverName: serverName,
+      });
+    }
 
     client.on('error', (error) => {
       console.warn(`[Daemon] MCP Client error for ${serverName}: ${error.message || error}`);
