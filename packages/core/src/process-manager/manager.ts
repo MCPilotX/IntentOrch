@@ -232,6 +232,12 @@ export class ProcessManager {
       const tools = await client.listTools();
       await client.disconnect();
 
+      // Register discovered tools in the registry
+      if (tools && tools.length > 0) {
+        const toolRegistry = getToolRegistry();
+        await toolRegistry.registerDynamicTools(serverNameOrUrl, tools);
+      }
+
       // Generate a virtual PID (negative number based on URL hash)
       const virtualPid = this.generateVirtualPid(url);
 

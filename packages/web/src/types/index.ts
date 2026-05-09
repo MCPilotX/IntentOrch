@@ -16,6 +16,7 @@ export type { CoreProcessInfo, CoreWorkflow, CoreWorkflowStep, CoreConfig, CoreA
 export interface MCPServer {
   id: string;
   name: string;
+  displayName?: string;
   version: string;
   description?: string;
   runtime: {
@@ -27,6 +28,11 @@ export interface MCPServer {
   capabilities?: {
     tools?: any[];
   };
+  tools?: Array<{
+    name: string;
+    description: string;
+    parameters?: Record<string, any>;
+  }>;
   status: 'not_pulled' | 'pulled' | 'running' | 'stopped' | 'error';
   pulledAt?: string;
   lastStartedAt?: string;

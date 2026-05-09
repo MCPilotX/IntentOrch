@@ -4,6 +4,7 @@ import AIChatPanel from '../components/orchestration/AIChatPanel';
 import StepPreviewBoard from '../components/orchestration/StepPreviewBoard';
 import ExecutionResultPanel from '../components/orchestration/ExecutionResultPanel';
 import StepEditorModal from '../components/orchestration/StepEditorModal';
+import ToolLibraryDrawer from '../components/orchestration/ToolLibraryDrawer';
 import { Toast } from '../components/ui';
 import { apiService } from '../services/api';
 import { useChatHistory } from '../hooks/useChatHistory';
@@ -60,8 +61,16 @@ const Orchestration: React.FC = () => {
   const [executionResults, setExecutionResults] = useState<StepResult[] | null>(null);
   const [executionTotalDuration, setExecutionTotalDuration] = useState(0);
 
+  // Tool library state
+  const [isToolLibraryOpen, setIsToolLibraryOpen] = useState(false);
+  const [insertedText, setInsertedText] = useState<string | null>(null);
+
   // Step editor state
   const [editingStep, setEditingStep] = useState<{ step: WorkflowStep; index: number } | null>(null);
+
+  const handleInsertTool = (toolName: string) => {
+    setInsertedText(toolName);
+  };
 
   // Chat history persistence
   const { addMessages: persistMessages, createSession } = useChatHistory();
@@ -502,14 +511,24 @@ const Orchestration: React.FC = () => {
   return (
     <div className="flex flex-col h-[calc(100vh-130px)] -m-6 overflow-hidden">
       {/* Main content area */}
-      <div className="flex flex-1 overflow-hidden">
+      <div className="flex flex-1 overflow-hidden relative">
         {/* Left: AI Chat Panel - 60% width */}
-        <div className="flex-[6] min-w-0">
+        <div className="flex-[6] min-w-0 relative">
           <AIChatPanel 
             onSendMessage={handleSendMessage}
             messages={messages}
             isAnalyzing={isAnalyzing}
             statusMessage={analysisStatus}
+            insertedText={insertedText}
+            onClearInsertedText={() => setInsertedText(null)}
+            onToggleLibrary={() => setIsToolLibraryOpen(!isToolLibraryOpen)}
+          />
+
+          {/* Tool Library Overlay */}
+          <ToolLibraryDrawer
+            isOpen={isToolLibraryOpen}
+            onClose={() => setIsToolLibraryOpen(false)}
+            onInsertTool={handleInsertTool}
           />
         </div>
 

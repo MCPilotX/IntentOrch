@@ -183,10 +183,74 @@ export class DaemonServer {
         token: await getSecretManager().get("daemon_auth_token"),
       });
 
-    if (path === "/api/servers" && method === "GET")
-      return this.sendJson(res, 200, {
-        servers: await getProcessManager().list(),
-      });
+    if (path === "/api/servers" && method === "GET") {
+      try {
+        const processManager = getProcessManager();
+        const registryClient = getRegistryClient();
+        const toolRegistry = getToolRegistry();
+
+        const processes = await processManager.list();
+        const cachedNames = await registryClient.listCachedManifests();
+        
+        // Use a Map to merge processes and cached manifests by name
+        // Processes take priority as they have real-time status
+        const serverMap = new Map<string, any>();
+
+        // 1. Add all active/stored processes
+        for (const proc of processes) {
+          const name = proc.serverName || proc.name;
+          serverMap.set(name, {
+            ...proc,
+            status: proc.status || "stopped",
+            source: "process"
+          });
+        }
+
+        // 2. Add cached manifests that aren't already in the list
+        for (const name of cachedNames) {
+          if (!serverMap.has(name)) {
+            try {
+              const manifest = await registryClient.getCachedManifest(name);
+              if (manifest) {
+                serverMap.set(name, {
+                  id: `cached_${name}`,
+                  name: manifest.name,
+                  serverName: name,
+                  version: manifest.version,
+                  status: "pulled", // Special status for pulled but not started
+                  manifest: manifest,
+                  source: "cache"
+                });
+              }
+            } catch (e) {
+              // Skip failed manifest loads
+            }
+          }
+        }
+
+        const servers = Array.from(serverMap.values());
+
+        // Enrich all with tools
+        const enrichedServers = await Promise.all(servers.map(async (server) => {
+          const serverKey = server.serverName || server.name;
+          const tools = await toolRegistry.findToolsByServer(serverKey);
+          return {
+            ...server,
+            tools: tools
+          };
+        }));
+
+        return this.sendJson(res, 200, {
+          servers: enrichedServers,
+        });
+      } catch (error: any) {
+        console.error("[Daemon] Error getting servers:", error);
+        return this.sendJson(res, 500, {
+          error: "Internal Server Error",
+          message: error.message,
+        });
+      }
+    }
     if (path === "/api/servers" && method === "POST") {
       try {
         const { serverNameOrUrl } = JSON.parse(body);
@@ -218,12 +282,14 @@ export class DaemonServer {
         );
 
         if (runningServer) {
+          const tools = await getToolRegistry().findToolsByServer(serverNameOrUrl);
           return this.sendJson(res, 200, {
             pid: runningServer.pid,
             name: runningServer.name || runningServer.manifest.name,
             version: runningServer.version || runningServer.manifest.version,
             status: runningServer.status,
             logPath: runningServer.logPath || getLogPath(runningServer.pid),
+            tools: tools,
             alreadyRunning: true,
           });
         }
@@ -239,12 +305,14 @@ export class DaemonServer {
           });
         }
 
+        const tools = await getToolRegistry().findToolsByServer(serverNameOrUrl);
         return this.sendJson(res, 201, {
           pid: processInfo.pid,
           name: processInfo.name || processInfo.manifest.name,
           version: processInfo.version || processInfo.manifest.version,
           status: processInfo.status,
           logPath: processInfo.logPath || getLogPath(processInfo.pid),
+          tools: tools,
           alreadyRunning: false,
         });
       } catch (error: any) {

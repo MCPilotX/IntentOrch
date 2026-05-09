@@ -329,42 +329,48 @@ const Dashboard: React.FC = () => {
         <div className="overflow-x-auto">
           <table className="w-full">
             <thead>
-              <tr className="border-b border-gray-200 dark:border-gray-700">
-                <th className="py-3 px-4 text-left text-sm font-medium text-gray-700 dark:text-gray-300">{t('dashboard.serverName')}</th>
-                <th className="py-3 px-4 text-left text-sm font-medium text-gray-700 dark:text-gray-300">{t('dashboard.version')}</th>
-                <th className="py-3 px-4 text-left text-sm font-medium text-gray-700 dark:text-gray-300">{t('common.status')}</th>
-                <th className="py-3 px-4 text-left text-sm font-medium text-gray-700 dark:text-gray-300">{t('dashboard.lastOperation')}</th>
-                <th className="py-3 px-4 text-left text-sm font-medium text-gray-700 dark:text-gray-300">{t('dashboard.actions')}</th>
+              <tr className="border-b border-gray-200 dark:border-gray-700 text-xs uppercase tracking-wider">
+                <th className="py-3 px-4 text-left font-bold text-gray-500 dark:text-gray-400">{t('dashboard.serverName')}</th>
+                <th className="py-3 px-4 text-left font-bold text-gray-500 dark:text-gray-400 whitespace-nowrap">{t('dashboard.version')}</th>
+                <th className="py-3 px-4 text-left font-bold text-gray-500 dark:text-gray-400 whitespace-nowrap">{t('common.status')}</th>
+                <th className="py-3 px-4 text-left font-bold text-gray-500 dark:text-gray-400 whitespace-nowrap">{t('dashboard.lastOperation')}</th>
+                <th className="py-3 px-4 text-right font-bold text-gray-500 dark:text-gray-400">{t('dashboard.actions')}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
               {servers && servers.length > 0 ? (
                 servers.slice(0, 5).map((server) => (
-                  <tr key={server.id} className="hover:bg-gray-50 dark:hover:bg-gray-800">
-                    <td className="py-3 px-4">
+                  <tr key={server.id} className="hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">
+                    <td className="py-4 px-4 min-w-[200px] max-w-[300px]">
                       <div className="flex items-center">
-                        <Server className="w-5 h-5 text-gray-400 mr-3" />
-                        <div>
-                          <p className="font-medium text-gray-900 dark:text-white">{formatMCPServerName(server.name)}</p>
-                          <p className="text-sm text-gray-500">{server.description || t('dashboard.noDescription')}</p>
+                        <div className="p-2 bg-gray-100 dark:bg-gray-700 rounded-lg mr-3 shrink-0">
+                          <Server className="w-4 h-4 text-gray-500 dark:text-gray-400" />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="font-bold text-gray-900 dark:text-white truncate" title={server.name}>
+                            {formatMCPServerName(server.name)}
+                          </p>
+                          <p className="text-xs text-gray-500 truncate" title={server.description}>
+                            {server.description || t('dashboard.noDescription')}
+                          </p>
                         </div>
                       </div>
                     </td>
-                    <td className="py-3 px-4">
-                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300">
+                    <td className="py-4 px-4 whitespace-nowrap">
+                      <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400">
                         v{server.version}
                       </span>
                     </td>
-                    <td className="py-3 px-4">
-                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusColor(server.status)}`}>
+                    <td className="py-4 px-4 whitespace-nowrap">
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold ${getStatusColor(server.status)}`}>
                         {getStatusText(server.status)}
                       </span>
                     </td>
-                    <td className="py-3 px-4 text-sm text-gray-500">
+                    <td className="py-4 px-4 text-xs text-gray-500 whitespace-nowrap italic">
                       {server.lastStartedAt ? formatRelativeTime(server.lastStartedAt) : t('dashboard.neverStarted')}
                     </td>
-                    <td className="py-3 px-4">
-                      <div className="flex space-x-2">
+                    <td className="py-4 px-4 text-right">
+                      <div className="flex justify-end space-x-2">
                         {server.status === 'not_pulled' && (
                           <button className="text-sm text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300">
                             {t('dashboard.pull')}

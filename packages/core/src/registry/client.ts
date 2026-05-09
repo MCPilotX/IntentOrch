@@ -21,6 +21,7 @@ export class RegistryClient {
     // Initialize default sources (official source removed, use github/gitee directly)
     this.sources.set("github", createRegistrySource("github"));
     this.sources.set("gitee", createRegistrySource("gitee"));
+    this.sources.set("smithery", createRegistrySource("smithery"));
     this.sources.set("direct", createRegistrySource("direct"));
   }
 

@@ -40,9 +40,20 @@ export interface ExtendedManifest {
 export class ToolRegistry {
   private tools: Map<string, ToolMetadata> = new Map();
   private registryPath: string;
+  private initialized: Promise<void> | null = null;
 
   constructor() {
     this.registryPath = path.join(getInTorchDir(), "tool-registry.json");
+  }
+
+  /**
+   * Ensure the registry is loaded before any operation
+   */
+  private async ensureInitialized(): Promise<void> {
+    if (!this.initialized) {
+      this.initialized = this.load();
+    }
+    return this.initialized;
   }
 
   async load(): Promise<void> {
@@ -81,6 +92,7 @@ export class ToolRegistry {
   }
 
   async save(): Promise<void> {
+    await this.ensureInitialized();
     const registry = {
       version: "1.0.0",
       updatedAt: new Date().toISOString(),
@@ -99,9 +111,11 @@ export class ToolRegistry {
     serverName: string,
     manifest: any,
   ): Promise<void> {
+    await this.ensureInitialized();
     // Normalize server name for uniqueness
     const normalizedServerName = normalizeServerName(serverName);
     const displayName = getDisplayName(serverName);
+    // ...
 
     // Support both manifest.tools and manifest.capabilities.tools
     let tools = manifest.tools || [];
@@ -143,6 +157,7 @@ export class ToolRegistry {
    * Register tools discovered dynamically from a running MCP server
    */
   async registerDynamicTools(serverName: string, tools: any[]): Promise<void> {
+    await this.ensureInitialized();
     if (!tools || tools.length === 0) {
       logger.info(`No tools to register for ${serverName}`);
       return;
@@ -218,6 +233,7 @@ export class ToolRegistry {
   }
 
   async findToolsByKeyword(keyword: string): Promise<ToolMetadata[]> {
+    await this.ensureInitialized();
     const results: ToolMetadata[] = [];
 
     for (const tool of this.tools.values()) {
@@ -239,6 +255,7 @@ export class ToolRegistry {
   }
 
   async findToolsByServer(serverName: string): Promise<ToolMetadata[]> {
+    await this.ensureInitialized();
     const normalizedServerName = normalizeServerName(serverName);
     const results: ToolMetadata[] = [];
 
@@ -255,15 +272,18 @@ export class ToolRegistry {
     serverName: string,
     toolName: string,
   ): Promise<ToolMetadata | undefined> {
+    await this.ensureInitialized();
     const normalizedServerName = normalizeServerName(serverName);
     return this.tools.get(this.getToolKey(normalizedServerName, toolName));
   }
 
   async getAllTools(): Promise<ToolMetadata[]> {
+    await this.ensureInitialized();
     return Array.from(this.tools.values());
   }
 
   async removeToolsByServer(serverName: string): Promise<void> {
+    await this.ensureInitialized();
     const normalizedServerName = normalizeServerName(serverName);
     const keysToDelete: string[] = [];
 

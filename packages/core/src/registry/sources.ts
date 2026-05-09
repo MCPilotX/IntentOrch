@@ -37,18 +37,23 @@ function claudeDesktopEntryToManifest(
   serverName: string,
   entry: any,
 ): Manifest {
+  const isNetworkService = !!entry.url;
+  const transportType = entry.transport?.type || (isNetworkService ? "sse" : "stdio");
+
   const manifest: Manifest = {
     name: serverName,
     version: "1.0.0",
     description: `Imported from MCP config: ${serverName}`,
     runtime: {
-      type: inferRuntimeType(entry.command || ""),
+      type: isNetworkService ? "remote" : inferRuntimeType(entry.command || ""),
       command: entry.command || "",
       args: entry.args || [],
       env: entry.env ? Object.keys(entry.env) : [],
     },
     transport: {
-      type: "stdio",
+      type: transportType,
+      url: entry.url || entry.transport?.url,
+      headers: entry.headers || entry.transport?.headers,
     },
   };
   return manifest;
@@ -71,8 +76,10 @@ export function parseClaudeDesktopConfig(configJson: string): Manifest[] {
 
   for (const [serverName, entry] of Object.entries(servers)) {
     const entryObj = entry as any;
-    if (!entryObj.command) {
-      logger.warn(`Skipping server "${serverName}": missing "command" field`);
+    
+    // Support both stdio (needs command) and network (needs url) services
+    if (!entryObj.command && !entryObj.url && !entryObj.transport?.url) {
+      logger.warn(`Skipping server "${serverName}": missing both "command" and "url" fields`);
       continue;
     }
     manifests.push(claudeDesktopEntryToManifest(serverName, entryObj));
@@ -864,12 +871,101 @@ export class DirectRegistrySource implements RegistrySource {
   }
 }
 
+export class SmitheryRegistrySource implements RegistrySource {
+  name = "smithery";
+
+  async fetchManifest(serverName: string): Promise<Manifest> {
+    // If it's a full qualified name like "namespace/slug"
+    // or just a slug (Smithery supports both)
+    const url = `https://api.smithery.ai/servers/${encodeURIComponent(serverName)}`;
+    
+    try {
+      logger.info(`[SmitherySource] Fetching details from: ${url}`);
+      const response = await axios.get(url, { timeout: 10000 });
+      const data = response.data;
+
+      // Map Smithery detail format to our Manifest format
+      const isRemote = !!data.remote;
+      const mcpUrl = data.deploymentUrl || (data.connections && data.connections[0]?.deploymentUrl);
+
+      const manifest: Manifest = {
+        name: data.qualifiedName || serverName,
+        version: "1.0.0", // Smithery doesn't always provide a specific version string in details
+        description: data.description || data.displayName,
+        runtime: {
+          type: isRemote ? "remote" : "process",
+          command: "", // Stdio servers on Smithery usually require manual install instructions
+        },
+        transport: {
+          type: isRemote ? "sse" : "stdio", // Default to sse for remote, stdio for local
+          url: mcpUrl,
+        },
+        tools: data.tools || [],
+        metadata: {
+          author: data.namespace,
+          repository: data.homepage,
+        }
+      };
+
+      return manifest;
+    } catch (error: any) {
+      logger.error(`[SmitherySource] Failed to fetch server details: ${error.message}`);
+      throw new Error(`Smithery server "${serverName}" not found or inaccessible: ${error.message}`);
+    }
+  }
+
+  async searchServices(options: SearchOptions): Promise<SearchResult> {
+    const { query = "", limit = 20, offset = 0 } = options;
+    const page = Math.floor(offset / limit) + 1;
+    
+    // Smithery API: GET /servers?q={query}&page={page}&pageSize={pageSize}
+    const url = `https://api.smithery.ai/servers?q=${encodeURIComponent(query)}&page=${page}&pageSize=${limit}`;
+
+    try {
+      logger.info(`[SmitherySource] Searching: ${url}`);
+      const response = await axios.get(url, { timeout: 10000 });
+      const data = response.data;
+      
+      const servers = data.servers || [];
+      const services: ServiceInfo[] = servers.map((s: any) => ({
+        name: s.qualifiedName || s.id,
+        description: s.description,
+        version: "latest",
+        source: "smithery",
+        tags: s.remote ? ["remote", "hosted", "smithery"] : ["stdio", "smithery"],
+        lastUpdated: s.createdAt ? s.createdAt.split('T')[0] : undefined,
+      }));
+
+      return {
+        services,
+        total: data.pagination?.totalCount || services.length,
+        source: this.name,
+        hasMore: data.pagination?.currentPage < data.pagination?.totalPages,
+      };
+    } catch (error: any) {
+      logger.error(`[SmitherySource] Search failed: ${error.message}`);
+      return {
+        services: [],
+        total: 0,
+        source: this.name,
+        hasMore: false,
+      };
+    }
+  }
+
+  async listAvailableServices(): Promise<ServiceInfo[]> {
+    return (await this.searchServices({ limit: 50 })).services;
+  }
+}
+
 export function createRegistrySource(type: string): RegistrySource {
   switch (type) {
     case "github":
       return new GitHubRegistrySource();
     case "gitee":
       return new GiteeRegistrySource();
+    case "smithery":
+      return new SmitheryRegistrySource();
     case "direct":
       return new DirectRegistrySource();
     default:

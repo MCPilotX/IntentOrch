@@ -98,7 +98,11 @@ class ApiService {
     
     return servers.map((server: any) => {
       const manifest = server.manifest || {};
-      const serverName = manifest.name || server.name || server.serverName || 'unknown';
+      // serverName is the unique key (e.g. smithery:namespace/repo or github:owner/repo)
+      // name is the display name from manifest
+      const serverIdentity = server.serverName || server.name || manifest.name || 'unknown';
+      const displayName = manifest.name || server.name || 'unknown';
+      
       const version = manifest.version || server.version || 'unknown';
       const description = manifest.description || server.description || '';
       const runtime = manifest.runtime || server.runtime || {
@@ -109,12 +113,14 @@ class ApiService {
       };
       
       return {
-        id: server.pid?.toString() || server.id || '0',
-        name: serverName,
+        id: server.id || server.pid?.toString() || serverIdentity,
+        name: serverIdentity, // Use identity as name for pull/start consistency
+        displayName: displayName, // Store friendly name separately
         version: version,
         description: description,
         runtime: runtime,
         capabilities: manifest.capabilities || server.capabilities || {},
+        tools: server.tools || [],
         status: server.status || 'stopped',
         lastStartedAt: server.startTime ? new Date(server.startTime).toISOString() : undefined
       };
