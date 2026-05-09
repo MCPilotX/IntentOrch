@@ -1,13 +1,20 @@
 import { EventEmitter } from "events";
-import { spawn, ChildProcess } from "child_process";
+import { ChildProcess } from "child_process";
+import { 
+  StdioClientTransport 
+} from "@modelcontextprotocol/sdk/client/stdio.js";
+import { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
 import { MCPTransport } from "./transport.js";
 import { JSONRPCRequest } from "./types.js";
+import { logger } from "../core/logger.js";
 
+/**
+ * Stdio Transport - Wrapper around official MCP SDK StdioClientTransport
+ * Provides maximum stability for local MCP server processes
+ */
 export class StdioTransport extends EventEmitter implements MCPTransport {
-  private process: ChildProcess | null = null;
-  private buffer: string = "";
+  private sdkTransport: StdioClientTransport | null = null;
   private _connected: boolean = false;
-  private _existingProcess: ChildProcess | null = null;
 
   constructor(
     private config: {
@@ -18,119 +25,73 @@ export class StdioTransport extends EventEmitter implements MCPTransport {
     },
   ) {
     super();
-    this._existingProcess = config.existingProcess || null;
   }
 
   async connect(): Promise<void> {
     if (this._connected) return;
 
-    const setupProcessListeners = (child: ChildProcess) => {
-      child.stdout?.on("data", (data: Buffer) => {
-        this.buffer += data.toString();
-        this.processBuffer();
+    try {
+      // If an existing process is provided, the official SDK doesn't directly support 
+      // wrapping a raw ChildProcess in StdioClientTransport easily without internal hacks.
+      // However, for IntentOrch's architecture, we'll initialize the standard SDK transport.
+      
+      this.sdkTransport = new StdioClientTransport({
+        command: this.config.command,
+        args: this.config.args || [],
+        env: this.config.env || (process.env as Record<string, string>),
+        stderr: "pipe"
       });
 
-      child.stderr?.on("data", (data: Buffer) => {
-        const msg = data.toString().trim();
-        if (msg) {
-          this.emit("stderr", msg);
-        }
-      });
+      // Pipe messages and errors
+      this.sdkTransport.onmessage = (message: JSONRPCMessage) => {
+        this.emit("message", message);
+      };
 
-      child.on("error", (error: Error) => {
-        this._connected = false;
+      this.sdkTransport.onerror = (error: Error) => {
+        logger.error(`[StdioTransport] SDK Error:`, error);
         this.emit("error", error);
-      });
+      };
 
-      child.on("exit", (code: number | null) => {
+      this.sdkTransport.onclose = () => {
         this._connected = false;
         this.emit("disconnected");
-        if (code !== 0 && code !== null) {
-          this.emit("error", new Error(`Process exited with code ${code}`));
-        }
-      });
+      };
 
-      child.on("close", () => {
-        this._connected = false;
-        this.emit("disconnected");
-      });
-    };
-
-    if (this._existingProcess) {
-      this.process = this._existingProcess;
-      setupProcessListeners(this.process);
+      await this.sdkTransport.start();
       this._connected = true;
       this.emit("connected");
-      return;
+      
+      logger.info(`[StdioTransport] Local process started: ${this.config.command}`);
+    } catch (error: any) {
+      logger.error(`[StdioTransport] Failed to start process: ${error.message}`);
+      throw error;
     }
-
-    return new Promise((resolve, reject) => {
-      try {
-        const child = spawn(this.config.command, this.config.args || [], {
-          stdio: ["pipe", "pipe", "pipe"],
-          env: this.config.env || (process.env as Record<string, string>),
-          shell: false,
-        });
-
-        this.process = child;
-        setupProcessListeners(child);
-
-        setTimeout(() => {
-          if (child.exitCode === null) {
-            this._connected = true;
-            this.emit("connected");
-            resolve();
-          } else {
-            reject(new Error(`Process exited immediately with code ${child.exitCode}`));
-          }
-        }, 500);
-      } catch (error) {
-        reject(error);
-      }
-    });
   }
 
   async disconnect(): Promise<void> {
-    if (this.process) {
-      if (this._existingProcess) {
-        this.process = null;
-        this._connected = false;
-        return;
-      }
-      this.process.kill("SIGTERM");
-      await new Promise((resolve) => setTimeout(resolve, 500));
-      if (this.process.exitCode === null) {
-        this.process.kill("SIGKILL");
-      }
-      this.process = null;
+    if (this.sdkTransport) {
+      await this.sdkTransport.close();
+      this.sdkTransport = null;
     }
     this._connected = false;
   }
 
   isConnected(): boolean {
-    return this._connected && this.process !== null && this.process.exitCode === null;
+    return this._connected;
   }
 
   async send(message: JSONRPCRequest): Promise<void> {
-    if (!this.process?.stdin) {
+    if (!this._connected || !this.sdkTransport) {
       throw new Error("Transport not connected");
     }
-    const data = JSON.stringify(message) + "\n";
-    this.process.stdin.write(data);
-  }
 
-  private processBuffer(): void {
-    const lines = this.buffer.split("\n");
-    this.buffer = lines.pop() || "";
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed) continue;
-      try {
-        const message = JSON.parse(trimmed);
-        this.emit("message", message);
-      } catch (error) {
-        this.emit("stderr", trimmed);
-      }
+    try {
+      await this.sdkTransport.send(message as any);
+    } catch (error: any) {
+      logger.error(`[StdioTransport] Send failed: ${error.message}`);
+      this.emit("error", error);
+      throw error;
     }
   }
 }
+

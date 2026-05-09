@@ -1,13 +1,18 @@
 import { EventEmitter } from "events";
-import { EventSource } from "eventsource";
-import axios from "axios";
+import { 
+  SSEClientTransport 
+} from "@modelcontextprotocol/sdk/client/sse.js";
+import { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
 import { MCPTransport } from "./transport.js";
 import { JSONRPCRequest } from "./types.js";
 import { logger } from "../core/logger.js";
 
+/**
+ * SSE Transport - Wrapper around official MCP SDK SSEClientTransport
+ * Provides maximum compatibility with official MCP tools and servers
+ */
 export class SseTransport extends EventEmitter implements MCPTransport {
-  private eventSource: EventSource | null = null;
-  private postUrl: string | null = null;
+  private sdkTransport: SSEClientTransport;
   private _connected: boolean = false;
 
   constructor(
@@ -17,96 +22,51 @@ export class SseTransport extends EventEmitter implements MCPTransport {
     },
   ) {
     super();
+    // Initialize official SDK transport
+    this.sdkTransport = new SSEClientTransport(new URL(this.config.url), {
+      eventSourceInit: {
+        headers: this.config.headers
+      } as any,
+      requestInit: {
+        headers: this.config.headers
+      }
+    });
+
+    // Pipe events from SDK transport to our interface
+    this.sdkTransport.onmessage = (message: JSONRPCMessage) => {
+      this.emit("message", message);
+    };
+
+    this.sdkTransport.onerror = (error: Error) => {
+      logger.error(`[SseTransport] SDK Error:`, error);
+      this.emit("error", error);
+    };
+
+    this.sdkTransport.onclose = () => {
+      this._connected = false;
+      this.emit("disconnected");
+    };
   }
 
   async connect(): Promise<void> {
     if (this._connected) return;
 
-    logger.info(`[SseTransport] Connecting to SSE endpoint: ${this.config.url}`);
-
-    return new Promise((resolve, reject) => {
-      try {
-        const headers = {
-          "Accept": "text/event-stream",
-          ...this.config.headers,
-        };
-        
-        this.eventSource = new EventSource(this.config.url, {
-          headers: headers,
-        } as any);
-
-        if (!this.eventSource) {
-          reject(new Error("Failed to create EventSource"));
-          return;
-        }
-
-        this.eventSource.onerror = (error: any) => {
-          const errorMsg = error && typeof error === 'object' ? JSON.stringify(error) : String(error);
-          logger.error(`[SseTransport] SSE error: ${errorMsg}`);
-          if (!this._connected) {
-            reject(new Error(`Failed to connect to SSE endpoint: ${errorMsg}`));
-          } else {
-            this.emit("error", new Error(`SSE connection error: ${errorMsg}`));
-          }
-        };
-
-        this.eventSource.onmessage = (event: any) => {
-          logger.info(`[SseTransport] Message received: ${event.data.substring(0, 500)}${event.data.length > 500 ? '...' : ''}`);
-          try {
-            const message = JSON.parse(event.data);
-            this.emit("message", message);
-          } catch (error) {
-            logger.warn(`[SseTransport] Failed to parse message:`, event.data);
-          }
-        };
-
-        // Standard MCP SSE 'endpoint' event to tell client where to post
-        this.eventSource.addEventListener("endpoint", (event: any) => {
-          this.postUrl = event.data;
-          logger.info(`[SseTransport] Outbound endpoint received: ${this.postUrl}`);
-          
-          // Mark as connected and resolve only after receiving the endpoint event
-          // This ensures postUrl is available before any send() calls
-          if (!this._connected) {
-            this._connected = true;
-            this.emit("connected");
-            
-            // Small delay to ensure server-side setup is complete before first POST
-            // In WSL/Remote scenarios, giving the server 1s to stabilize often fixes ECONNRESET
-            setTimeout(() => {
-              resolve();
-            }, 1000);
-          }
-        });
-
-        // Also handle the case where the server sends the endpoint in the initial connection
-        // Some servers send endpoint as the first event before onopen
-        this.eventSource.onopen = () => {
-          logger.info(`[SseTransport] SSE connection opened for ${this.config.url}`);
-          // If endpoint already received, we're good
-          if (this.postUrl) {
-            if (!this._connected) {
-              this._connected = true;
-              this.emit("connected");
-              resolve();
-            }
-          }
-          // Otherwise, wait for endpoint event (handled above)
-        };
-
-      } catch (error) {
-        reject(error);
-      }
-    });
+    logger.info(`[SseTransport] Connecting via Official SDK: ${this.config.url}`);
+    
+    try {
+      await this.sdkTransport.start();
+      this._connected = true;
+      this.emit("connected");
+      logger.info(`[SseTransport] Official SDK connection established`);
+    } catch (error: any) {
+      logger.error(`[SseTransport] SDK Connection failed: ${error.message}`);
+      throw error;
+    }
   }
 
   async disconnect(): Promise<void> {
-    if (this.eventSource) {
-      this.eventSource.close();
-      this.eventSource = null;
-    }
+    await this.sdkTransport.close();
     this._connected = false;
-    this.emit("disconnected");
   }
 
   async send(message: JSONRPCRequest): Promise<void> {
@@ -114,50 +74,13 @@ export class SseTransport extends EventEmitter implements MCPTransport {
       throw new Error("Transport not connected");
     }
 
-    // Resolve the post URL: if it's a relative path, resolve it against the ACTUAL connected URL
-    let url = this.postUrl || this.config.url;
     try {
-      // Use the actual URL from the eventSource if available (handles redirects)
-      const base = this.eventSource?.url ? new URL(this.eventSource.url) : new URL(this.config.url);
-      if (this.postUrl) {
-        url = new URL(this.postUrl, base.href).href;
-      }
-    } catch (e) {
-      logger.warn(`[SseTransport] URL resolution failed, using fallback: ${e}`);
-    }
-
-    logger.debug(`[SseTransport] POSTing to ${url} (ID: ${message.id})`);
-
-    try {
-      // Use standard fetch to avoid any axios-specific header/proxy issues
-      // This is exactly how the official SDK implements it
-      const response = await fetch(url, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(message),
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text().catch(() => "Unknown error");
-        logger.error(`[SseTransport] POST failed with status ${response.status}: ${errorText}`);
-        this.emit("error", new Error(`POST failed with status ${response.status}`));
-        return;
-      }
-
-      // If the server returns a JSON-RPC response directly in the HTTP response body
-      const contentType = response.headers.get("content-type") || "";
-      if (contentType.includes("application/json")) {
-        const data = await response.json();
-        if (data && typeof data === 'object' && data.jsonrpc === '2.0') {
-          logger.debug(`[SseTransport] Received direct response from POST`);
-          this.emit("message", data);
-        }
-      }
+      // SDK handles endpoint resolution and POSTing internally
+      await this.sdkTransport.send(message as any);
     } catch (error: any) {
-      logger.error(`[SseTransport] POST failed: ${error.message}`);
+      logger.error(`[SseTransport] SDK Send failed: ${error.message}`);
       this.emit("error", error);
+      throw error;
     }
   }
 
@@ -165,3 +88,4 @@ export class SseTransport extends EventEmitter implements MCPTransport {
     return this._connected;
   }
 }
+

@@ -204,6 +204,10 @@ export interface MCPSession {
 // ==================== Constants ====================
 
 export const MCP_METHODS = {
+  // Lifecycle
+  INITIALIZE: "initialize",
+  NOTIFICATIONS_INITIALIZED: "notifications/initialized",
+
   // Tool related
   TOOLS_LIST: "tools/list",
   TOOLS_CALL: "tools/call",

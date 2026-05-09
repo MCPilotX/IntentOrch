@@ -4,6 +4,10 @@ import { MCPTransport } from "./transport.js";
 import { JSONRPCRequest } from "./types.js";
 import { logger } from "../core/logger.js";
 
+/**
+ * HTTP Transport - Custom implementation using Axios
+ * Note: The official MCP SDK does not currently provide a standard HttpClientTransport
+ */
 export class HttpTransport extends EventEmitter implements MCPTransport {
   private _connected: boolean = false;
 
@@ -17,8 +21,7 @@ export class HttpTransport extends EventEmitter implements MCPTransport {
   }
 
   async connect(): Promise<void> {
-    // HTTP is technically stateless for simple requests, 
-    // but we mark as connected.
+    // HTTP is technically stateless, but we mark as connected to satisfy interface
     this._connected = true;
     this.emit("connected");
   }
@@ -34,15 +37,23 @@ export class HttpTransport extends EventEmitter implements MCPTransport {
     }
 
     try {
+      // Use axios for standard HTTP POST tool calls
       const response = await axios.post(this.config.url, message, {
         headers: {
           "Content-Type": "application/json",
           ...this.config.headers,
         },
+        timeout: 30000,
+        proxy: false
       });
-      this.emit("message", response.data);
+
+      // Emit response message for MCPClient to process
+      if (response.data) {
+        this.emit("message", response.data);
+      }
     } catch (error: any) {
-      logger.error(`[HttpTransport] request failed: ${error.message}`);
+      const errorMsg = error.response ? `HTTP ${error.response.status}` : error.message;
+      logger.error(`[HttpTransport] request failed: ${errorMsg}`);
       this.emit("error", error);
     }
   }

@@ -97,6 +97,30 @@ export class MCPClient extends EventEmitter {
     const result = await globalErrorBoundary.execute(
       async () => {
         await this.transport.connect();
+
+        // 1. Send mandatory initialize request
+        logger.info(`[MCPClient] Sending initialize request to ${this.config.serverName}...`);
+        const initResult = await this.sendRequest(MCP_METHODS.INITIALIZE, {
+          protocolVersion: "2024-11-05",
+          capabilities: {},
+          clientInfo: { name: "IntentOrch", version: "0.8.0" }
+        });
+
+        logger.info(`[MCPClient] Server initialized: ${initResult.serverInfo?.name} ${initResult.serverInfo?.version}`);
+
+        // 2. Send mandatory initialized notification (BARE-BONES - NO PARAMS)
+        // Many Java/Spring servers require this specific notification to "unlock" the session
+        logger.info(`[MCPClient] Sending initialized notification...`);
+        await this.sendNotification(MCP_METHODS.NOTIFICATIONS_INITIALIZED);
+
+        // 3. Set logging level (Follows Inspector's sequence for Java servers)
+        try {
+          logger.info(`[MCPClient] Setting logging level to info...`);
+          await this.sendRequest(MCP_METHODS.LOGGING_SET_LEVEL, { level: "info" });
+        } catch (e) {
+          logger.warn(`[MCPClient] logging/setLevel failed (ignoring):`, e);
+        }
+
         this.connected = true;
         this.emitEvent("connected");
 
@@ -116,6 +140,21 @@ export class MCPClient extends EventEmitter {
     }
   }
 
+  /**
+   * Send a JSON-RPC notification (MUST NOT have an ID or empty PARAMS)
+   */
+  private async sendNotification(method: string, params?: any): Promise<void> {
+    const request: any = {
+      jsonrpc: "2.0",
+      method,
+    };
+    // CRITICAL: Only add params if they are non-empty. 
+    // Java servers often fail if an empty {} is provided for notification methods that expect nothing.
+    if (params && Object.keys(params).length > 0) {
+      request.params = params;
+    }
+    await this.transport.send(request);
+  }
   async disconnect(): Promise<void> {
     if (!this.connected) return;
 
@@ -409,29 +448,36 @@ export class MCPClient extends EventEmitter {
 
   // ==================== Core Request Methods ====================
 
-  private async sendRequest(method: string, params?: any): Promise<any> {
+  private async sendRequest(method: string, params: any = {}): Promise<any> {
     if (!this.isConnected()) {
       throw new Error("Not connected to MCP server");
     }
 
     const requestId = this.generateRequestId();
+    // Ensure params is at least an empty object, never undefined
+    const normalizedParams = params || {};
+    
     const request: JSONRPCRequest = {
       jsonrpc: "2.0",
       id: requestId,
       method,
-      params,
+      params: normalizedParams,
     };
 
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
         this.pendingRequests.delete(requestId);
+        this.pendingRequests.delete(String(requestId)); // Cleanup both variants
         reject(new Error(`Request timeout after ${this.config.timeout}ms`));
       }, this.config.timeout);
 
+      // Store with both original ID and string ID for maximum lookup compatibility
       this.pendingRequests.set(requestId, { resolve, reject, timeout });
+      this.pendingRequests.set(String(requestId), { resolve, reject, timeout });
 
       this.transport.send(request).catch((error) => {
         this.pendingRequests.delete(requestId);
+        this.pendingRequests.delete(String(requestId));
         clearTimeout(timeout);
         reject(error);
       });
@@ -466,12 +512,16 @@ export class MCPClient extends EventEmitter {
         return;
       }
 
-      if (response.id && this.pendingRequests.has(response.id)) {
-        const { resolve, reject, timeout } = this.pendingRequests.get(
-          response.id,
-        )!;
+      // Check if ID matches, handling both number and string representations
+      const id = response.id;
+      if (id !== undefined && id !== null && this.pendingRequests.has(id)) {
+        const { resolve, reject, timeout } = this.pendingRequests.get(id)!;
         clearTimeout(timeout);
-        this.pendingRequests.delete(response.id);
+        
+        // Cleanup all variants of this ID from the map
+        this.pendingRequests.delete(id);
+        this.pendingRequests.delete(String(id));
+        this.pendingRequests.delete(Number(id));
 
         if (response.error) {
           const errorMessage = response.error.message || "Unknown error";
@@ -482,7 +532,7 @@ export class MCPClient extends EventEmitter {
         } else {
           resolve(response.result !== undefined ? response.result : null);
         }
-      } else if (!response.id) {
+      } else if (id === undefined || id === null) {
         this.handleNotification(response);
       }
     } catch (error) {
@@ -490,13 +540,17 @@ export class MCPClient extends EventEmitter {
     }
   }
 
-  private handleTransportError(error: Error): void {
+  private handleTransportError(error: any): void {
+    // Only log if it's a real error, avoid flooding with empty {} from SDK
+    if (error && Object.keys(error).length > 0) {
+      logger.error(`[MCPClient] Transport error for "${this.config.serverName}":`, error);
+    }
     this.emitEvent("error", error);
   }
 
   private handleNotification(response: JSONRPCResponse): void {
     if (response.result) {
-      logger.info("Received notification:", response);
+      logger.debug("Received notification:", response);
     }
   }
 
@@ -513,8 +567,9 @@ export class MCPClient extends EventEmitter {
     if (type === "error") {
       if (this.listenerCount("error") > 0) {
         this.emit("error", event);
-      } else {
-        logger.error(`[MCPClient] Unhandled error:`, data);
+      } else if (data && Object.keys(data).length > 0) {
+        // Only log non-empty unhandled errors
+        logger.error(`[MCPClient] Unhandled error in "${this.config.serverName}":`, data);
       }
     } else {
       this.emit(type, event);
