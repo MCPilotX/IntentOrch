@@ -208,8 +208,9 @@ export class DaemonServer {
     }
 
     try {
-      const { getConfigManager } = await import('@intentorch/core');
-      const config = await getConfigManager().getAll();
+      const { getConfigService } = await import('@intentorch/core');
+      const configService = getConfigService();
+      const config = await configService.getAppConfig();
       if (config.services && config.services.autoStart && Array.isArray(config.services.autoStart)) {
         return config.services.autoStart;
       }

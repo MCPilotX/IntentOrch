@@ -1,5 +1,5 @@
 import http from 'http';
-import { getConfigManager } from '@intentorch/core';
+import { getConfigService } from '@intentorch/core';
 import type { RouteContext } from './status';
 
 /**
@@ -13,8 +13,8 @@ export async function handleConfigRoutes(ctx: RouteContext): Promise<boolean> {
   // GET /api/config
   if (path === '/api/config' && method === 'GET') {
     try {
-      const configManager = getConfigManager();
-      const config = await configManager.getAll();
+      const configService = getConfigService();
+      const config = await configService.getAppConfig();
       sendJson(res, 200, { config });
     } catch (error: any) {
       console.error('[Daemon] Error getting config:', error);
@@ -27,20 +27,21 @@ export async function handleConfigRoutes(ctx: RouteContext): Promise<boolean> {
   if (path === '/api/config' && method === 'PUT') {
     try {
       const request = JSON.parse(body);
-      const configManager = getConfigManager();
+      const configService = getConfigService();
       const config = request.config || request;
 
       if (config.ai) {
-        if (config.ai.provider) await configManager.setAIProvider(config.ai.provider);
-        if (config.ai.apiKey) await configManager.setAIAPIKey(config.ai.apiKey);
-        if (config.ai.model) await configManager.setAIModel(config.ai.model);
+        if (config.ai.provider) await configService.setAIProvider(config.ai.provider);
+        if (config.ai.apiKey !== undefined) await configService.setAIAPIKey(config.ai.apiKey || '');
+        if (config.ai.model) await configService.setAIModel(config.ai.model);
+        if (config.ai.apiEndpoint !== undefined) await configService.setAIEndpoint(config.ai.apiEndpoint || '');
       }
       if (config.registry) {
-        if (config.registry.default) await configManager.setRegistryDefault(config.registry.default);
-        if (config.registry.fallback) await configManager.setRegistryFallback(config.registry.fallback);
+        if (config.registry.default) await configService.setRegistryDefault(config.registry.default);
+        if (config.registry.fallback) await configService.setRegistryFallback(config.registry.fallback);
       }
 
-      const updatedConfig = await configManager.getAll();
+      const updatedConfig = await configService.getAppConfig();
       sendJson(res, 200, { config: updatedConfig });
     } catch (error: any) {
       console.error('[Daemon] Error updating config:', error);

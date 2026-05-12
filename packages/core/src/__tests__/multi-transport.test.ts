@@ -3,6 +3,11 @@ import { MCPClient } from "../mcp/client.js";
 import { getRegistryClient } from "../registry/client.js";
 import { getProcessManager } from "../process-manager/manager.js";
 
+// Mock uuid to prevent ESM parsing issues
+jest.mock("uuid", () => ({
+  v4: jest.fn(() => "mock-uuid-v4"),
+}));
+
 // Mock MCPClient
 jest.mock("../mcp/client.js");
 const MockedMCPClient = MCPClient as jest.MockedClass<typeof MCPClient>;

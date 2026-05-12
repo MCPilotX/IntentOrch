@@ -1,5 +1,5 @@
 import { Command } from "commander";
-import { getConfigManager } from "@intentorch/core";
+import { getConfigService } from "@intentorch/core";
 import { AIProviders, RegistrySources } from "@intentorch/core";
 import type { AIProvider } from "@intentorch/core";
 
@@ -22,7 +22,7 @@ export function configCommand(): Command {
     .command("set <key> <value>")
     .description("Set configuration item")
     .action(async (key: string, value: string) => {
-      const configManager = getConfigManager();
+      const configService = getConfigService();
 
       switch (key) {
         case "provider":
@@ -33,25 +33,29 @@ export function configCommand(): Command {
             console.log(`Valid providers: ${validProviders.join(", ")}`);
             process.exit(1);
           }
-          await configManager.setAIProvider(value as AIProvider);
+          await configService.setAIProvider(value as AIProvider);
           console.log(`✓ AI provider set to: ${value}`);
           break;
         case "apiKey":
-          await configManager.setAIAPIKey(value);
+          await configService.setAIAPIKey(value);
           console.log("✓ API key set");
           break;
         case "model":
-          await configManager.setAIModel(value);
+          await configService.setAIModel(value);
           console.log(`✓ AI model set to: ${value}`);
+          break;
+        case "apiEndpoint":
+          await configService.setAIEndpoint(value);
+          console.log(`✓ API endpoint set to: ${value}`);
           break;
         case "registry.default":
           if (!validateRegistrySource(value)) process.exit(1);
-          await configManager.setRegistryDefault(value);
+          await configService.setRegistryDefault(value);
           console.log(`✓ Default registry set to: ${value}`);
           break;
         case "registry.fallback":
           if (!validateRegistrySource(value)) process.exit(1);
-          await configManager.setRegistryFallback(value);
+          await configService.setRegistryFallback(value);
           console.log(`✓ Fallback registry set to: ${value}`);
           break;
         case "services.auto-start":
@@ -60,7 +64,7 @@ export function configCommand(): Command {
             .split(",")
             .map((s) => s.trim())
             .filter((s) => s.length > 0);
-          await configManager.setServicesAutoStart(servers);
+          await configService.setServicesAutoStart(servers);
           console.log(`✓ Auto-start servers set to: ${servers.join(", ")}`);
           console.log(
             `  Note: These servers will auto-start when daemon starts`,
@@ -79,8 +83,8 @@ export function configCommand(): Command {
     .command("list")
     .description("List all configurations")
     .action(async () => {
-      const configManager = getConfigManager();
-      const config = await configManager.getAll();
+      const configService = getConfigService();
+      const config = await configService.getAppConfig();
 
       console.log("AI Configuration:");
       console.log(`  Provider: ${config.ai.provider || "(not set)"}`);
@@ -88,6 +92,7 @@ export function configCommand(): Command {
         `  API Key: ${config.ai.apiKey ? "***" + config.ai.apiKey.slice(-4) : "(not set)"}`,
       );
       console.log(`  Model: ${config.ai.model || "(not set)"}`);
+      console.log(`  API Endpoint: ${config.ai.apiEndpoint || "(not set)"}`);
 
       console.log("\nRegistry Configuration:");
       console.log(`  Default: ${config.registry.default}`);

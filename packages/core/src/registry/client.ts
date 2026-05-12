@@ -8,7 +8,8 @@ import {
 } from "./types.js";
 import { createRegistrySource, parseClaudeDesktopConfig } from "./sources.js";
 import { ManifestCache } from "./cache.js";
-import { getRegistryConfig } from "../utils/config.js";
+import { getConfigService } from "../core/config-service.js";
+import { toStorageFormat } from "../utils/owner-project-format.js";
 
 export class RegistryClient {
   private cache: ManifestCache;
@@ -141,7 +142,8 @@ export class RegistryClient {
     }
 
     // Fetch from Registry
-    const registryConfig = await getRegistryConfig();
+    const configService = getConfigService();
+    const registryConfig = await configService.getRegistryConfig();
     let manifest: Manifest | null = null;
     let lastError: Error | null = null;
 
@@ -377,178 +379,7 @@ export class RegistryClient {
   }
 
   generateCacheKey(serverNameOrUrl: string): string {
-    // If it's a URL, extract meaningful name from it
-    if (
-      serverNameOrUrl.startsWith("http://") ||
-      serverNameOrUrl.startsWith("https://")
-    ) {
-      try {
-        const url = new URL(serverNameOrUrl);
-        const pathname = url.pathname;
-
-        // Extract service name from common URL patterns
-        // Pattern 1: GitHub hub URL - https://raw.githubusercontent.com/MCPilotX/mcp-server-hub/main/github/github-mcp-server/mcp.json
-        // Pattern 2: Gitee hub URL - https://gitee.com/mcpilotx/mcp-server-hub/raw/master/Joooook/12306-mcp/mcp.json
-        // Pattern 3: Direct GitHub repo URL - https://raw.githubusercontent.com/owner/repo/main/mcp.json
-
-        // Remove /mcp.json suffix first, then .json suffix
-        let servicePath = pathname;
-        if (servicePath.endsWith("/mcp.json")) {
-          servicePath = servicePath.substring(0, servicePath.length - 9); // Remove "/mcp.json"
-        } else if (servicePath.endsWith(".json")) {
-          servicePath = servicePath.substring(0, servicePath.length - 5); // Remove ".json"
-        }
-
-        // GitHub hub pattern (MCPilotX hub): /MCPilotX/mcp-server-hub/main/github/github-mcp-server
-        // Also handles: /MCPilotX/mcp-server-hub/refs/heads/main/github/github-mcp-server
-        // Note: after removing /mcp.json, we have: /MCPilotX/mcp-server-hub/main/github/github-mcp-server
-        // Use a more flexible pattern to match branch names that may contain slashes
-        const githubHubMatch = servicePath.match(
-          /\/[^\/]+\/mcp-server-hub\/(?:[^\/]+\/)*github\/(.+)/,
-        );
-        if (githubHubMatch) {
-          const serviceName = githubHubMatch[1];
-          // If it doesn't contain a slash, add "github/" prefix
-          if (!serviceName.includes("/")) {
-            return `github/${serviceName}`;
-          }
-          return serviceName;
-        }
-
-        // Gitee hub pattern (mcpilotx hub): /mcpilotx/mcp-server-hub/raw/master/Joooook/12306-mcp
-        // Note: after removing /mcp.json, we have: /mcpilotx/mcp-server-hub/raw/master/Joooook/12306-mcp
-        const giteeHubMatch = servicePath.match(
-          /^\/mcpilotx\/mcp-server-hub\/raw\/master\/(.+)$/,
-        );
-        if (giteeHubMatch) {
-          // Return as-is without "gitee/" prefix (should be in owner/server format)
-          return giteeHubMatch[1];
-        }
-
-        // GitHub hub pattern for non-github directory: /MCPilotX/mcp-server-hub/main/some-other-service
-        // Also handles: /MCPilotX/mcp-server-hub/refs/heads/main/some-other-service
-        const githubHubGenericMatch = servicePath.match(
-          /\/[^\/]+\/mcp-server-hub\/(?:[^\/]+\/)*([^\/].+)/,
-        );
-        if (githubHubGenericMatch) {
-          const serviceName = githubHubGenericMatch[1];
-          // Check if the first part is a common branch name or refs/heads/branch
-          const parts = serviceName.split("/");
-          const commonBranches = [
-            "main",
-            "master",
-            "develop",
-            "dev",
-            "trunk",
-            "release",
-          ];
-
-          // Handle refs/heads/main pattern
-          if (
-            parts.length >= 3 &&
-            parts[0] === "refs" &&
-            parts[1] === "heads" &&
-            commonBranches.includes(parts[2])
-          ) {
-            // Skip refs/heads/main
-            return parts.slice(3).join("/");
-          }
-
-          // Handle simple branch name
-          if (parts.length >= 2 && commonBranches.includes(parts[0])) {
-            // First part is a branch name, skip it
-            return parts.slice(1).join("/");
-          }
-          return serviceName;
-        }
-
-        // Direct GitHub raw URL pattern: /owner/repo/main/mcp.json
-        // We need to handle both with and without branch name
-        const rawGithubMatch = servicePath.match(/\/raw\/[^\/]+\/(.+)/);
-        if (rawGithubMatch) {
-          const fullPath = rawGithubMatch[1];
-          // Split by / to analyze
-          const parts = fullPath.split("/");
-
-          // If we have at least 2 parts, check if last part is a common branch name
-          if (parts.length >= 2) {
-            const lastPart = parts[parts.length - 1];
-            const commonBranches = [
-              "main",
-              "master",
-              "develop",
-              "dev",
-              "trunk",
-              "release",
-            ];
-
-            // If last part is a branch name, remove it
-            if (commonBranches.includes(lastPart)) {
-              // Return owner/repo
-              if (parts.length >= 3) {
-                const owner = parts[parts.length - 3];
-                const repo = parts[parts.length - 2];
-                return `${owner}/${repo}`;
-              }
-            } else {
-              // Last part is not a branch, could be filename or service name
-              // Try to extract owner/repo from the path
-              for (let i = parts.length - 1; i >= 1; i--) {
-                const potentialOwner = parts[i - 1];
-                const potentialRepo = parts[i];
-                // Simple check: if neither contains dot, it's likely owner/repo
-                if (
-                  !potentialOwner.includes(".") &&
-                  !potentialRepo.includes(".")
-                ) {
-                  return `${potentialOwner}/${potentialRepo}`;
-                }
-              }
-            }
-          }
-
-          // Fallback: return the full path without branch/file extension
-          return fullPath;
-        }
-
-        // Generic pattern: try to extract owner/server from path
-        const segments = servicePath.split("/").filter((seg) => seg.length > 0);
-        if (segments.length >= 2) {
-          // Common branch names to skip
-          const commonBranches = [
-            "main",
-            "master",
-            "develop",
-            "dev",
-            "trunk",
-            "release",
-          ];
-
-          // Check if we have a pattern like /owner/repo/branch
-          if (
-            segments.length >= 3 &&
-            commonBranches.includes(segments[segments.length - 1])
-          ) {
-            // Return owner/repo
-            const owner = segments[segments.length - 3];
-            const repo = segments[segments.length - 2];
-            return `${owner}/${repo}`;
-          }
-
-          // Default: use last two segments
-          const owner = segments[segments.length - 2];
-          const server = segments[segments.length - 1];
-          return `${owner}/${server}`;
-        } else if (segments.length === 1) {
-          return segments[0];
-        }
-      } catch (error) {
-        logger.warn("Failed to parse URL for cache key generation:", error);
-      }
-    }
-
-    // For non-URLs or if URL parsing failed, use the original string
-    return serverNameOrUrl;
+    return toStorageFormat(serverNameOrUrl);
   }
 }
 

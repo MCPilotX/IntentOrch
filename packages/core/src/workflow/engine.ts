@@ -5,6 +5,8 @@ import { getProcessManager } from "../process-manager/manager.js";
 import { getSecretManager } from "../secret/manager.js";
 import { MCPClient } from "../mcp/client.js";
 import { getInTorchDir } from "../utils/paths.js";
+import { getExecutionRecorder } from "./execution-recorder.js";
+import { v4 as uuidv4 } from "uuid";
 import fs from "fs/promises";
 import fsSync from "fs";
 import path from "path";
@@ -26,6 +28,11 @@ export class WorkflowEngine {
       secrets: await this.loadRequiredSecrets(),
     };
 
+    // Start execution recording
+    const executionId = uuidv4();
+    const recorder = getExecutionRecorder();
+    await recorder.startExecution(executionId, workflow, userInputs);
+
     try {
       // 1. Pre-flight: Ensure Servers are Running
       const requiredServers = workflow.requirements?.servers || [];
@@ -33,12 +40,16 @@ export class WorkflowEngine {
 
       // 2. Step Execution Loop
       const steps = workflow.steps || [];
-      for (const step of steps) {
+      for (let stepIndex = 0; stepIndex < steps.length; stepIndex++) {
+        const step = steps[stepIndex];
+
         if (
           step.if &&
           !(await ExpressionEvaluator.evaluateCondition(step.if, context))
         ) {
           logger.info(`⏭️ Skipping step ${step.id} (condition not met)`);
+          await recorder.startStep(executionId, step, stepIndex);
+          await recorder.completeStep(executionId, stepIndex, "skipped");
           continue;
         }
 
@@ -47,12 +58,41 @@ export class WorkflowEngine {
           await this.ensureServerRunning(step.serverName);
         }
 
-        const result = await this.executeStep(step, context);
-        context.state[step.id] = result;
+        // Record step start
+        await recorder.startStep(executionId, step, stepIndex);
+
+        try {
+          const result = await this.executeStep(step, context);
+          context.state[step.id] = result;
+
+          // Record step success
+          await recorder.completeStep(executionId, stepIndex, "success", result);
+        } catch (stepError: any) {
+          // Record step failure
+          await recorder.completeStep(
+            executionId,
+            stepIndex,
+            "failed",
+            undefined,
+            stepError.message,
+          );
+
+          // Re-throw to fail the entire workflow
+          throw stepError;
+        }
       }
 
       // 3. Final Outputs
-      return this.resolveOutputs(workflow, context);
+      const output = this.resolveOutputs(workflow, context);
+
+      // Record successful completion
+      await recorder.completeExecution(executionId, "success", undefined, output);
+
+      return output;
+    } catch (error: any) {
+      // Record failed execution
+      await recorder.completeExecution(executionId, "failed", error.message);
+      throw error;
     } finally {
       // Cleanup connections
       for (const client of this.clients.values()) {

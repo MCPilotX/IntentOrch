@@ -20,6 +20,7 @@ export type { RuntimeType, ServiceConfig, Config, AIConfig, DetectionResult } fr
 
 // ==================== AI Modules ====================
 export { CloudIntentEngine, LLMClient, getLLMClient } from './ai/index.js';
+export { ProviderRegistry } from './ai/providers/index.js';
 export type { CloudIntentEngineConfig } from './ai/index.js';
 
 // ==================== Execute Service ====================
@@ -110,7 +111,7 @@ export { getRegistryClient } from './registry/client.js';
 export { getWorkflowManager } from './workflow/manager.js';
 export { getToolRegistry } from './tool-registry/registry.js';
 export { getIntentService } from './ai/intent-service.js';
-export { getAIConfig, getConfigManager } from './utils/config.js';
+export { getAIConfig } from './utils/config.js';
 export { AutoStartManager } from './utils/auto-start-manager.js';
 export { printError } from './utils/cli-error.js';
 export { PROGRAM_NAME, PROGRAM_DESCRIPTION, PROGRAM_VERSION } from './utils/constants.js';

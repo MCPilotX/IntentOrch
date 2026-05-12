@@ -101,10 +101,18 @@ export class ExecuteService {
         // Use provided AI config or get from system
         this.aiConfig = aiConfig || (await getConfigService().getAIConfig());
 
-        if (!this.aiConfig.provider || !this.aiConfig.apiKey) {
+        if (!this.aiConfig.provider) {
           throw new IntentOrchError(
             ErrorCode.AI_NOT_CONFIGURED,
-            "AI configuration not set. Please configure AI provider and API key.",
+            "AI configuration not set. Please configure AI provider.",
+          );
+        }
+
+        // For Ollama, apiKey is not required
+        if (this.aiConfig.provider !== "ollama" && !this.aiConfig.apiKey) {
+          throw new IntentOrchError(
+            ErrorCode.AI_NOT_CONFIGURED,
+            `API key not set for provider: ${this.aiConfig.provider}. Please configure API key.`,
           );
         }
 

@@ -61,6 +61,7 @@ export class IntentorchAdapter {
         provider: this.aiConfig.provider || "openai",
         apiKey: this.aiConfig.apiKey,
         model: this.aiConfig.model || "gpt-4o-mini",
+        endpoint: this.aiConfig.apiEndpoint || "",
         temperature: 0.3,
         maxTokens: 1000,
         timeout: 30000,

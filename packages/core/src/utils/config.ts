@@ -1,5 +1,9 @@
-// This file is now a backward compatibility wrapper for the new ConfigService
-// It delegates to the new unified configuration system
+/**
+ * @deprecated This module is kept for backward compatibility.
+ * Please use `getConfigService()` from `../core/config-service.js` instead.
+ *
+ * This file delegates to the new unified configuration system (ConfigService).
+ */
 
 import type { AIConfig, AIProvider } from "../core/types.js";
 import {
@@ -17,8 +21,10 @@ export interface RegistryConfig {
   fallback: string;
 }
 
-// Export the ConfigManager class for backward compatibility
-// This is now just a wrapper around the new system
+/**
+ * @deprecated Use getConfigService() from core/config-service.js instead.
+ * This is kept for backward compatibility only.
+ */
 export { getConfigManager };
 
 // Re-export utility functions
@@ -27,8 +33,10 @@ export {
   getRegistryConfigNew as getRegistryConfig,
 };
 
-// For backward compatibility, we also export a ConfigManager class
-// that delegates to the new system
+/**
+ * @deprecated Use ConfigService from core/config-service.js instead.
+ * This class is kept for backward compatibility only.
+ */
 export class ConfigManager {
   private adapter = getConfigManager();
 

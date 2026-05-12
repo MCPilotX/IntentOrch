@@ -13,6 +13,7 @@ const AI_PROVIDERS = [
   { id: 'cohere', name: 'Cohere', models: ['command', 'command-light', 'command-r', 'command-r-plus'] },
   { id: 'huggingface', name: 'Hugging Face', models: ['llama-2-70b', 'mistral-7b', 'zephyr-7b'] },
   { id: 'deepseek', name: 'DeepSeek', models: ['deepseek-chat', 'deepseek-coder'] },
+  { id: 'ollama', name: 'Ollama (Local)', models: ['llama2', 'llama3', 'llama3.1', 'mistral', 'codellama', 'qwen2', 'gemma', 'phi', 'deepseek-coder', 'yi'] },
   { id: 'none', name: 'None', models: ['none'] },
   { id: 'custom', name: 'Custom', models: [] },
 ];
@@ -195,7 +196,7 @@ export default function ConfigPage() {
               <input
                 type="password"
                 className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 font-mono"
-                placeholder={t('config.apiKeyPlaceholder')}
+                placeholder={formData.config.ai?.provider === 'ollama' ? t('config.ollamaApiKeyHint') || 'Ollama does not require API key (optional)' : t('config.apiKeyPlaceholder')}
                 value={formData.config.ai?.apiKey || ''}
                 onChange={(e) => setFormData({
                   ...formData,
@@ -208,12 +209,46 @@ export default function ConfigPage() {
                   }
                 })}
               />
+              {formData.config.ai?.provider === 'ollama' && (
+                <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  Ollama runs locally and does not require an API key. Leave empty for local inference.
+                </p>
+              )}
             </div>
+            {/* API Endpoint - shown for Ollama and custom providers */}
+            {(formData.config.ai?.provider === 'ollama' || formData.config.ai?.provider === 'custom' || formData.config.ai?.provider === 'azure') && (
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  API Endpoint
+                </label>
+                <input
+                  type="text"
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 font-mono"
+                  placeholder={formData.config.ai?.provider === 'ollama' ? 'http://localhost:11434' : 'https://your-endpoint.com'}
+                  value={formData.config.ai?.apiEndpoint || ''}
+                  onChange={(e) => setFormData({
+                    ...formData,
+                    config: {
+                      ...formData.config,
+                      ai: {
+                        ...formData.config.ai,
+                        apiEndpoint: e.target.value
+                      }
+                    }
+                  })}
+                />
+                {formData.config.ai?.provider === 'ollama' && (
+                  <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                    Default: http://localhost:11434. Change if Ollama is running on a different host/port.
+                  </p>
+                )}
+              </div>
+            )}
             <div className="flex items-center space-x-4">
               <button
                 type="button"
                 onClick={handleTestAI}
-                disabled={testing || !formData.config.ai?.apiKey}
+                disabled={testing || (formData.config.ai?.provider !== 'ollama' && !formData.config.ai?.apiKey)}
                 className="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors disabled:opacity-50"
               >
                 {testing ? t('config.testing') : t('config.testConfiguration')}

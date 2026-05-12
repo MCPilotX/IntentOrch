@@ -6,7 +6,7 @@ import { logger } from "../core/logger.js";
 import { CloudIntentEngine } from "./cloud-intent-engine.js";
 import { getToolRegistry } from "../tool-registry/registry.js";
 import type { WorkflowStep } from "../workflow/types.js";
-import type { AIConfig } from "../utils/config.js";
+import type { AIConfig } from "../core/types.js";
 import { createCloudIntentEngine } from "../utils/cloud-intent-engine-factory.js";
 import { ParameterPostProcessor } from "./parameter-post-processor.js";
 
@@ -56,6 +56,7 @@ export class IntentService {
       provider: (process.env.LLM_PROVIDER as any) || "none",
       apiKey: process.env.LLM_API_KEY,
       model: process.env.LLM_MODEL || "none",
+      apiEndpoint: process.env.LLM_API_ENDPOINT || "",
     };
   }
 

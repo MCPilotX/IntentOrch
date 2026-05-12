@@ -166,6 +166,7 @@ export class CloudIntentEngine {
       provider: config.llm.provider,
       apiKey: config.llm.apiKey || "",
       model: config.llm.model || LLMDefaults.MODEL,
+      apiEndpoint: config.llm.endpoint || "",
       temperature: config.llm.temperature ?? LLMDefaults.TEMPERATURE,
       maxTokens: config.llm.maxTokens ?? LLMDefaults.MAX_TOKENS,
       timeout: config.llm.timeout ?? Timeouts.LLM_REQUEST,

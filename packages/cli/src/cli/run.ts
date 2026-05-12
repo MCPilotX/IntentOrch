@@ -259,16 +259,27 @@ export function runCommand(): Command {
         // Check AI configuration
         const aiConfig = await getAIConfig();
 
-        if (!aiConfig.provider || !aiConfig.apiKey) {
+        if (!aiConfig.provider) {
           console.error("❌ AI configuration not set");
           console.log("\n💡 Please set AI configuration first:");
           console.log(
-            `   ${PROGRAM_NAME} config set provider <openai|deepseek|...>`,
+            `   ${PROGRAM_NAME} config set provider <openai|deepseek|ollama|...>`,
           );
           console.log(`   ${PROGRAM_NAME} config set apiKey <your-api-key>`);
           console.log(
             `   ${PROGRAM_NAME} config set model <model-name> (optional)`,
           );
+          console.log(
+            `   ${PROGRAM_NAME} config set apiEndpoint <endpoint-url> (optional, for Ollama)`,
+          );
+          return;
+        }
+
+        // For Ollama, apiKey is not required
+        if (aiConfig.provider !== "ollama" && !aiConfig.apiKey) {
+          console.error("❌ API key not set for provider:", aiConfig.provider);
+          console.log("\n💡 Please set your API key:");
+          console.log(`   ${PROGRAM_NAME} config set apiKey <your-api-key>`);
           return;
         }
 

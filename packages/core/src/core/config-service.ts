@@ -252,6 +252,12 @@ export class ConfigService {
     await this.saveAppConfig(appConfig);
   }
 
+  async setAIEndpoint(endpoint: string): Promise<void> {
+    const appConfig = await this.getAppConfig();
+    appConfig.ai.apiEndpoint = endpoint;
+    await this.saveAppConfig(appConfig);
+  }
+
   // ==================== Registry Configuration ====================
 
   async getRegistryConfig(): Promise<RegistryConfig> {

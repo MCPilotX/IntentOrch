@@ -25,3 +25,24 @@ export {
   isWindows,
 } from "./system.js";
 export { OwnerProjectFormat } from "./owner-project-format.js";
+export {
+  DatabaseManager,
+  getConfigRepository,
+  getSecretRepository,
+  getProcessRepository,
+  getToolRepository,
+  getManifestCacheRepository,
+  getWorkflowRepository,
+  getWorkflowExecutionRepository,
+  getSqliteDb,
+  closeSqliteDb,
+} from "./sqlite.js";
+export type {
+  IConfigRepository,
+  ISecretRepository,
+  IProcessRepository,
+  IToolRepository,
+  IManifestCacheRepository,
+  IWorkflowRepository,
+  IWorkflowExecutionRepository,
+} from "./sqlite.js";

@@ -71,6 +71,10 @@ export class LegacyConfigManagerAdapter {
     await this.configService.setAIModel(model);
   }
 
+  async setAIEndpoint(endpoint: string): Promise<void> {
+    await this.configService.setAIEndpoint(endpoint);
+  }
+
   async setRegistryDefault(registry: string): Promise<void> {
     await this.configService.setRegistryDefault(registry);
   }

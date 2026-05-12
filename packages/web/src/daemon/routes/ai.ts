@@ -11,18 +11,29 @@ export async function handleAIRoutes(ctx: RouteContext): Promise<boolean> {
   // POST /api/ai/test
   if (path === '/api/ai/test' && method === 'POST') {
     try {
-      const { provider, model, apiKey } = JSON.parse(body);
-      if (!provider || !model || !apiKey) {
+      const { provider, model, apiKey, apiEndpoint } = JSON.parse(body);
+      
+      // Ollama does not require an API key; other providers do
+      if (!provider || !model) {
+        sendJson(res, 200, { success: false, message: 'provider and model are required' });
+        return true;
+      }
+      if (provider !== 'ollama' && !apiKey) {
         sendJson(res, 200, { success: false, message: 'provider, model, and apiKey are required' });
         return true;
       }
 
-      console.log(`[Daemon] Testing AI config: provider=${provider}, model=${model}`);
+      console.log(`[Daemon] Testing AI config: provider=${provider}, model=${model}, apiEndpoint=${apiEndpoint || '(default)'}`);
 
       try {
         const { LLMClient } = await import('@intentorch/core');
         const client = new LLMClient();
-        client.configure({ provider: provider as any, apiKey, model });
+        client.configure({ 
+          provider: provider as any, 
+          apiKey: apiKey || '', 
+          model,
+          apiEndpoint: apiEndpoint || undefined,
+        });
         const testResult = await client.testConnection();
 
         sendJson(res, 200, {

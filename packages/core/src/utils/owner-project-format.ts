@@ -1,17 +1,10 @@
 import { logger } from "../core/logger.js";
+
 /**
  * Owner/Project format unification utilities
  * Ensures consistent owner/project format throughout the system
  */
 
-/**
- * Standardized Owner/Project format
- * Format: owner/project[@branch][:path]
- * Examples:
- * - Joooook/12306-mcp
- * - mcpilotx/mcp-server-hub@main
- * - github/github-mcp-server:dist/mcp.json
- */
 export interface OwnerProjectFormat {
   owner: string;
   project: string;
@@ -19,33 +12,52 @@ export interface OwnerProjectFormat {
   path?: string;
   fullName: string; // owner/project
   qualifiedName: string; // owner/project[@branch][:path]
+  source: string; // github, gitee, direct, local, official
 }
 
 /**
  * Build OwnerProjectFormat result from a simple owner/project string
  */
-function buildResult(input: string): OwnerProjectFormat {
+function buildResult(
+  input: string,
+  source: string = "github",
+): OwnerProjectFormat {
   let baseName = input;
   let branch: string | undefined;
   let path: string | undefined;
 
-  // Extract path first
-  if (baseName.includes(":")) {
-    const [nameWithBranch, pathPart] = baseName.split(":", 2);
-    baseName = nameWithBranch;
-    path = pathPart;
+  // 1. Extract path (from the end to avoid confusion with source prefix)
+  const pathIndex = baseName.indexOf(":");
+  if (pathIndex > -1) {
+    const potentialSource = baseName.substring(0, pathIndex);
+    // If it's NOT a known source, then the colon is likely a path separator
+    if (!["github", "gitee", "official", "local", "direct", "remote"].includes(potentialSource)) {
+       const [nameWithBranch, pathPart] = baseName.split(":", 2);
+       baseName = nameWithBranch;
+       path = pathPart;
+    }
   }
 
-  // Extract branch next
+  // 2. Extract branch
   if (baseName.includes("@")) {
     const [name, branchPart] = baseName.split("@", 2);
     baseName = name;
     branch = branchPart;
   }
 
-  // Validate owner/project format
-  if (!baseName.includes("/")) {
-    baseName = `official/${baseName}`;
+  // 3. Normalize owner/project
+  if (baseName.includes("/")) {
+    const parts = baseName.split("/");
+    const firstPart = parts[0];
+    if (["github", "gitee", "official", "local", "direct", "remote"].includes(firstPart)) {
+      source = firstPart === "remote" ? "direct" : firstPart;
+    }
+  } else {
+    // Shorthand for official registry
+    if (source !== "local" && source !== "direct") {
+      baseName = `official/${baseName}`;
+      source = "official";
+    }
   }
 
   const [owner, project] = baseName.split("/", 2);
@@ -65,6 +77,7 @@ function buildResult(input: string): OwnerProjectFormat {
     path,
     fullName: `${owner}/${project}`,
     qualifiedName,
+    source,
   };
 }
 
@@ -72,211 +85,98 @@ function buildResult(input: string): OwnerProjectFormat {
  * Convert various server name formats to unified owner/project format
  */
 export function toOwnerProjectFormat(serverName: string): OwnerProjectFormat {
-  // Input validation
-  if (serverName === null || serverName === undefined) {
-    throw new Error("Server name cannot be null or undefined");
+  if (!serverName) throw new Error("Server name cannot be empty");
+  
+  const trimmedName = serverName.trim();
+
+  // 0. Handle source:rest format
+  if (trimmedName.includes(":")) {
+    const firstColonIndex = trimmedName.indexOf(":");
+    const source = trimmedName.substring(0, firstColonIndex);
+    const rest = trimmedName.substring(firstColonIndex + 1);
+
+    if (["github", "gitee", "official", "local", "direct", "remote"].includes(source)) {
+      // If rest is a URL, process it as a URL
+      if (rest.startsWith("http://") || rest.startsWith("https://") || rest.startsWith("file://")) {
+        return toOwnerProjectFormat(rest);
+      }
+      return buildResult(rest, source);
+    }
   }
 
-  if (typeof serverName !== "string") {
-    throw new Error(`Server name must be a string, got ${typeof serverName}`);
-  }
-
-  if (serverName.trim() === "") {
-    throw new Error("Server name cannot be empty");
-  }
-
-  // 0. Handle URL format - extract service name from URL first
+  // 1. Handle URL format
   if (
-    serverName.startsWith("http://") ||
-    serverName.startsWith("https://") ||
-    serverName.startsWith("file://")
+    trimmedName.startsWith("http://") ||
+    trimmedName.startsWith("https://") ||
+    trimmedName.startsWith("file://")
   ) {
     try {
-      const url = new URL(serverName);
+      const url = new URL(trimmedName);
 
-      // For file:// protocol, extract the filename as the display name
-      if (serverName.startsWith("file://")) {
-        const pathname = url.pathname;
-        // Extract just the filename without extension
-        const fileName = pathname.split("/").filter(Boolean).pop() || "local-service";
+      if (trimmedName.startsWith("file://")) {
+        const fileName = url.pathname.split("/").filter(Boolean).pop() || "local-service";
         const baseName = fileName.replace(/\.json$/i, "");
-        return buildResult(`local/${baseName}`);
+        return buildResult(`local/${baseName}`, "local");
       }
 
       const pathname = url.pathname;
+      let servicePath = pathname.endsWith("/mcp.json") 
+        ? pathname.slice(0, -9) 
+        : (pathname.endsWith(".json") ? pathname.slice(0, -5) : pathname);
 
-      // Remove /mcp.json suffix first, then .json suffix
-      let servicePath = pathname;
-      if (servicePath.endsWith("/mcp.json")) {
-        servicePath = servicePath.substring(0, servicePath.length - 9);
-      } else if (servicePath.endsWith(".json")) {
-        servicePath = servicePath.substring(0, servicePath.length - 5);
+      if (url.hostname.includes("github.com")) {
+        const githubHubMatch = servicePath.match(/\/[^\/]+\/mcp-server-hub\/(?:[^\/]+\/)*github\/(.+)/);
+        if (githubHubMatch) return buildResult(githubHubMatch[1], "github");
+        
+        const segments = servicePath.split("/").filter(Boolean);
+        if (segments.length >= 2) return buildResult(`${segments[0]}/${segments[1]}`, "github");
       }
 
-      // GitHub hub pattern (MCPilotX hub): /MCPilotX/mcp-server-hub/main/github/github-mcp-server
-      const githubHubMatch = servicePath.match(
-        /\/[^\/]+\/mcp-server-hub\/(?:[^\/]+\/)*github\/(.+)/,
-      );
-      if (githubHubMatch) {
-        const serviceName = githubHubMatch[1];
-        if (!serviceName.includes("/")) {
-          return buildResult(`github/${serviceName}`);
-        }
-        return buildResult(serviceName);
+      if (url.hostname.includes("gitee.com")) {
+        const giteeHubMatch = servicePath.match(/^\/mcpilotx\/mcp-server-hub\/raw\/master\/(.+)$/);
+        if (giteeHubMatch) return buildResult(giteeHubMatch[1], "gitee");
+        
+        const segments = servicePath.split("/").filter(Boolean);
+        if (segments.length >= 2) return buildResult(`${segments[0]}/${segments[1]}`, "gitee");
       }
 
-      // Gitee hub pattern (mcpilotx hub): /mcpilotx/mcp-server-hub/raw/master/Joooook/12306-mcp
-      const giteeHubMatch = servicePath.match(
-        /^\/mcpilotx\/mcp-server-hub\/raw\/master\/(.+)$/,
-      );
-      if (giteeHubMatch) {
-        return buildResult(giteeHubMatch[1]);
-      }
-
-      // Generic GitHub hub pattern
-      const githubHubGenericMatch = servicePath.match(
-        /\/[^\/]+\/mcp-server-hub\/(?:[^\/]+\/)*([^\/].+)/,
-      );
-      if (githubHubGenericMatch) {
-        const serviceName = githubHubGenericMatch[1];
-        const parts = serviceName.split("/");
-        const commonBranches = [
-          "main",
-          "master",
-          "develop",
-          "dev",
-          "trunk",
-          "release",
-        ];
-
-        if (
-          parts.length >= 3 &&
-          parts[0] === "refs" &&
-          parts[1] === "heads" &&
-          commonBranches.includes(parts[2])
-        ) {
-          return buildResult(parts.slice(3).join("/"));
-        }
-
-        if (parts.length >= 2 && commonBranches.includes(parts[0])) {
-          return buildResult(parts.slice(1).join("/"));
-        }
-        return buildResult(serviceName);
-      }
-
-      // Direct GitHub raw URL pattern
-      const rawGithubMatch = servicePath.match(/\/raw\/[^\/]+\/(.+)/);
-      if (rawGithubMatch) {
-        const fullPath = rawGithubMatch[1];
-        const parts = fullPath.split("/");
-
-        if (parts.length >= 2) {
-          const lastPart = parts[parts.length - 1];
-          const commonBranches = [
-            "main",
-            "master",
-            "develop",
-            "dev",
-            "trunk",
-            "release",
-          ];
-
-          if (commonBranches.includes(lastPart)) {
-            return buildResult(parts.slice(0, -1).join("/"));
-          }
-          return buildResult(fullPath);
-        }
-      }
-
-      // Generic URL: extract owner/repo from path
-      const segments = servicePath.split("/").filter((s) => s);
-      if (segments.length >= 2) {
-        return buildResult(`${segments[0]}/${segments[1]}`);
-      }
-
-      // Fallback for short URLs (e.g., http://localhost:8099/sse)
       const hostname = url.hostname.replace(/\./g, "-");
+      const segments = servicePath.split("/").filter(Boolean);
       const lastSegment = segments.pop() || "service";
-      return buildResult(`remote/${hostname}-${lastSegment}`);
+      return buildResult(`remote/${hostname}-${lastSegment}`, "direct");
     } catch (error) {
-      // URL parsing failed, fall through to normal processing
+      // Fall through
     }
   }
 
-  // 1. Handle source:owner/project format
-  let normalized = serverName;
-  if (serverName.includes(":")) {
-    const parts = serverName.split(":");
-    if (parts.length >= 2) {
-      const source = parts[0];
-      const rest = parts.slice(1).join(":");
-
-      // Skip if it looks like a URL protocol (http, https, file)
-      if (source !== "http" && source !== "https" && source !== "file") {
-        // If rest is a URL, process it as a URL
-        if (rest.startsWith("http://") || rest.startsWith("https://") || rest.startsWith("file://")) {
-          return toOwnerProjectFormat(rest);
-        }
-
-        // For official registry, format might be official:official/12306
-        if (source === "official" && rest.startsWith("official/")) {
-          normalized = rest;
-        } else {
-          normalized = rest;
-        }
-      }
-    }
+  // 2. Local path
+  if (trimmedName.startsWith("./") || trimmedName.startsWith("/") || trimmedName.endsWith(".json")) {
+    const fileName = trimmedName.split("/").filter(Boolean).pop() || "local-service";
+    const baseName = fileName.replace(/\.json$/i, "");
+    return buildResult(`local/${baseName}`, "local");
   }
 
-  // 2. Extract branch and path
-  let baseName = normalized;
-  let branch: string | undefined;
-  let path: string | undefined;
+  // 3. Shorthands
+  if (trimmedName.startsWith("official/")) return buildResult(trimmedName, "official");
+  if (!trimmedName.includes("/")) return buildResult(`official/${trimmedName}`, "official");
 
-  // Extract path first
-  if (baseName.includes(":")) {
-    const [nameWithBranch, pathPart] = baseName.split(":", 2);
-    baseName = nameWithBranch;
-    path = pathPart;
-  }
-
-  // Extract branch next
-  if (baseName.includes("@")) {
-    const [name, branchPart] = baseName.split("@", 2);
-    baseName = name;
-    branch = branchPart;
-  }
-
-  // 3. Validate owner/project format
-  if (!baseName.includes("/")) {
-    // If no slash, assume official registry shorthand
-    baseName = `official/${baseName}`;
-  }
-
-  const [owner, project] = baseName.split("/", 2);
-
-  // 4. Build qualified name
-  let qualifiedName = `${owner}/${project}`;
-  if (branch) {
-    qualifiedName += `@${branch}`;
-  }
-  if (path) {
-    qualifiedName += `:${path}`;
-  }
-
-  return {
-    owner,
-    project,
-    branch,
-    path,
-    fullName: `${owner}/${project}`,
-    qualifiedName,
-  };
+  return buildResult(trimmedName, "github");
 }
 
 /**
- * Convert owner/project format to display string
- * Used for CLI output and UI display
+ * Convert server name to a stable URN (Uniform Resource Name)
+ * Format: source:owner/project[@branch][:path]
+ */
+export function toUrn(serverName: string): string {
+  const format = toOwnerProjectFormat(serverName);
+  let urn = `${format.source}:${format.fullName}`;
+  if (format.branch) urn += `@${format.branch}`;
+  if (format.path) urn += `:${format.path}`;
+  return urn;
+}
+
+/**
+ * Convert URN to a display string
  */
 export function toDisplayString(serverName: string): string {
   const format = toOwnerProjectFormat(serverName);
@@ -284,138 +184,39 @@ export function toDisplayString(serverName: string): string {
 }
 
 /**
- * Convert owner/project format to normalized storage format
- * Used for cache keys, file storage, etc.
+ * Convert URN to a storage format (safe for filenames)
  */
 export function toStorageFormat(serverName: string): string {
-  const format = toOwnerProjectFormat(serverName);
-  // Remove special characters for filename safety
-  return format.qualifiedName
+  const urn = toUrn(serverName);
+  return urn
     .replace(/[^a-zA-Z0-9_\-@:./]/g, "_")
-    .replace(/\/+/g, "/")
-    .replace(/^\/+|\/+$/g, "");
+    .replace(/:/g, "_") // Replace colon for NTFS compatibility
+    .replace(/\//g, "-") // Replace slash
+    .replace(/-+/g, "-")
+    .replace(/_+/g, "_");
 }
 
 /**
- * Check if two server names refer to the same service
+ * Check if two names refer to the same service
  */
 export function isSameService(name1: string, name2: string): boolean {
-  const format1 = toOwnerProjectFormat(name1);
-  const format2 = toOwnerProjectFormat(name2);
-
-  // Compare owner and project (ignore branch and path)
-  return format1.fullName === format2.fullName;
+  const u1 = toUrn(name1);
+  const u2 = toUrn(name2);
+  // Compare without branch/path for basic "same service" check
+  const f1 = toOwnerProjectFormat(u1);
+  const f2 = toOwnerProjectFormat(u2);
+  return f1.source === f2.source && f1.fullName === f2.fullName;
 }
 
-/**
- * Extract owner/project format from URL
- */
-export function extractFromUrl(url: string): string | null {
-  try {
-    const urlObj = new URL(url);
-    const pathname = urlObj.pathname;
-
-    // GitHub raw URL pattern
-    if (url.includes("raw.githubusercontent.com")) {
-      const match = pathname.match(
-        /^\/([^\/]+)\/([^\/]+)\/(?:raw\/)?(?:[^\/]+\/)?(.+)$/,
-      );
-      if (match) {
-        const [, owner, repo, rest] = match;
-        // Remove possible mcp.json suffix
-        const serviceName = rest
-          .replace(/\/mcp\.json$/, "")
-          .replace(/\.json$/, "");
-        return `${owner}/${repo}:${serviceName}`;
-      }
-    }
-
-    // Gitee raw URL pattern
-    if (url.includes("gitee.com")) {
-      const match = pathname.match(
-        /^\/([^\/]+)\/([^\/]+)\/(?:raw\/)?(?:[^\/]+\/)?(.+)$/,
-      );
-      if (match) {
-        const [, owner, repo, rest] = match;
-        const serviceName = rest
-          .replace(/\/mcp\.json$/, "")
-          .replace(/\.json$/, "");
-        return `${owner}/${repo}:${serviceName}`;
-      }
-    }
-
-    // Generic URL pattern
-    const segments = pathname.split("/").filter((s) => s);
-    if (segments.length >= 2) {
-      const owner = segments[0];
-      const repo = segments[1];
-      return `${owner}/${repo}`;
-    }
-  } catch (error) {
-    // URL parsing failed
-  }
-
-  return null;
-}
-
-/**
- * Validate if it's a valid owner/project format
- */
-export function isValidFormat(serverName: string): boolean {
-  try {
-    const format = toOwnerProjectFormat(serverName);
-    return format.owner.length > 0 && format.project.length > 0;
-  } catch (error) {
-    return false;
-  }
-}
-
-/**
- * Get friendly service name (for logs and UI)
- */
 export function getFriendlyName(serverName: string): string {
   const format = toOwnerProjectFormat(serverName);
-
-  // Remove common suffixes
-  let friendlyName = format.project;
+  let name = format.project;
   const suffixes = ["-mcp", "-server", "-service", "-tool"];
-
-  for (const suffix of suffixes) {
-    if (friendlyName.endsWith(suffix)) {
-      friendlyName = friendlyName.slice(0, -suffix.length);
+  for (const s of suffixes) {
+    if (name.endsWith(s)) {
+      name = name.slice(0, -s.length);
       break;
     }
   }
-
-  return friendlyName;
-}
-
-/**
- * Example usage (for documentation/testing)
- */
-export function exampleUsage(): void {
-  const examples = [
-    "Joooook/12306-mcp",
-    "github:Joooook/12306-mcp",
-    "gitee:mcpilotx/mcp-server-hub:dist/12306-mcp",
-    "official/12306",
-    "official:official/12306",
-    "mcp/12306",
-    "https://raw.githubusercontent.com/Joooook/12306-mcp/main/mcp.json",
-  ];
-
-  logger.info("Owner/Project format unification examples:");
-  logger.info("=".repeat(60));
-
-  for (const example of examples) {
-    const format = toOwnerProjectFormat(example);
-    logger.info(`Input: ${example}`);
-    logger.info(`  Display format: ${toDisplayString(example)}`);
-    logger.info(`  Storage format: ${toStorageFormat(example)}`);
-    logger.info(`  Friendly name: ${getFriendlyName(example)}`);
-    logger.info(
-      `  Components: owner=${format.owner}, project=${format.project}, branch=${format.branch || "none"}, path=${format.path || "none"}`,
-    );
-    logger.info("---");
-  }
+  return name;
 }

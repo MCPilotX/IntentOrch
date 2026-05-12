@@ -313,7 +313,7 @@ class ApiService {
     }
   }
 
-  async testAIConfig(config: { provider: string; model: string; apiKey: string }): Promise<{ success: boolean; message?: string }> {
+  async testAIConfig(config: { provider: string; model: string; apiKey: string; apiEndpoint?: string }): Promise<{ success: boolean; message?: string }> {
     try {
       const response = await this.client.post('/api/ai/test', config) as any;
       return { success: true, message: response.message || 'Configuration test successful' };
