@@ -291,6 +291,7 @@ export class DaemonServer {
             logPath: runningServer.logPath || getLogPath(runningServer.pid),
             tools: tools,
             alreadyRunning: true,
+            external: runningServer.external || false,
           });
         }
         // Then start the server
@@ -314,6 +315,7 @@ export class DaemonServer {
           logPath: processInfo.logPath || getLogPath(processInfo.pid),
           tools: tools,
           alreadyRunning: false,
+          external: processInfo.external || false,
         });
       } catch (error: any) {
         // Handle JSON parsing errors
@@ -1529,18 +1531,30 @@ export class DaemonServer {
       // Get configured servers from environment or config file
       const configuredServers = await this.getConfiguredServers();
 
-      if (configuredServers.length === 0) {
+      // Also get previously running external services from process store
+      const processManager = getProcessManager();
+      const storedProcesses = await processManager.list();
+      const previouslyRunningExternal = storedProcesses
+        .filter((p) => p.external && p.status === "running")
+        .map((p) => p.serverName);
+
+      // Combine both lists (uniquely)
+      const allServersToStart = Array.from(
+        new Set([...configuredServers, ...previouslyRunningExternal]),
+      );
+
+      if (allServersToStart.length === 0) {
         console.log("[Daemon] No servers configured for auto-start");
         return;
       }
 
       console.log(
-        `[Daemon] Found ${configuredServers.length} configured servers: ${configuredServers.join(", ")}`,
+        `[Daemon] Found ${allServersToStart.length} servers to ensure running: ${allServersToStart.join(", ")}`,
       );
 
       // Ensure servers are running
       const results =
-        await autoStartManager.ensureServersRunning(configuredServers);
+        await autoStartManager.ensureServersRunning(allServersToStart);
 
       // Print results
       const summary = autoStartManager.getResultsSummary(results);
@@ -1557,7 +1571,7 @@ export class DaemonServer {
       // After servers are started, ensure tools are registered
       // Wait longer for servers to fully initialize
       await new Promise((resolve) => setTimeout(resolve, 5000));
-      await this.ensureToolsRegistered(configuredServers);
+      await this.ensureToolsRegistered(allServersToStart);
     } catch (error) {
       console.error("[Daemon] Failed to auto-start servers:", error);
     }

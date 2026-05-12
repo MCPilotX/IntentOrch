@@ -23,6 +23,8 @@ export class RegistryClient {
     this.sources.set("gitee", createRegistrySource("gitee"));
     this.sources.set("smithery", createRegistrySource("smithery"));
     this.sources.set("direct", createRegistrySource("direct"));
+    this.sources.set("sse", createRegistrySource("sse"));
+    this.sources.set("http", createRegistrySource("http"));
   }
 
   /**

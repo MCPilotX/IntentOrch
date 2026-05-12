@@ -42,15 +42,22 @@ export function pullCommand(): Command {
           );
         }
 
-        console.log(`  Runtime: ${manifest.runtime.type}`);
-        console.log(
-          `  Command: ${manifest.runtime.command} ${manifest.runtime.args?.join(" ") || ""}`,
-        );
+        const isRemote = manifest.runtime?.type === "remote";
 
-        if (manifest.runtime.env && manifest.runtime.env.length > 0) {
+        if (isRemote) {
+          console.log(`  Type: ${manifest.transport?.type?.toUpperCase() || "REMOTE"}`);
+          console.log(`  URL: ${manifest.transport?.url || manifest.runtime?.url || "N/A"}`);
+        } else {
+          console.log(`  Runtime: ${manifest.runtime.type}`);
           console.log(
-            `  Required environment variables: ${manifest.runtime.env.join(", ")}`,
+            `  Command: ${manifest.runtime.command} ${manifest.runtime.args?.join(" ") || ""}`,
           );
+
+          if (manifest.runtime.env && manifest.runtime.env.length > 0) {
+            console.log(
+              `  Required environment variables: ${manifest.runtime.env.join(", ")}`,
+            );
+          }
         }
 
         // Check if this server supports dynamic tool discovery

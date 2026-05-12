@@ -53,9 +53,11 @@ export function normalizeServerName(serverName: string): string {
   } else if (serverName.includes(":")) {
     const parts = serverName.split(":");
     const possibleSource = parts[0];
-    if (["github", "gitee", "official", "local"].includes(possibleSource)) {
+    if (["github", "gitee", "official", "local", "sse", "http", "direct"].includes(possibleSource)) {
       source = possibleSource;
     }
+  } else if (serverName.startsWith("remote/")) {
+    source = "direct";
   } else if (serverName.startsWith("official/")) {
     source = "official";
   } else if (

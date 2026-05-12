@@ -833,41 +833,113 @@ export class DirectRegistrySource implements RegistrySource {
 
     // HTTP/HTTPS URL
     try {
-      const response = await axios.get(serverNameOrUrl);
+      const response = await axios.get(serverNameOrUrl, { timeout: 5000 });
       const data = response.data;
 
       // If it looks like a manifest, return it
-      if (data && typeof data === "object" && (data.name || data.mcpServers || data.runtime)) {
+      if (
+        data &&
+        typeof data === "object" &&
+        (data.name || data.mcpServers || data.runtime)
+      ) {
         return data;
       }
 
-      // If it's not a manifest but we got a response, it might be an SSE endpoint
-      // that doesn't return JSON on GET. But axios.get might have succeeded.
+      // If it's not a manifest but we got a response, it might be an SSE/HTTP endpoint
       throw new Error("Response is not a valid manifest");
     } catch (error: any) {
-      // If it's a 405 or other error, it might still be an SSE/HTTP endpoint
-      // Check if the URL ends with /sse or contains sse
-      const isLikelySse = serverNameOrUrl.toLowerCase().includes("sse");
+      // Automatic sensing based on URL features
+      const lowerUrl = serverNameOrUrl.toLowerCase();
+      const isLikelySse = lowerUrl.includes("sse") || lowerUrl.includes("/events");
+      const isLikelyHttp = (lowerUrl.includes("http") && lowerUrl.includes("mcp")) || 
+                          lowerUrl.includes("/rpc");
       
-      if (isLikelySse) {
-        logger.info(`[DirectRegistrySource] URL looks like an SSE endpoint, generating virtual manifest: ${serverNameOrUrl}`);
+      if (isLikelySse || isLikelyHttp) {
+        const type = isLikelySse ? "sse" : "http";
+        logger.info(
+          `[DirectRegistrySource] URL features suggest ${type.toUpperCase()} endpoint: ${serverNameOrUrl}`,
+        );
         return {
-          name: serverNameOrUrl.split("/").pop() || "remote-sse-service",
+          name: serverNameOrUrl.split("/").filter(Boolean).pop() || `remote-${type}-service`,
           version: "1.0.0",
-          description: `Remote SSE service at ${serverNameOrUrl}`,
+          description: `Remote ${type.toUpperCase()} service at ${serverNameOrUrl}`,
           runtime: {
             type: "remote",
             command: "",
           },
           transport: {
-            type: "sse",
+            type: type as "sse" | "http",
             url: serverNameOrUrl,
           },
         };
       }
 
-      throw error;
+      // Default fallback for URLs if manifest fetch fails - assume SSE as it's the most common remote transport
+      logger.info(
+        `[DirectRegistrySource] Manifest fetch failed for ${serverNameOrUrl}, defaulting to virtual SSE manifest`,
+      );
+      return {
+        name: serverNameOrUrl.split("/").filter(Boolean).pop() || "remote-service",
+        version: "1.0.0",
+        description: `Remote service at ${serverNameOrUrl}`,
+        runtime: {
+          type: "remote",
+          command: "",
+        },
+        transport: {
+          type: "sse",
+          url: serverNameOrUrl,
+        },
+      };
     }
+  }
+}
+
+export class SSERegistrySource implements RegistrySource {
+  name = "sse";
+
+  async fetchManifest(url: string): Promise<Manifest> {
+    const fullUrl =
+      url.startsWith("http://") || url.startsWith("https://")
+        ? url
+        : `http://${url}`;
+    return {
+      name: url.split("/").filter(Boolean).pop() || "remote-sse-service",
+      version: "1.0.0",
+      description: `Remote SSE service at ${fullUrl}`,
+      runtime: {
+        type: "remote",
+        command: "",
+      },
+      transport: {
+        type: "sse",
+        url: fullUrl,
+      },
+    };
+  }
+}
+
+export class HTTPRegistrySource implements RegistrySource {
+  name = "http";
+
+  async fetchManifest(url: string): Promise<Manifest> {
+    const fullUrl =
+      url.startsWith("http://") || url.startsWith("https://")
+        ? url
+        : `http://${url}`;
+    return {
+      name: url.split("/").filter(Boolean).pop() || "remote-http-service",
+      version: "1.0.0",
+      description: `Remote HTTP service at ${fullUrl}`,
+      runtime: {
+        type: "remote",
+        command: "",
+      },
+      transport: {
+        type: "http",
+        url: fullUrl,
+      },
+    };
   }
 }
 
@@ -878,7 +950,7 @@ export class SmitheryRegistrySource implements RegistrySource {
     // If it's a full qualified name like "namespace/slug"
     // or just a slug (Smithery supports both)
     const url = `https://api.smithery.ai/servers/${encodeURIComponent(serverName)}`;
-    
+
     try {
       logger.info(`[SmitherySource] Fetching details from: ${url}`);
       const response = await axios.get(url, { timeout: 10000 });
@@ -886,7 +958,9 @@ export class SmitheryRegistrySource implements RegistrySource {
 
       // Map Smithery detail format to our Manifest format
       const isRemote = !!data.remote;
-      const mcpUrl = data.deploymentUrl || (data.connections && data.connections[0]?.deploymentUrl);
+      const mcpUrl =
+        data.deploymentUrl ||
+        (data.connections && data.connections[0]?.deploymentUrl);
 
       const manifest: Manifest = {
         name: data.qualifiedName || serverName,
@@ -904,20 +978,24 @@ export class SmitheryRegistrySource implements RegistrySource {
         metadata: {
           author: data.namespace,
           repository: data.homepage,
-        }
+        },
       };
 
       return manifest;
     } catch (error: any) {
-      logger.error(`[SmitherySource] Failed to fetch server details: ${error.message}`);
-      throw new Error(`Smithery server "${serverName}" not found or inaccessible: ${error.message}`);
+      logger.error(
+        `[SmitherySource] Failed to fetch server details: ${error.message}`,
+      );
+      throw new Error(
+        `Smithery server "${serverName}" not found or inaccessible: ${error.message}`,
+      );
     }
   }
 
   async searchServices(options: SearchOptions): Promise<SearchResult> {
     const { query = "", limit = 20, offset = 0 } = options;
     const page = Math.floor(offset / limit) + 1;
-    
+
     // Smithery API: GET /servers?q={query}&page={page}&pageSize={pageSize}
     const url = `https://api.smithery.ai/servers?q=${encodeURIComponent(query)}&page=${page}&pageSize=${limit}`;
 
@@ -925,15 +1003,17 @@ export class SmitheryRegistrySource implements RegistrySource {
       logger.info(`[SmitherySource] Searching: ${url}`);
       const response = await axios.get(url, { timeout: 10000 });
       const data = response.data;
-      
+
       const servers = data.servers || [];
       const services: ServiceInfo[] = servers.map((s: any) => ({
         name: s.qualifiedName || s.id,
         description: s.description,
         version: "latest",
         source: "smithery",
-        tags: s.remote ? ["remote", "hosted", "smithery"] : ["stdio", "smithery"],
-        lastUpdated: s.createdAt ? s.createdAt.split('T')[0] : undefined,
+        tags: s.remote
+          ? ["remote", "hosted", "smithery"]
+          : ["stdio", "smithery"],
+        lastUpdated: s.createdAt ? s.createdAt.split("T")[0] : undefined,
       }));
 
       return {
@@ -968,6 +1048,10 @@ export function createRegistrySource(type: string): RegistrySource {
       return new SmitheryRegistrySource();
     case "direct":
       return new DirectRegistrySource();
+    case "sse":
+      return new SSERegistrySource();
+    case "http":
+      return new HTTPRegistrySource();
     default:
       throw new Error(`Unknown registry source type: ${type}`);
   }

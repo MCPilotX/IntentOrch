@@ -193,6 +193,11 @@ export function toOwnerProjectFormat(serverName: string): OwnerProjectFormat {
       if (segments.length >= 2) {
         return buildResult(`${segments[0]}/${segments[1]}`);
       }
+
+      // Fallback for short URLs (e.g., http://localhost:8099/sse)
+      const hostname = url.hostname.replace(/\./g, "-");
+      const lastSegment = segments.pop() || "service";
+      return buildResult(`remote/${hostname}-${lastSegment}`);
     } catch (error) {
       // URL parsing failed, fall through to normal processing
     }
@@ -203,15 +208,22 @@ export function toOwnerProjectFormat(serverName: string): OwnerProjectFormat {
   if (serverName.includes(":")) {
     const parts = serverName.split(":");
     if (parts.length >= 2) {
-      // If source is github/gitee/official, keep owner/project part
       const source = parts[0];
       const rest = parts.slice(1).join(":");
 
-      // For official registry, format might be official:official/12306
-      if (source === "official" && rest.startsWith("official/")) {
-        normalized = rest;
-      } else {
-        normalized = rest;
+      // Skip if it looks like a URL protocol (http, https, file)
+      if (source !== "http" && source !== "https" && source !== "file") {
+        // If rest is a URL, process it as a URL
+        if (rest.startsWith("http://") || rest.startsWith("https://") || rest.startsWith("file://")) {
+          return toOwnerProjectFormat(rest);
+        }
+
+        // For official registry, format might be official:official/12306
+        if (source === "official" && rest.startsWith("official/")) {
+          normalized = rest;
+        } else {
+          normalized = rest;
+        }
       }
     }
   }

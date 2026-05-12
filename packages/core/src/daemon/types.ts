@@ -30,6 +30,7 @@ export interface StartServerResponse {
   status: string;
   logPath: string;
   alreadyRunning?: boolean;
+  external?: boolean;
 }
 
 export interface StopServerRequest {

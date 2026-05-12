@@ -205,6 +205,29 @@ export class ProcessManager {
       );
     }
 
+    // Resolve headers with secrets if any
+    const secretManager = getSecretManager();
+    const headers: Record<string, string> = {};
+    const manifestHeaders = manifest.transport?.headers || manifest.runtime?.headers || {};
+
+    for (const [key, value] of Object.entries(manifestHeaders)) {
+      if (typeof value === "string") {
+        // Support $SECRET_NAME or {{SECRET_NAME}} or just normal string
+        const secretMatch = value.match(/^\$(.+)$/) || value.match(/^\{\{(.+)\}\}$/);
+        if (secretMatch) {
+          const secretName = secretMatch[1];
+          const secretValue = await secretManager.get(secretName);
+          if (secretValue) {
+            headers[key] = secretValue;
+            continue;
+          } else {
+            logger.warn(`Secret "${secretName}" not found for header "${key}"`);
+          }
+        }
+        headers[key] = value;
+      }
+    }
+
     logger.info(
       `Connecting to external service ${manifest.name} (${transportType.toUpperCase()}: ${url})...`,
     );
@@ -212,11 +235,12 @@ export class ProcessManager {
     // Try to connect to the service to verify it's available
     const client = new MCPClient({
       transport: {
-        type: transportType,
+        type: transportType as any,
         url: url,
+        headers: Object.keys(headers).length > 0 ? headers : undefined,
       },
-      timeout: 15000, // Increased from 5s to 15s
-      maxRetries: 2, // Increased retries
+      timeout: 15000, 
+      maxRetries: 2, 
       serverName: manifest.name,
     });
 
