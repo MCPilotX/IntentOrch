@@ -19,10 +19,10 @@ export async function handleConfigRoutes(
       const configService = getConfigService();
       const config = await configService.getAppConfig();
       sendJson(res, 200, { config });
-    } catch (error: any) {
+    } catch (error: unknown) {
       sendJson(res, 500, {
         error: "Failed to get configuration",
-        message: error.message,
+        message: (error instanceof Error ? error.message : String(error)),
       });
     }
     return true;
@@ -61,7 +61,7 @@ export async function handleConfigRoutes(
         success: true,
         message: "Configuration updated successfully",
       });
-    } catch (error: any) {
+    } catch (error: unknown) {
       if (error instanceof SyntaxError) {
         sendJson(res, 400, {
           error: "Invalid JSON",
@@ -70,7 +70,7 @@ export async function handleConfigRoutes(
       } else {
         sendJson(res, 500, {
           error: "Failed to update configuration",
-          message: error.message,
+          message: (error instanceof Error ? error.message : String(error)),
         });
       }
     }

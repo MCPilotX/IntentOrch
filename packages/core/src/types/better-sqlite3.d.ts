@@ -15,14 +15,14 @@ declare module "better-sqlite3" {
   }
 
   interface Statement {
-    run(...params: any[]): { changes: number };
-    get(...params: any[]): any;
-    all(...params: any[]): any[];
+    run(...params: unknown[]): { changes: number };
+    get(...params: unknown[]): unknown;
+    all(...params: unknown[]): unknown[];
   }
 
   interface DatabaseConstructor {
-    new (filename: string, options?: any): Database;
-    (filename: string, options?: any): Database;
+    new (filename: string, options?: Record<string, unknown>): Database;
+    (filename: string, options?: Record<string, unknown>): Database;
     default: DatabaseConstructor;
   }
 

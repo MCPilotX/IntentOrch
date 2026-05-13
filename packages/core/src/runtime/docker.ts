@@ -10,7 +10,7 @@ export interface AdapterOptions {
 export class DockerAdapter {
   private process: ChildProcess | null = null;
   private requestId = 0;
-  private pendingRequests = new Map<number, (res: any) => void>();
+  private pendingRequests = new Map<number, (res: unknown) => void>();
 
   constructor(private options: AdapterOptions) {}
 
@@ -63,7 +63,7 @@ export class DockerAdapter {
     });
   }
 
-  async call(method: string, params: any = {}): Promise<any> {
+  async call(method: string, params: Record<string, unknown> = {}): Promise<unknown> {
     if (!this.process) {
       throw new Error(`Docker service ${this.options.name} is not running.`);
     }

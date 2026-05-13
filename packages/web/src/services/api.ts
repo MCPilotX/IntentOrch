@@ -1,6 +1,6 @@
 import axios from 'axios';
 import type { AxiosInstance, InternalAxiosRequestConfig } from 'axios';
-import type {
+import {
   MCPServer,
   ProcessInfo,
   Config,
@@ -15,6 +15,10 @@ import type {
   ExecuteWorkflowRequest,
   Notification,
   NotificationStats,
+  ExecutionSession,
+  SessionCreateResponse,
+  SessionExecuteResponse,
+  SessionListResponse,
 } from '../types';
 
 import type { 
@@ -93,10 +97,11 @@ class ApiService {
 
   // Server management
   async getServers(): Promise<MCPServer[]> {
-    const response = await this.client.get('/api/servers') as any;
-    const servers = response.servers || [];
+    const response = await this.client.get<{ servers: Record<string, unknown>[] }>('/api/servers');
+    const data = response as { servers?: Record<string, unknown>[] };
+    const servers = data.servers || [];
     
-    return servers.map((server: any) => {
+    return servers.map((server: Record<string, unknown>) => {
       const manifest = server.manifest || {};
       // serverName is the unique key (e.g. smithery:namespace/repo or github:owner/repo)
       // name is the display name from manifest
@@ -131,8 +136,8 @@ class ApiService {
   }
 
   async getServer(id: string): Promise<MCPServer> {
-    const response = await this.client.get(`/api/servers/${id}`) as any;
-    const server = response.server || response;
+    const data = await this.client.get<Record<string, unknown>>(`/api/servers/${id}`);
+    const server = (data as Record<string, unknown>).server as Record<string, unknown> || data;
     
     return {
       id: server.pid?.toString() || server.id || id,
@@ -148,9 +153,9 @@ class ApiService {
 
   async pullServer(request: PullServerRequest): Promise<MCPServer> {
     const backendRequest = { serverNameOrUrl: request.serverName };
-    const response = await this.client.post('/api/servers/pull', backendRequest) as any;
+    const data = await this.client.post<Record<string, unknown>>('/api/servers/pull', backendRequest);
     
-    const server = response.server || response;
+    const server = (data as Record<string, unknown>).server as Record<string, unknown> || data;
     const result: MCPServer = {
       id: server.pid?.toString() || '0',
       name: server.manifest?.name || server.name || server.serverName,
@@ -168,58 +173,106 @@ class ApiService {
   /**
    * Import MCP config (Claude Desktop format)
    */
-  async importConfig(config: string): Promise<{ success: boolean; message: string; imported: any[]; total: number }> {
-    return await this.client.post('/api/servers/import', { config }) as any;
+  async importConfig(config: string): Promise<{ success: boolean; message: string; imported: Record<string, unknown>[]; total: number }> {
+    return await this.client.post('/api/servers/import', { config });
   }
 
   async startServer(request: StartServerRequest): Promise<ProcessInfo> {
-    const response = await this.client.post(`/api/servers`, { serverNameOrUrl: request.serverId }) as any;
+    const data = await this.client.post<Record<string, unknown>>(`/api/servers`, { serverNameOrUrl: request.serverId });
     return {
-      pid: response.pid,
-      serverName: response.name,
-      name: response.name,
-      version: response.version,
-      status: response.status,
-      logPath: response.logPath,
+      pid: data.pid,
+      serverName: data.name,
+      name: data.name,
+      version: data.version,
+      status: data.status,
+      logPath: data.logPath,
       startTime: Date.now(),
       manifest: {
-        name: response.name,
-        version: response.version,
+        name: data.name,
+        version: data.version,
         runtime: { type: "unknown", command: "" }
       }
-    } as any;
+    };
   }
 
   async deleteServer(id: string): Promise<void> {
     await this.client.delete(`/api/servers/${id}`);
   }
 
-  // Execution & AI
-  async parseIntent(intent: string, context?: any): Promise<UnifiedExecutionResult> {
-    const response = await this.client.post('/api/execute/parse-intent', { intent, context }) as any;
-    return response.data || response;
+  // ==================== Session-Based API ====================
+
+  /**
+   * Create a new execution session.
+   */
+  async createSession(query: string, type: 'direct' | 'interactive' = 'direct', metadata?: Record<string, unknown>): Promise<SessionCreateResponse> {
+    return await this.client.post<SessionCreateResponse>('/api/execute/session/create', { query, type, metadata });
+  }
+
+  /**
+   * Execute a session by ID.
+   */
+  async executeSession(sessionId: string, options?: UnifiedExecutionOptions): Promise<SessionExecuteResponse> {
+    return await this.client.post<SessionExecuteResponse>(`/api/execute/session/${sessionId}/execute`, { options });
+  }
+
+  /**
+   * Send feedback for an interactive session.
+   */
+  async sendFeedback(sessionId: string, type: string, message?: string, modifiedPlan?: Record<string, unknown>): Promise<ExecutionSession> {
+    const data = await this.client.post<{ session: ExecutionSession }>(`/api/execute/session/${sessionId}/feedback`, { type, message, modifiedPlan });
+    return data.session;
+  }
+
+  /**
+   * Get a session by ID.
+   */
+  async getSession(sessionId: string): Promise<ExecutionSession> {
+    const data = await this.client.get<{ session: ExecutionSession }>(`/api/execute/session/${sessionId}`);
+    return data.session;
+  }
+
+  /**
+   * List all sessions.
+   */
+  async listSessions(): Promise<SessionListResponse> {
+    return await this.client.get<SessionListResponse>('/api/execute/sessions');
+  }
+
+  /**
+   * Cancel a session.
+   */
+  async cancelSession(sessionId: string): Promise<ExecutionSession> {
+    const data = await this.client.post<{ session: ExecutionSession }>(`/api/execute/session/${sessionId}/cancel`);
+    return data.session;
+  }
+
+  // ==================== Legacy Execution & AI (kept for backward compatibility) ====================
+
+  async parseIntent(intent: string, context?: Record<string, unknown>): Promise<UnifiedExecutionResult> {
+    const response = await this.client.post<UnifiedExecutionResult>('/api/execute/parse-intent', { intent, context });
+    return response;
   }
 
   async executeNaturalLanguage(query: string, options?: UnifiedExecutionOptions): Promise<UnifiedExecutionResult> {
-    return await this.client.post('/api/execute/natural-language', { query, options }) as any;
+    return await this.client.post<UnifiedExecutionResult>('/api/execute/natural-language', { query, options });
   }
 
-  async executeSteps(request: { steps: any[]; options?: UnifiedExecutionOptions }): Promise<UnifiedExecutionResult> {
-    const response = await this.client.post('/api/execute/steps', request) as any;
-    return response.data || response;
+  async executeSteps(request: { steps: Record<string, unknown>[]; options?: UnifiedExecutionOptions }): Promise<UnifiedExecutionResult> {
+    const response = await this.client.post<UnifiedExecutionResult>('/api/execute/steps', request);
+    return response;
   }
 
   // Process management
   async getProcesses(): Promise<ProcessInfo[]> {
-    const response = await this.client.get('/api/servers') as any;
-    const servers = (response.servers || []) as any[];
+    const data = await this.client.get<{ servers: Record<string, unknown>[] }>('/api/servers');
+    const servers = data.servers || [];
     return servers.map(server => ({
       ...server,
-      serverId: server.pid?.toString() || '0',
-      serverName: server.name || server.serverName,
-      status: server.status || 'running',
-      startedAt: server.startTime ? new Date(server.startTime).toISOString() : new Date().toISOString()
-    }));
+      serverId: (server.pid?.toString() as string) || '0',
+      serverName: (server.name as string) || (server.serverName as string),
+      status: (server.status as string) || 'running',
+      startedAt: server.startTime ? new Date(server.startTime as string).toISOString() : new Date().toISOString()
+    } as unknown as ProcessInfo));
   }
 
   async stopProcess(request: StopProcessRequest): Promise<void> {
@@ -227,30 +280,28 @@ class ApiService {
   }
 
   async getProcessLogs(pid: number): Promise<string> {
-    const response = await this.client.get(`/api/servers/${pid}/logs`) as any;
-    return response.logs || '';
+    const data = await this.client.get<{ logs?: string }>(`/api/servers/${pid}/logs`);
+    return data.logs || '';
   }
 
   // Configuration management
   async getConfig(): Promise<Config> {
-    const response = await this.client.get('/api/config') as any;
-    return response.config;
+    return await this.client.get<Config>('/api/config');
   }
 
   async updateConfig(request: UpdateConfigRequest): Promise<Config> {
-    const response = await this.client.put('/api/config', request) as any;
-    return response.config;
+    return await this.client.put<Config>('/api/config', request);
   }
 
   // Secrets management
   async getSecrets(): Promise<Secret[]> {
-    const response = await this.client.get('/api/secrets') as any;
-    return response.secrets || [];
+    const data = await this.client.get<{ secrets: Secret[] }>('/api/secrets');
+    return data.secrets || [];
   }
 
   async createSecret(request: CreateSecretRequest): Promise<Secret> {
-    const response = await this.client.post('/api/secrets', request) as any;
-    return response.secret;
+    const data = await this.client.post<{ secret: Secret }>('/api/secrets', request);
+    return data.secret;
   }
 
   async deleteSecret(name: string): Promise<void> {
@@ -259,19 +310,19 @@ class ApiService {
 
   // Workflow management
   async getWorkflows(): Promise<Workflow[]> {
-    const response = await this.client.get('/api/workflows') as any;
-    return response.workflows || [];
+    const data = await this.client.get<{ workflows: Workflow[] }>('/api/workflows');
+    return data.workflows || [];
   }
 
   async getWorkflow(id: string): Promise<Workflow> {
     const encodedId = encodeURIComponent(id);
-    const response = await this.client.get(`/api/workflows/${encodedId}`) as any;
-    return response.workflow;
+    const data = await this.client.get<{ workflow: Workflow }>(`/api/workflows/${encodedId}`);
+    return data.workflow;
   }
 
   async saveWorkflow(workflow: Workflow): Promise<Workflow> {
-    const response = await this.client.post('/api/workflows', workflow) as any;
-    return response.workflow || response;
+    const response = await this.client.post<Workflow | { workflow: Workflow }>('/api/workflows', workflow);
+    return (response as { workflow?: Workflow }).workflow || (response as Workflow);
   }
 
   async deleteWorkflow(id: string): Promise<void> {
@@ -279,26 +330,26 @@ class ApiService {
     await this.client.delete(`/api/workflows/${encodedId}`);
   }
 
-  async executeWorkflow(request: ExecuteWorkflowRequest): Promise<any> {
+  async executeWorkflow(request: ExecuteWorkflowRequest): Promise<unknown> {
     const encodedId = encodeURIComponent(request.workflowId);
-    return await this.client.post(`/api/workflows/${encodedId}/execute`, request.parameters || {}) as any;
+    return await this.client.post<unknown>(`/api/workflows/${encodedId}/execute`, request.parameters || {});
   }
 
   // System information
   async getSystemStats(): Promise<SystemStats> {
-    const response = await this.client.get('/api/system/stats') as any;
-    return response.stats;
+    const data = await this.client.get<{ stats: SystemStats }>('/api/system/stats');
+    return data.stats;
   }
 
   async getSystemLogs(): Promise<string> {
-    const response = await this.client.get('/api/system/logs') as any;
-    return response.logs || '';
+    const data = await this.client.get<{ logs?: string }>('/api/system/logs');
+    return data.logs || '';
   }
 
   async healthCheck(): Promise<boolean> {
     try {
-      const response = await this.client.get('/api/status') as any;
-      return !!response.running;
+      const data = await this.client.get<{ running?: boolean }>('/api/status');
+      return !!data.running;
     } catch {
       return false;
     }
@@ -315,12 +366,12 @@ class ApiService {
 
   async testAIConfig(config: { provider: string; model: string; apiKey: string; apiEndpoint?: string }): Promise<{ success: boolean; message?: string }> {
     try {
-      const response = await this.client.post('/api/ai/test', config) as any;
-      return { success: true, message: response.message || 'Configuration test successful' };
-    } catch (error: any) {
+      const data = await this.client.post<{ message?: string }>('/api/ai/test', config);
+      return { success: true, message: data.message || 'Configuration test successful' };
+    } catch (error: unknown) {
       return {
         success: false,
-        message: error.message || 'Configuration test failed'
+        message: error instanceof Error ? error.message : 'Configuration test failed'
       };
     }
   }
@@ -328,8 +379,8 @@ class ApiService {
   // Notification management
   async getNotifications(): Promise<Notification[]> {
     try {
-      const response = await this.client.get('/api/notifications') as any;
-      return response.notifications || [];
+      const data = await this.client.get<{ notifications: Notification[] }>('/api/notifications');
+      return data.notifications || [];
     } catch {
       return [];
     }
@@ -340,10 +391,10 @@ class ApiService {
   }
 
   // Search logic (Kept for compatibility, but simplified)
-  async searchServices(query: string, source?: string, limit?: number, offset?: number) {
-    const params: any = { q: query, source, limit, offset };
+  async searchServices(query: string, source?: string, limit?: number, offset?: number): Promise<Record<string, unknown>> {
+    const params: Record<string, unknown> = { q: query, source, limit, offset };
     try {
-      return await this.client.get('/api/servers/search', { params }) as any;
+      return await this.client.get<Record<string, unknown>>('/api/servers/search', { params });
     } catch {
       return { services: [], total: 0, source: source || 'unknown', hasMore: false };
     }

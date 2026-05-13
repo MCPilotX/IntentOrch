@@ -50,7 +50,7 @@ jest.mock("../mcp/parameter-mapper", () => {
 
 describe("CloudIntentEngine", () => {
   let engine: CloudIntentEngine;
-  let mockTools: Tool[];
+  let mockTools: any[];
 
   beforeEach(() => {
     // Reset all mocks including implementations
@@ -83,6 +83,7 @@ describe("CloudIntentEngine", () => {
     mockTools = [
       {
         name: "search_files",
+        serverName: "test-server",
         description: "Search for files matching a pattern",
         inputSchema: {
           type: "object",
@@ -95,6 +96,7 @@ describe("CloudIntentEngine", () => {
       },
       {
         name: "read_file",
+        serverName: "test-server",
         description: "Read the contents of a file",
         inputSchema: {
           type: "object",
@@ -106,6 +108,7 @@ describe("CloudIntentEngine", () => {
       },
       {
         name: "get_weather",
+        serverName: "weather-server",
         description: "Get weather information for a location",
         inputSchema: {
           type: "object",
@@ -150,9 +153,10 @@ describe("CloudIntentEngine", () => {
 
   describe("setAvailableTools", () => {
     it("should set available tools and build cache", () => {
-      const tools: Tool[] = [
+      const tools: any[] = [
         {
           name: "test_tool",
+          serverName: "test-server",
           description: "A test tool",
           inputSchema: {
             type: "object",

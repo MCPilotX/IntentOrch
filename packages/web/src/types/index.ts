@@ -6,11 +6,28 @@ import type {
   Config as CoreConfig,
   AIConfig as CoreAIConfig,
   DaemonResponse as CoreDaemonResponse,
-  RuntimeType
+  RuntimeType,
+  ExecutionSession as CoreExecutionSession,
+  SessionType,
+  SessionState as CoreSessionState,
+  ToolExecutionPlan,
+  PlanStep
 } from '@intentorch/core';
 
 // Re-export core types for convenience
-export type { CoreProcessInfo, CoreWorkflow, CoreWorkflowStep, CoreConfig, CoreAIConfig, CoreDaemonResponse };
+export type { 
+  CoreProcessInfo, 
+  CoreWorkflow, 
+  CoreWorkflowStep, 
+  CoreConfig, 
+  CoreAIConfig, 
+  CoreDaemonResponse,
+  CoreExecutionSession as ExecutionSession,
+  SessionType,
+  CoreSessionState as SessionState,
+  ToolExecutionPlan,
+  PlanStep
+};
 
 // MCP Server related types
 export interface MCPServer {
@@ -26,13 +43,13 @@ export interface MCPServer {
     env?: string[];
   };
   capabilities?: {
-    tools?: any[];
+    tools?: Record<string, unknown>[];
   };
   tools?: Array<{
     name: string;
     description: string;
-    parameters?: Record<string, any>;
-    inputSchema?: any;
+    parameters?: Record<string, unknown>;
+    inputSchema?: Record<string, unknown>;
   }>;
   status: 'not_pulled' | 'pulled' | 'running' | 'stopped' | 'error';
   pulledAt?: string;
@@ -72,7 +89,7 @@ export interface MissingParameter {
   parameterName: string;
   description: string;
   required: boolean;
-  currentValue: any;
+  currentValue: unknown;
   suggestions?: string[];
   validationError?: string;
 }
@@ -80,7 +97,7 @@ export interface MissingParameter {
 export interface UserFeedbackResponse {
   type: 'parameter_value' | 'clarification' | 'confirmation' | 'cancellation';
   parameterName?: string;
-  value?: any;
+  value?: unknown;
   clarification?: string;
   confirmed?: boolean;
   timestamp: Date;
@@ -94,7 +111,7 @@ export interface UserGuidanceMessage {
     id: string;
     label: string;
     description?: string;
-    value?: any;
+    value?: unknown;
   }>;
   requiresResponse: boolean;
   timestamp: Date;
@@ -112,23 +129,23 @@ export interface InteractiveSession {
     parameterName: string;
     isValid: boolean;
     message?: string;
-    suggestedValue?: any;
+    suggestedValue?: unknown;
   }>;
   conversationHistory: Array<{
     role: 'user' | 'system' | 'assistant';
     content: string;
     timestamp: Date;
-    metadata?: Record<string, any>;
+    metadata?: Record<string, unknown>;
   }>;
-  executionResult?: any;
+  executionResult?: unknown;
   error?: string;
   confidence: number;
   turnCount: number;
   createdAt: Date;
   updatedAt: Date;
   completedAt?: Date;
-  parsedIntents?: any[];
-  toolSelections?: any[];
+  parsedIntents?: Record<string, unknown>[];
+  toolSelections?: Record<string, unknown>[];
 }
 
 export type Workflow = CoreWorkflow;
@@ -142,7 +159,30 @@ export interface SystemStats {
   diskUsage: number;
 }
 
-export interface ApiResponse<T = any> {
+export interface SessionCreateResponse {
+  success: boolean;
+  sessionId: string;
+  session: ExecutionSession;
+}
+
+export interface SessionExecuteResponse {
+  success: boolean;
+  result?: unknown;
+  executionSteps?: Record<string, unknown>[];
+  steps?: Record<string, unknown>[];
+  status?: string;
+  confidence?: number;
+  error?: string;
+  session?: ExecutionSession;
+}
+
+export interface SessionListResponse {
+  success: boolean;
+  sessions: ExecutionSession[];
+  total: number;
+}
+
+export interface ApiResponse<T = unknown> {
   success: boolean;
   data?: T;
   error?: string;
@@ -182,7 +222,7 @@ export interface CreateSecretRequest {
 
 export interface ExecuteWorkflowRequest {
   workflowId: string;
-  parameters?: Record<string, any>;
+  parameters?: Record<string, unknown>;
 }
 
 // Notification types

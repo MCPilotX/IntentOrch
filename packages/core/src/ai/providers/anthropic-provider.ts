@@ -45,10 +45,10 @@ export class AnthropicProvider extends BaseLLMProvider {
         success: false,
         message: `API returned error: ${response.status}`,
       };
-    } catch (error: any) {
+    } catch (error: unknown) {
       return {
         success: false,
-        message: `Connection test failed: ${error.message}`,
+        message: `Connection test failed: ${(error instanceof Error ? error.message : String(error))}`,
       };
     }
   }

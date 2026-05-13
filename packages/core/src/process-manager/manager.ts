@@ -81,7 +81,7 @@ export class ProcessManager {
       transportType,
     );
 
-    let spawnOptions: any = {
+    let spawnOptions: Record<string, unknown> = {
       env: { ...process.env, ...envVars },
       shell: false,
     };
@@ -192,7 +192,7 @@ export class ProcessManager {
    * The service must already be running externally.
    */
   private async startExternalService(
-    manifest: any,
+    manifest: Record<string, unknown>,
     serverNameOrUrl: string,
   ): Promise<number> {
     const transportType = manifest.transport?.type || manifest.runtime?.type || "sse";
@@ -235,7 +235,7 @@ export class ProcessManager {
     // Try to connect to the service to verify it's available
     const client = new MCPClient({
       transport: {
-        type: transportType as any,
+        type: transportType as "sse" | "http",
         url: url,
         headers: Object.keys(headers).length > 0 ? headers : undefined,
       },
@@ -259,7 +259,7 @@ export class ProcessManager {
       // Register discovered tools in the registry
       if (tools && tools.length > 0) {
         const toolRegistry = getToolRegistry();
-        await toolRegistry.registerDynamicTools(serverNameOrUrl, tools);
+        await toolRegistry.registerDynamicTools(serverNameOrUrl, tools as unknown as Record<string, unknown>[]);
       }
 
       // Generate a virtual PID (negative number based on URL hash)
@@ -301,7 +301,7 @@ export class ProcessManager {
       logger.info(`  Discovered ${tools.length} tool(s)`);
 
       return virtualPid;
-    } catch (error: any) {
+    } catch (error: unknown) {
       throw new Error(
         `Cannot connect to external service "${manifest.name}"\n\n` +
         `  This service is configured as ${transportType.toUpperCase()} type and must be started manually.\n` +
@@ -332,7 +332,7 @@ export class ProcessManager {
    */
   private async discoverToolsIfSupported(
     serverName: string,
-    manifest: any,
+    manifest: Record<string, unknown>,
     childProcess: ChildProcess,
   ): Promise<void> {
     try {
@@ -378,7 +378,7 @@ export class ProcessManager {
           );
 
           const toolRegistry = getToolRegistry();
-          await toolRegistry.registerDynamicTools(serverName, tools);
+          await toolRegistry.registerDynamicTools(serverName, tools as unknown as Record<string, unknown>[]);
 
           for (const tool of tools.slice(0, 3)) {
             logger.info(`  - ${tool.name}: ${tool.description}`);
@@ -391,18 +391,18 @@ export class ProcessManager {
         }
 
         await client.disconnect();
-      } catch (connectError: any) {
+      } catch (connectError: unknown) {
         logger.warn(
-          `Dynamic tool discovery failed for ${manifest.name}: ${connectError.message}`,
+          `Dynamic tool discovery failed for ${manifest.name}: ${connectError instanceof Error ? connectError.message : String(connectError)}`,
         );
         logger.info(
           `   Tools can still be used via direct MCP protocol calls when needed`,
         );
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       logger.error(
         `Tool discovery error for ${manifest.name}:`,
-        error.message,
+        (error instanceof Error ? error.message : String(error)),
       );
     }
   }

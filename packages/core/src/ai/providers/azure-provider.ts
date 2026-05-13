@@ -46,10 +46,10 @@ export class AzureProvider extends BaseLLMProvider {
         success: false,
         message: `API returned error: ${response.status}`,
       };
-    } catch (error: any) {
+    } catch (error: unknown) {
       return {
         success: false,
-        message: `Connection test failed: ${error.message}`,
+        message: `Connection test failed: ${(error instanceof Error ? error.message : String(error))}`,
       };
     }
   }
@@ -60,7 +60,7 @@ export class AzureProvider extends BaseLLMProvider {
     const apiVersion = this.config?.apiVersion || "2024-02-15-preview";
     const url = `${endpoint}/openai/deployments/${model}/chat/completions?api-version=${apiVersion}`;
 
-    const requestBody: any = {
+    const requestBody: Record<string, unknown> = {
       messages: options.messages,
       temperature: options.temperature ?? 0.1,
       max_tokens: options.maxTokens ?? 1024,

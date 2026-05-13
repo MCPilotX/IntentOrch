@@ -11,13 +11,14 @@
  * It delegates to the new ConfigService while maintaining the old API.
  */
 
-import { ConfigService, getConfigService } from "./config-service.js";
+import { ConfigService, getConfigService, AppConfig } from "./config-service.js";
 import type {
   AIConfig,
   AIProvider,
   ServiceConfig,
   DockerConnectionConfig,
   RuntimeSpecificConfig,
+  RuntimeType,
   DetectionResult,
 } from "./types.js";
 
@@ -162,8 +163,9 @@ export class StaticConfigManagerAdapter {
     const fs = await import("fs/promises");
     try {
       await fs.unlink(configPath);
-    } catch (error: any) {
-      if (error.code !== "ENOENT") {
+    } catch (error: unknown) {
+      const err = error as NodeJS.ErrnoException;
+      if (err.code !== "ENOENT") {
         throw error;
       }
     }
@@ -172,17 +174,17 @@ export class StaticConfigManagerAdapter {
   static async getRuntimeProfile(
     runtime: string,
   ): Promise<RuntimeSpecificConfig | null> {
-    return this.configService.getRuntimeProfile(runtime as any);
+    return this.configService.getRuntimeProfile(runtime as RuntimeType);
   }
 
   static async saveRuntimeProfile(
     runtime: string,
     config: RuntimeSpecificConfig,
   ): Promise<void> {
-    await this.configService.saveRuntimeProfile(runtime as any, config);
+    await this.configService.saveRuntimeProfile(runtime as RuntimeType, config);
   }
 
-  static async getGlobalConfig(): Promise<any> {
+  static async getGlobalConfig(): Promise<Record<string, unknown>> {
     const appConfig = await this.configService.getAppConfig();
     return {
       ai: appConfig.ai,
@@ -191,15 +193,18 @@ export class StaticConfigManagerAdapter {
     };
   }
 
-  static async saveGlobalConfig(config: any): Promise<void> {
+  static async saveGlobalConfig(config: Record<string, unknown>): Promise<void> {
     const appConfig = await this.configService.getAppConfig();
+    const configAi = config.ai as Record<string, unknown> | undefined;
+    const configRegistry = config.registry as Record<string, unknown> | undefined;
+    const configServices = config.services as Record<string, unknown> | undefined;
 
     // Merge with existing config
-    const mergedConfig = {
+    const mergedConfig: AppConfig = {
       ...appConfig,
-      ai: { ...appConfig.ai, ...config.ai },
-      registry: { ...appConfig.registry, ...config.registry },
-      services: { ...appConfig.services, ...config.services },
+      ai: configAi ? { ...appConfig.ai, ...configAi } : appConfig.ai,
+      registry: configRegistry ? { ...appConfig.registry, ...configRegistry } : appConfig.registry,
+      services: configServices ? { ...appConfig.services, ...configServices } : appConfig.services,
     };
 
     await this.configService.saveAppConfig(mergedConfig);
@@ -209,7 +214,7 @@ export class StaticConfigManagerAdapter {
     await this.configService.resetToDefaults();
   }
 
-  static getDefaultGlobalConfig(): any {
+  static getDefaultGlobalConfig(): Record<string, unknown> {
     // Return a simplified default config
     return {
       ai: {

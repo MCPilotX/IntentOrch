@@ -76,7 +76,8 @@ export interface ExecutionStats {
 
 export class ExecutionRecorder {
   private dbPath: string;
-  private db: any = null;
+  // eslint-disable-next-line @typescript-eslint/no-redundant-type-constituents
+  private db: any | null = null;
   private initialized = false;
 
   constructor() {
@@ -149,9 +150,9 @@ export class ExecutionRecorder {
 
       this.initialized = true;
       logger.debug(`[ExecutionRecorder] Initialized at ${this.dbPath}`);
-    } catch (error: any) {
+    } catch (error: unknown) {
       logger.warn(
-        `[ExecutionRecorder] Failed to initialize SQLite (better-sqlite3 may not be installed): ${error.message}`,
+        `[ExecutionRecorder] Failed to initialize SQLite (better-sqlite3 may not be installed): ${(error instanceof Error ? error.message : String(error))}`,
       );
       logger.warn(
         "[ExecutionRecorder] Execution recording will be disabled. Install better-sqlite3 to enable.",
@@ -192,9 +193,9 @@ export class ExecutionRecorder {
         workflow.steps?.length || 0,
         inputs ? JSON.stringify(inputs) : null,
       );
-    } catch (error: any) {
+    } catch (error: unknown) {
       logger.error(
-        `[ExecutionRecorder] Failed to start execution: ${error.message}`,
+        `[ExecutionRecorder] Failed to start execution: ${(error instanceof Error ? error.message : String(error))}`,
       );
     }
   }
@@ -206,7 +207,7 @@ export class ExecutionRecorder {
     executionId: string,
     status: "success" | "failed" | "cancelled",
     error?: string,
-    output?: any,
+    output?: unknown,
   ): Promise<void> {
     if (!this.isAvailable()) return;
 
@@ -234,9 +235,9 @@ export class ExecutionRecorder {
         output ? JSON.stringify(output) : null,
         executionId,
       );
-    } catch (error: any) {
+    } catch (error: unknown) {
       logger.error(
-        `[ExecutionRecorder] Failed to complete execution: ${error.message}`,
+        `[ExecutionRecorder] Failed to complete execution: ${(error instanceof Error ? error.message : String(error))}`,
       );
     }
   }
@@ -268,9 +269,9 @@ export class ExecutionRecorder {
         new Date().toISOString(),
         JSON.stringify(step.parameters),
       );
-    } catch (error: any) {
+    } catch (error: unknown) {
       logger.error(
-        `[ExecutionRecorder] Failed to start step: ${error.message}`,
+        `[ExecutionRecorder] Failed to start step: ${(error instanceof Error ? error.message : String(error))}`,
       );
     }
   }
@@ -282,7 +283,7 @@ export class ExecutionRecorder {
     executionId: string,
     stepIndex: number,
     status: "success" | "failed" | "skipped",
-    result?: any,
+    result?: unknown,
     error?: string,
   ): Promise<void> {
     if (!this.isAvailable()) return;
@@ -327,9 +328,9 @@ export class ExecutionRecorder {
           WHERE id = ?
         `).run(executionId);
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       logger.error(
-        `[ExecutionRecorder] Failed to complete step: ${error.message}`,
+        `[ExecutionRecorder] Failed to complete step: ${(error instanceof Error ? error.message : String(error))}`,
       );
     }
   }
@@ -348,9 +349,9 @@ export class ExecutionRecorder {
       if (!row) return null;
 
       return this.mapExecutionRow(row);
-    } catch (error: any) {
+    } catch (error: unknown) {
       logger.error(
-        `[ExecutionRecorder] Failed to get execution: ${error.message}`,
+        `[ExecutionRecorder] Failed to get execution: ${(error instanceof Error ? error.message : String(error))}`,
       );
       return null;
     }
@@ -370,9 +371,9 @@ export class ExecutionRecorder {
         .all(executionId);
 
       return rows.map(this.mapStepExecutionRow);
-    } catch (error: any) {
+    } catch (error: unknown) {
       logger.error(
-        `[ExecutionRecorder] Failed to get step executions: ${error.message}`,
+        `[ExecutionRecorder] Failed to get step executions: ${(error instanceof Error ? error.message : String(error))}`,
       );
       return [];
     }
@@ -386,7 +387,7 @@ export class ExecutionRecorder {
 
     try {
       let sql = "SELECT * FROM workflow_executions WHERE 1=1";
-      const params: any[] = [];
+      const params: unknown[] = [];
 
       if (query.workflowId) {
         sql += " AND workflow_id = ?";
@@ -416,9 +417,9 @@ export class ExecutionRecorder {
 
       const rows = this.db.prepare(sql).all(...params);
       return rows.map(this.mapExecutionRow);
-    } catch (error: any) {
+    } catch (error: unknown) {
       logger.error(
-        `[ExecutionRecorder] Failed to query executions: ${error.message}`,
+        `[ExecutionRecorder] Failed to query executions: ${(error instanceof Error ? error.message : String(error))}`,
       );
       return [];
     }
@@ -461,9 +462,9 @@ export class ExecutionRecorder {
         totalStepsExecuted: stats.total_steps || 0,
         totalStepsFailed: stats.total_failed || 0,
       };
-    } catch (error: any) {
+    } catch (error: unknown) {
       logger.error(
-        `[ExecutionRecorder] Failed to get stats: ${error.message}`,
+        `[ExecutionRecorder] Failed to get stats: ${(error instanceof Error ? error.message : String(error))}`,
       );
       return {
         totalExecutions: 0,
@@ -502,9 +503,9 @@ export class ExecutionRecorder {
         .run(cutoffStr);
 
       return result.changes;
-    } catch (error: any) {
+    } catch (error: unknown) {
       logger.error(
-        `[ExecutionRecorder] Failed to clean old executions: ${error.message}`,
+        `[ExecutionRecorder] Failed to clean old executions: ${(error instanceof Error ? error.message : String(error))}`,
       );
       return 0;
     }
@@ -536,39 +537,39 @@ export class ExecutionRecorder {
     }
   }
 
-  private mapExecutionRow(row: any): WorkflowExecutionRecord {
+  private mapExecutionRow(row: Record<string, unknown>): WorkflowExecutionRecord {
     return {
-      id: row.id,
-      workflowId: row.workflow_id,
-      workflowName: row.workflow_name,
-      status: row.status,
-      startedAt: row.started_at,
-      completedAt: row.completed_at || undefined,
-      durationMs: row.duration_ms || undefined,
-      error: row.error || undefined,
-      totalSteps: row.total_steps,
-      completedSteps: row.completed_steps,
-      failedSteps: row.failed_steps,
-      inputs: row.inputs || undefined,
-      output: row.output || undefined,
+      id: row.id as string,
+      workflowId: row.workflow_id as string,
+      workflowName: row.workflow_name as string,
+      status: row.status as 'running' | 'success' | 'failed' | 'cancelled',
+      startedAt: row.started_at as string,
+      completedAt: (row.completed_at as string) || undefined,
+      durationMs: (row.duration_ms as number) || undefined,
+      error: (row.error as string) || undefined,
+      totalSteps: row.total_steps as number,
+      completedSteps: row.completed_steps as number,
+      failedSteps: row.failed_steps as number,
+      inputs: (row.inputs as string) || undefined,
+      output: (row.output as string) || undefined,
     };
   }
 
-  private mapStepExecutionRow(row: any): StepExecutionRecord {
+  private mapStepExecutionRow(row: Record<string, unknown>): StepExecutionRecord {
     return {
-      id: row.id,
-      executionId: row.execution_id,
-      stepId: row.step_id,
-      stepIndex: row.step_index,
-      toolName: row.tool_name,
-      serverName: row.server_name || undefined,
-      status: row.status,
-      startedAt: row.started_at || undefined,
-      completedAt: row.completed_at || undefined,
-      durationMs: row.duration_ms || undefined,
-      error: row.error || undefined,
-      input: row.input || undefined,
-      output: row.output || undefined,
+      id: row.id as string,
+      executionId: row.execution_id as string,
+      stepId: row.step_id as string,
+      stepIndex: row.step_index as number,
+      toolName: row.tool_name as string,
+      serverName: (row.server_name as string) || undefined,
+      status: row.status as 'pending' | 'running' | 'success' | 'failed' | 'skipped',
+      startedAt: (row.started_at as string) || undefined,
+      completedAt: (row.completed_at as string) || undefined,
+      durationMs: (row.duration_ms as number) || undefined,
+      error: (row.error as string) || undefined,
+      input: (row.input as string) || undefined,
+      output: (row.output as string) || undefined,
     };
   }
 }

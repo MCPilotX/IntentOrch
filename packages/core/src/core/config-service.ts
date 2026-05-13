@@ -36,6 +36,19 @@ import {
 } from "./types.js";
 import { logger } from "./logger.js";
 
+// Helper to safely extract error code from unknown errors
+function getErrorCode(error: unknown): string | undefined {
+  if (error && typeof error === "object" && "code" in error) {
+    return (error as { code: string }).code;
+  }
+  return undefined;
+}
+
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error) return getErrorMessage(error);
+  return String(error);
+}
+
 // ==================== Type Definitions ====================
 
 export interface RegistryConfig {
@@ -125,9 +138,10 @@ export class ConfigService {
     for (const dir of dirs) {
       try {
         await fs.mkdir(dir, { recursive: true });
-      } catch (error: any) {
-        if (error.code !== "EEXIST") {
-          logger.error(`Failed to create directory ${dir}: ${error.message}`);
+      } catch (error: unknown) {
+        const err = error as NodeJS.ErrnoException;
+        if (err.code !== "EEXIST") {
+          logger.error(`Failed to create directory ${dir}: ${err.message}`);
           throw error;
         }
       }
@@ -199,14 +213,14 @@ export class ConfigService {
       };
 
       return this.appConfigCache!;
-    } catch (error: any) {
-      if (error.code === "ENOENT") {
+    } catch (error: unknown) {
+      if (getErrorCode(error) === "ENOENT") {
         // Config file doesn't exist, return defaults
         const defaultConfig = this.getDefaultAppConfig();
         this.appConfigCache = defaultConfig;
         return defaultConfig;
       }
-      logger.error(`Failed to read app config: ${error.message}`);
+      logger.error(`Failed to read app config: ${getErrorMessage(error)}`);
       throw error;
     }
   }
@@ -304,12 +318,12 @@ export class ConfigService {
       const config = JSON.parse(data);
       this.serviceConfigCache.set(serviceName, config);
       return config;
-    } catch (error: any) {
-      if (error.code === "ENOENT") {
+    } catch (error: unknown) {
+      if (getErrorCode(error) === "ENOENT") {
         return null;
       }
       logger.error(
-        `Failed to read service config for ${serviceName}: ${error.message}`,
+        `Failed to read service config for ${serviceName}: ${getErrorMessage(error)}`,
       );
       throw error;
     }
@@ -325,9 +339,9 @@ export class ConfigService {
       await fs.writeFile(configPath, JSON.stringify(config, null, 2), "utf-8");
       this.serviceConfigCache.set(serviceName, config);
       logger.debug(`Service config saved: ${serviceName}`);
-    } catch (error: any) {
+    } catch (error: unknown) {
       logger.error(
-        `Failed to save service config for ${serviceName}: ${error.message}`,
+        `Failed to save service config for ${serviceName}: ${getErrorMessage(error)}`,
       );
       throw error;
     }
@@ -466,12 +480,12 @@ export class ConfigService {
     try {
       const data = await fs.readFile(cachePath, "utf-8");
       return JSON.parse(data);
-    } catch (error: any) {
-      if (error.code === "ENOENT") {
+    } catch (error: unknown) {
+      if (getErrorCode(error) === "ENOENT") {
         return null;
       }
       logger.error(
-        `Failed to read detection cache for ${serviceName}: ${error.message}`,
+        `Failed to read detection cache for ${serviceName}: ${getErrorMessage(error)}`,
       );
       return null;
     }
@@ -499,9 +513,9 @@ export class ConfigService {
         "utf-8",
       );
       logger.debug(`Detection cache saved for ${serviceName}`);
-    } catch (error: any) {
+    } catch (error: unknown) {
       logger.error(
-        `Failed to save detection cache for ${serviceName}: ${error.message}`,
+        `Failed to save detection cache for ${serviceName}: ${getErrorMessage(error)}`,
       );
     }
   }
@@ -519,11 +533,11 @@ export class ConfigService {
 
       this.servicesListCache = services;
       return services;
-    } catch (error: any) {
-      if (error.code === "ENOENT") {
+    } catch (error: unknown) {
+      if (getErrorCode(error) === "ENOENT") {
         return [];
       }
-      logger.error(`Failed to list services: ${error.message}`);
+      logger.error(`Failed to list services: ${getErrorMessage(error)}`);
       throw error;
     }
   }
@@ -544,12 +558,12 @@ export class ConfigService {
       const config = JSON.parse(data);
       this.dockerHostsCache.set(hostName, config);
       return config;
-    } catch (error: any) {
-      if (error.code === "ENOENT") {
+    } catch (error: unknown) {
+      if (getErrorCode(error) === "ENOENT") {
         return null;
       }
       logger.error(
-        `Failed to read Docker host config ${hostName}: ${error.message}`,
+        `Failed to read Docker host config ${hostName}: ${getErrorMessage(error)}`,
       );
       throw error;
     }
@@ -565,9 +579,9 @@ export class ConfigService {
       await fs.writeFile(configPath, JSON.stringify(config, null, 2), "utf-8");
       this.dockerHostsCache.set(hostName, config);
       logger.debug(`Docker host config saved: ${hostName}`);
-    } catch (error: any) {
+    } catch (error: unknown) {
       logger.error(
-        `Failed to save Docker host config ${hostName}: ${error.message}`,
+        `Failed to save Docker host config ${hostName}: ${getErrorMessage(error)}`,
       );
       throw error;
     }
@@ -589,12 +603,12 @@ export class ConfigService {
       const config = JSON.parse(data);
       this.runtimeProfilesCache.set(runtime, config);
       return config;
-    } catch (error: any) {
-      if (error.code === "ENOENT") {
+    } catch (error: unknown) {
+      if (getErrorCode(error) === "ENOENT") {
         return null;
       }
       logger.error(
-        `Failed to read runtime profile for ${runtime}: ${error.message}`,
+        `Failed to read runtime profile for ${runtime}: ${getErrorMessage(error)}`,
       );
       throw error;
     }
@@ -610,9 +624,9 @@ export class ConfigService {
       await fs.writeFile(configPath, JSON.stringify(config, null, 2), "utf-8");
       this.runtimeProfilesCache.set(runtime, config);
       logger.debug(`Runtime profile saved: ${runtime}`);
-    } catch (error: any) {
+    } catch (error: unknown) {
       logger.error(
-        `Failed to save runtime profile for ${runtime}: ${error.message}`,
+        `Failed to save runtime profile for ${runtime}: ${getErrorMessage(error)}`,
       );
       throw error;
     }
@@ -631,8 +645,8 @@ export class ConfigService {
         });
         this.isLocked = true;
         return;
-      } catch (error: any) {
-        if (error.code === "EEXIST") {
+      } catch (error: unknown) {
+        if (getErrorCode(error) === "EEXIST") {
           if (attempt === maxAttempts - 1) {
             throw new Error(
               "Configuration storage is locked by another process.",
@@ -705,8 +719,8 @@ export class ConfigService {
       return files
         .filter((file) => file.endsWith(".json"))
         .map((file) => file.replace(".json", ""));
-    } catch (error: any) {
-      if (error.code === "ENOENT") {
+    } catch (error: unknown) {
+      if (getErrorCode(error) === "ENOENT") {
         return [];
       }
       throw error;
@@ -720,8 +734,8 @@ export class ConfigService {
         .filter((file) => file.endsWith(".json"))
         .map((file) => file.replace(".json", "") as RuntimeType)
         .filter((runtime) => Object.values(RuntimeTypes).includes(runtime));
-    } catch (error: any) {
-      if (error.code === "ENOENT") {
+    } catch (error: unknown) {
+      if (getErrorCode(error) === "ENOENT") {
         return [];
       }
       throw error;

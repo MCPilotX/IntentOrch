@@ -8,20 +8,20 @@ interface ToolCallModalProps {
   tool: {
     name: string;
     description: string;
-    parameters?: Record<string, any>;
+    parameters?: Record<string, unknown>;
   };
-  onExecute: (params: Record<string, any>) => Promise<any>;
+  onExecute: (params: Record<string, unknown>) => Promise<unknown>;
 }
 
 const ToolCallModal: React.FC<ToolCallModalProps> = ({ isOpen, onClose, serverName, tool, onExecute }) => {
-  const [params, setParams] = useState<Record<string, any>>({});
+  const [params, setParams] = useState<Record<string, unknown>>({});
   const [isExecuting, setIsExecuting] = useState(false);
-  const [result, setResult] = useState<any>(null);
+  const [result, setResult] = useState<unknown>(null);
   const [error, setError] = useState<string | null>(null);
 
   if (!isOpen) return null;
 
-  const handleParamChange = (name: string, value: any, type: string) => {
+  const handleParamChange = (name: string, value: string | boolean, type: string) => {
     let normalizedValue = value;
     if (type === 'number') normalizedValue = parseFloat(value);
     if (type === 'boolean') normalizedValue = value === 'true' || value === true;
@@ -41,8 +41,8 @@ const ToolCallModal: React.FC<ToolCallModalProps> = ({ isOpen, onClose, serverNa
     try {
       const data = await onExecute(params);
       setResult(data);
-    } catch (err: any) {
-      setError(err.message || 'Execution failed');
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Execution failed');
     } finally {
       setIsExecuting(false);
     }
@@ -77,7 +77,7 @@ const ToolCallModal: React.FC<ToolCallModalProps> = ({ isOpen, onClose, serverNa
 
           <form id="tool-call-form" onSubmit={handleSubmit} className="space-y-4">
             {tool.parameters && Object.keys(tool.parameters).length > 0 ? (
-              Object.entries(tool.parameters).map(([name, schema]: [string, any]) => (
+              Object.entries(tool.parameters).map(([name, schema]: [string, Record<string, unknown>]) => (
                 <div key={name} className="space-y-1.5">
                   <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300">
                     {name}

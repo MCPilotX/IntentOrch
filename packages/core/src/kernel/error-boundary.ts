@@ -2,6 +2,9 @@
  * Global Error Boundary
  *
  * Provides a unified error handling layer for all MCP operations.
+ * INTEGRATED with IntentOrchError — all errors output from this boundary
+ * are IntentOrchError instances, providing a single error type across the system.
+ *
  * Features:
  * 1. Automatic error classification and categorization
  * 2. Graceful degradation with fallback strategies
@@ -12,6 +15,11 @@
 
 import { logger } from "../core/logger.js";
 import type { Tool } from "../mcp/types.js";
+import {
+  IntentOrchError,
+  ErrorCode,
+  ErrorSeverity,
+} from "../core/error-handler.js";
 
 // ==================== Type Definitions ====================
 
@@ -61,15 +69,46 @@ export interface ErrorBoundaryConfig {
   enableAutoRecovery: boolean;
 }
 
-export interface ErrorBoundaryResult<T = any> {
+export interface ErrorBoundaryResult<T = unknown> {
   success: boolean;
   result?: T;
-  error?: Error;
+  /** error is always an IntentOrchError when success is false */
+  error?: IntentOrchError;
   classification: ErrorClassification;
   retryCount: number;
   recoveryAttempted: boolean;
   recoverySuccessful?: boolean;
   duration: number;
+}
+
+/**
+ * Map an ErrorCategory to the most appropriate ErrorCode
+ */
+function categoryToErrorCode(category: ErrorCategory): ErrorCode {
+  switch (category) {
+    case "connection":
+      return ErrorCode.CONNECTION_REFUSED;
+    case "timeout":
+      return ErrorCode.CONNECTION_TIMEOUT;
+    case "authentication":
+      return ErrorCode.AI_CONFIG_INVALID;
+    case "authorization":
+      return ErrorCode.PERMISSION_DENIED;
+    case "rate_limited":
+      return ErrorCode.RESOURCE_LIMIT_EXCEEDED;
+    case "invalid_parameters":
+      return ErrorCode.VALIDATION_FAILED;
+    case "resource_not_found":
+      return ErrorCode.TOOL_NOT_FOUND;
+    case "server_error":
+      return ErrorCode.SERVICE_HEALTH_CHECK_FAILED;
+    case "network_error":
+      return ErrorCode.NETWORK_ERROR;
+    case "protocol_error":
+      return ErrorCode.CONFIG_INVALID;
+    default:
+      return ErrorCode.UNEXPECTED_ERROR;
+  }
 }
 
 // ==================== Error Classification Patterns ====================
@@ -254,9 +293,6 @@ export class ErrorBoundary {
       try {
         const result = await operation();
 
-        // Circuit breaker integration is handled by MCPClient.sendRequest
-        // which wraps calls through circuitBreaker.call()
-
         const duration = Date.now() - startTime;
         return {
           success: true,
@@ -273,15 +309,15 @@ export class ErrorBoundary {
           recoverySuccessful,
           duration,
         };
-      } catch (error: any) {
-        lastError = error;
-        const classification = this.classifyError(error);
+      } catch (error: unknown) {
+        lastError = error instanceof Error ? error : new Error(String(error));
+        const classification = this.classifyError(lastError);
 
         if (this.config.verboseLogging) {
           logger.warn(
             `[ErrorBoundary] Attempt ${attempt}/${this.config.maxRetries + 1} failed for ${context.operationName}`,
             {
-              error: error.message,
+              error: lastError.message,
               category: classification.category,
               isRetryable: classification.isRetryable,
               serverName: context.serverName,
@@ -289,9 +325,6 @@ export class ErrorBoundary {
             },
           );
         }
-
-        // Circuit breaker integration is handled by MCPClient.sendRequest
-        // which wraps calls through circuitBreaker.call()
 
         // Check if we should retry
         if (classification.isRetryable && attempt <= this.config.maxRetries) {
@@ -318,10 +351,10 @@ export class ErrorBoundary {
               classification,
               context,
             );
-          } catch (recoveryError: any) {
+          } catch (recoveryError: unknown) {
             if (this.config.verboseLogging) {
               logger.warn(
-                `[ErrorBoundary] Recovery failed for ${context.operationName}: ${recoveryError.message}`,
+                `[ErrorBoundary] Recovery failed for ${context.operationName}: ${recoveryError instanceof Error ? recoveryError.message : String(recoveryError)}`,
               );
             }
             recoverySuccessful = false;
@@ -329,9 +362,11 @@ export class ErrorBoundary {
         }
 
         const duration = Date.now() - startTime;
+        // Wrap the raw Error into IntentOrchError for unified error handling
+        const orchError = this.wrapToIntentOrchError(lastError, classification, context);
         return {
           success: false,
-          error: lastError,
+          error: orchError,
           classification,
           retryCount,
           recoveryAttempted,
@@ -345,7 +380,12 @@ export class ErrorBoundary {
     const duration = Date.now() - startTime;
     return {
       success: false,
-      error: lastError || new Error("Unknown error"),
+      error: new IntentOrchError(
+        ErrorCode.UNEXPECTED_ERROR,
+        "Unknown error after all retries",
+        ErrorSeverity.CRITICAL,
+        { operationName: context.operationName },
+      ),
       classification: {
         category: "unknown",
         isRetryable: false,
@@ -364,7 +404,7 @@ export class ErrorBoundary {
    * Classify an error into a category
    */
   classifyError(error: Error): ErrorClassification {
-    const message = error.message || String(error);
+    const message = (error instanceof Error ? error.message : String(error)) || String(error);
 
     for (const pattern of ERROR_PATTERNS) {
       for (const regex of pattern.patterns) {
@@ -470,6 +510,57 @@ export class ErrorBoundary {
   /**
    * Get suggested action for an error category
    */
+  /**
+   * Wrap a raw Error into an IntentOrchError with proper code, severity, and context
+   */
+  private wrapToIntentOrchError(
+    error: Error,
+    classification: ErrorClassification,
+    context: {
+      serverName?: string;
+      toolName?: string;
+      operationName: string;
+    },
+  ): IntentOrchError {
+    // If already an IntentOrchError, preserve it
+    if (error instanceof IntentOrchError) {
+      return error;
+    }
+
+    const errorCode = categoryToErrorCode(classification.category);
+    const severity =
+      classification.category === "server_error" ||
+      classification.category === "authentication" ||
+      classification.category === "authorization"
+        ? ErrorSeverity.HIGH
+        : classification.category === "connection" ||
+            classification.category === "network_error"
+          ? ErrorSeverity.MEDIUM
+          : ErrorSeverity.LOW;
+
+    return new IntentOrchError(
+      errorCode,
+      error.message,
+      severity,
+      {
+        serverName: context.serverName,
+        toolName: context.toolName,
+        operationName: context.operationName,
+        category: classification.category,
+      },
+      classification.suggestedAction
+        ? [
+            {
+              title: classification.suggestedAction.split(".")[0],
+              description: classification.suggestedAction,
+              steps: [classification.suggestedAction],
+            },
+          ]
+        : [],
+      error,
+    );
+  }
+
   private getSuggestedAction(category: ErrorCategory): string {
     switch (category) {
       case "connection":

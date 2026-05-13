@@ -16,14 +16,14 @@ export function isProcessRunning(pid: number): boolean {
     // On Windows and POSIX, signal 0 can be used to test for the existence of a process.
     process.kill(pid, 0);
     return true;
-  } catch (error: any) {
+  } catch (error: unknown) {
     // ESRCH means the process does not exist.
     // EPERM means the process exists but we don't have permission to send a signal to it.
-    if (error.code === "EPERM") {
+    if ((error && typeof error === "object" && "code" in error ? (error as { code: string }).code : undefined) === "EPERM") {
       return true;
     }
     // If signal 0 fails with ESRCH, process doesn't exist
-    if (error.code === "ESRCH") {
+    if ((error && typeof error === "object" && "code" in error ? (error as { code: string }).code : undefined) === "ESRCH") {
       return false;
     }
     // For other errors, try other methods

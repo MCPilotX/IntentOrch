@@ -31,10 +31,10 @@ export abstract class OpenAICompatibleProvider extends BaseLLMProvider {
         success: false,
         message: `API returned error: ${response.status}`,
       };
-    } catch (error: any) {
+    } catch (error: unknown) {
       return {
         success: false,
-        message: `Connection test failed: ${error.message}`,
+        message: `Connection test failed: ${(error instanceof Error ? error.message : String(error))}`,
       };
     }
   }
@@ -46,7 +46,7 @@ export abstract class OpenAICompatibleProvider extends BaseLLMProvider {
     const baseUrl = this.getBaseUrl();
     const model = this.getModel();
 
-    const requestBody: any = {
+    const requestBody: Record<string, unknown> = {
       model,
       messages: options.messages,
       temperature: options.temperature ?? 0.1,
@@ -82,7 +82,7 @@ export abstract class OpenAICompatibleProvider extends BaseLLMProvider {
     return {
       text: raw.choices?.[0]?.message?.content || "",
       raw,
-      provider: this.name as any,
+      provider: this.name as unknown as import("../../core/types.js").AIProvider,
       model,
       toolCalls: raw.choices?.[0]?.message?.tool_calls || undefined,
     };

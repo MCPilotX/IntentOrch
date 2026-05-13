@@ -50,8 +50,8 @@ export class ProcessStoreManager {
         JSON.stringify(store, null, 2),
         "utf-8",
       );
-    } catch (err: any) {
-      if (err.code === "EEXIST") {
+    } catch (err: unknown) {
+      if ((err && typeof err === "object" && "code" in err ? (err as { code: string }).code : undefined) === "EEXIST") {
         throw new Error("Process storage is locked by another process.");
       }
       throw err;

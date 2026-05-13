@@ -12,6 +12,7 @@
 import http from "http";
 import { getSecretManager } from "../../secret/manager.js";
 import { sendJson, type RouteContext } from "./index.js";
+import { logger } from "../../core/logger.js";
 
 // ==================== CORS Middleware ====================
 
@@ -36,9 +37,11 @@ export function corsMiddleware(
 export function optionsHandler(ctx: RouteContext): boolean {
   if (ctx.method === "OPTIONS") {
     ctx.res.writeHead(200).end();
-    return true;
+    // OPTIONS handled, short-circuit the middleware chain
+    return false;
   }
-  return false;
+  // Non-OPTIONS requests: pass through
+  return true;
 }
 
 // ==================== Auth Middleware ====================
@@ -80,7 +83,7 @@ export async function bodyParserMiddleware(ctx: RouteContext): Promise<boolean> 
 
 export function loggingMiddleware(ctx: RouteContext): boolean {
   if (ctx.method !== "OPTIONS") {
-    console.log(`[Daemon] ${ctx.method} ${ctx.path}`);
+    logger.info(`[Daemon] ${ctx.method} ${ctx.path}`);
   }
   return true;
 }
@@ -102,7 +105,7 @@ export function errorHandlerMiddleware(
   error: unknown,
 ): void {
   const { res } = ctx;
-  console.error("[Daemon Error]", error);
+  logger.error("[Daemon Error]", error);
   sendJson(res, 500, {
     error: "Internal Error",
     message: (error as Error).message,

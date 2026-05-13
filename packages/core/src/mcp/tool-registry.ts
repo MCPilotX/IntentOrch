@@ -7,7 +7,7 @@ import { Tool, ToolCall, ToolResult } from "./types.js";
 import { ParameterMapper } from "./parameter-mapper.js";
 
 export interface ToolExecutor {
-  (args: Record<string, any>): Promise<ToolResult>;
+  (args: Record<string, unknown>): Promise<ToolResult>;
 }
 
 export interface RegisteredTool {
@@ -329,7 +329,7 @@ export class ToolRegistry {
 
   // ==================== Tool Validation ====================
 
-  private validateToolArguments(tool: Tool, args: Record<string, any>): void {
+  private validateToolArguments(tool: Tool, args: Record<string, unknown>): void {
     const schema = tool.inputSchema;
     const toolName = tool.name;
 

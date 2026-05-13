@@ -30,7 +30,7 @@ export interface CloudIntentEngineOptions {
   fallback?: {
     enableKeywordMatching?: boolean;
     askUserOnFailure?: boolean;
-    defaultTools?: Record<string, any>;
+    defaultTools?: Record<string, unknown>;
   };
 
   /**
@@ -67,7 +67,7 @@ export async function createCloudIntentEngine(
 
       // Fallback to environment variables
       aiConfig = {
-        provider: (process.env.LLM_PROVIDER as any) || "deepseek",
+        provider: (process.env.LLM_PROVIDER as string) || "deepseek",
         apiKey: process.env.LLM_API_KEY || process.env.DEEPSEEK_API_KEY,
         model: process.env.LLM_MODEL || "deepseek-chat",
         apiEndpoint: process.env.LLM_API_ENDPOINT || "",
@@ -96,7 +96,7 @@ export async function createCloudIntentEngine(
   // Build the CloudIntentEngine configuration
   const config = {
     llm: {
-      provider: aiConfig.provider as any, // Type assertion to avoid import issues
+      provider: aiConfig.provider as string, // Type assertion to avoid import issues
       apiKey: aiConfig.apiKey,
       model: aiConfig.model || "gpt-3.5-turbo",
       endpoint: aiConfig.apiEndpoint || "",
@@ -119,7 +119,7 @@ export async function createCloudIntentEngine(
       ...options.fallback,
     },
     parameterMapping: {
-      validationLevel: "warning" as any, // Type assertion for compatibility
+      validationLevel: "warning" as const, // Type assertion for compatibility
       enableCompatibilityMappings: true,
       logWarnings: true,
       enforceRequired: false,

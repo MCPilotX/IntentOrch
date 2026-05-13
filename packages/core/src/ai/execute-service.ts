@@ -1,46 +1,89 @@
 /**
- * Execute Service
+ * Execute Service — Facade Pattern
  *
- * Provides a unified interface for both CLI and Web to use the same underlying
- * execution capabilities as the CLI run command.
+ * UNIFIED entry point for ALL execution flows.
  *
- * This service bridges the gap between:
- * 1. CLI's powerful run command (using CloudIntentEngine directly)
- * 2. Web's limited intent parsing (using IntentService)
+ * This is a Facade that delegates to focused sub-components:
+ * - SessionOrchestrator: Interactive session lifecycle (create, feedback, etc.)
+ * - ReActLoopEngine: Multi-turn LLM function calling loop
+ * - WorkflowOrchestrator: Deterministic workflow execution
+ * - PlanExecutor: Intent parsing and step execution
+ * - DaemonDelegator: Daemon process delegation
  *
- * Key features:
- * - Full CloudIntentEngine capabilities for both CLI and Web
- * - Automatic server management and connection
- * - Complete workflow execution with tracking
- * - Support for natural language, JSON files, and named workflows
+ * Architecture:
+ * ExecuteService (Facade)
+ *   ├── SessionOrchestrator (interactive session lifecycle)
+ *   ├── ReActLoopEngine (ReAct multi-turn loop)
+ *   ├── WorkflowOrchestrator (workflow execution)
+ *   ├── PlanExecutor (intent parsing, step execution)
+ *   └── DaemonDelegator (daemon delegation)
  *
- * Uses the new Plan → Confirm → Execute pipeline (replaces old parseAndPlan + executeWorkflowWithTracking).
+ * All complex logic has been extracted into the dedicated components above.
+ * This class only handles orchestration and delegation.
  */
 
 import { CloudIntentEngine } from "./cloud-intent-engine.js";
-import { getToolRegistry } from "../tool-registry/registry.js";
-import { getProcessManager } from "../process-manager/manager.js";
-import { getRegistryClient } from "../registry/client.js";
-import { getWorkflowManager } from "../workflow/manager.js";
-import { WorkflowEngine } from "../workflow/engine.js";
-import { AutoStartManager } from "../utils/auto-start-manager.js";
+import { getSessionManager } from "../execution/session-manager.js";
+import { getSessionStore } from "../execution/session-store.js";
+import { getToolExecutor } from "../execution/tool-executor/index.js";
+import { getParameterNormalizer } from "../execution/parameter-normalizer/index.js";
 import { getConfigService } from "../core/config-service.js";
 import { createCloudIntentEngine } from "../utils/cloud-intent-engine-factory.js";
-import { MCPClient } from "../mcp/client.js";
+import { DatabaseManager } from "../utils/sqlite.js";
+import { IntentOrchError, ErrorCode } from "../core/error-handler.js";
 import { logger } from "../core/logger.js";
-import {
-  IntentOrchError,
-  ErrorFactory,
-  ErrorCode,
-} from "../core/error-handler.js";
-import { Timeouts, KnownServers } from "../core/constants.js";
 
 import type { AIConfig } from "../core/types.js";
+import type { ToolExecutionPlan } from "./cloud-intent-engine.js";
+import type {
+  ExecutionSession,
+  SessionType,
+  ConversationMessage,
+  StepResult,
+  CreateSessionRequest,
+  FeedbackRequest,
+} from "../execution/types.js";
 
-// Server connection info
-interface ConnectedServer {
-  name: string;
-  client: MCPClient;
+// Import focused sub-components
+import {
+  ReActLoopEngine,
+  PlanExecutor,
+  SessionOrchestrator,
+  WorkflowOrchestrator,
+  DaemonDelegator,
+} from "./executor/index.js";
+
+// ==================== Re-usable result types ====================
+
+/** A single execution step record used for execution results */
+export interface StepExecutionRecord {
+  name?: string;
+  toolName: string;
+  success: boolean;
+  result?: unknown;
+  error?: string;
+  duration: number;
+}
+
+/** A plan step with its parameters — used before execution */
+export interface PlanStepRecord {
+  id: string;
+  type?: string;
+  serverName?: string;
+  serverId?: string;
+  toolName: string;
+  description?: string;
+  parameters?: Record<string, unknown>;
+  dependsOn?: string[];
+}
+
+/** Execution statistics */
+export interface ExecutionStatistics {
+  totalSteps: number;
+  successfulSteps: number;
+  failedSteps: number;
+  totalDuration: number;
+  averageStepDuration: number;
 }
 
 // Execution options
@@ -49,56 +92,72 @@ export interface UnifiedExecutionOptions {
   keepAlive?: boolean;
   silent?: boolean;
   simulate?: boolean;
-  params?: Record<string, any>;
+  params?: Record<string, unknown>;
+  /** Skip delegation to daemon process. Used internally to prevent infinite loops. */
+  skipDaemonDelegation?: boolean;
+  /**
+   * Maximum number of ReAct turns for multi-turn LLM function calling.
+   * Default: 10 (covers most complex scenarios)
+   * Set to 0 to skip ReAct loop entirely (plan-only mode).
+   */
+  maxReActTurns?: number;
 }
 
 // Execution result
 export interface UnifiedExecutionResult {
   success: boolean;
-  result?: any;
-  executionSteps?: any[];
-  steps?: any[]; // For web compatibility
-  status?: string; // For web compatibility
-  confidence?: number; // For web compatibility
+  result?: unknown;
+  executionSteps?: StepExecutionRecord[];
+  steps?: PlanStepRecord[];
+  status?: string;
+  confidence?: number;
   error?: string;
-  statistics?: {
-    totalSteps: number;
-    successfulSteps: number;
-    failedSteps: number;
-    totalDuration: number;
-    averageStepDuration: number;
-  };
+  statistics?: ExecutionStatistics;
 }
 
 // Workflow execution result
 export interface WorkflowExecutionResult {
   success: boolean;
-  results?: any;
+  results?: unknown;
   error?: string;
 }
 
+// Re-export sub-component types for convenience
+export { ReActLoopEngine, PlanExecutor, SessionOrchestrator, WorkflowOrchestrator, DaemonDelegator };
+
 /**
- * Execute Service
+ * Execute Service — orchestrator for all execution flows.
  */
 export class ExecuteService {
+  // Sub-component instances (lazy-initialized)
   private cloudIntentEngine: CloudIntentEngine | null = null;
-  private connectedServers: Map<string, ConnectedServer> = new Map();
   private aiConfig: AIConfig | null = null;
   private initPromise: Promise<void> | null = null;
+  private sessionManager = getSessionManager();
+  private toolExecutor = getToolExecutor();
+  private parameterNormalizer = getParameterNormalizer();
+
+  // Focused sub-components
+  private reactLoopEngine = new ReActLoopEngine();
+  private planExecutor = new PlanExecutor();
+  private sessionOrchestrator = new SessionOrchestrator();
+  private workflowOrchestrator = new WorkflowOrchestrator();
+  private daemonDelegator = new DaemonDelegator();
 
   constructor() {
     logger.debug("[ExecuteService] Creating service instance");
   }
 
   /**
-   * Initialize the service with AI configuration
+   * Initialize the service with AI configuration.
    */
   async initialize(aiConfig?: AIConfig): Promise<void> {
     logger.debug("[ExecuteService] Initializing service");
 
     if (!this.initPromise) {
       this.initPromise = (async () => {
-        // Use provided AI config or get from system
+        await DatabaseManager.getInstance().initialize();
+
         this.aiConfig = aiConfig || (await getConfigService().getAIConfig());
 
         if (!this.aiConfig.provider) {
@@ -108,7 +167,6 @@ export class ExecuteService {
           );
         }
 
-        // For Ollama, apiKey is not required
         if (this.aiConfig.provider !== "ollama" && !this.aiConfig.apiKey) {
           throw new IntentOrchError(
             ErrorCode.AI_NOT_CONFIGURED,
@@ -116,10 +174,16 @@ export class ExecuteService {
           );
         }
 
-        // Create CloudIntentEngine using the unified factory
         this.cloudIntentEngine = await createCloudIntentEngine({
           aiConfig: this.aiConfig,
         });
+
+        try {
+          getSessionStore().startAutoCleanup();
+          logger.debug("[ExecuteService] Session auto-cleanup started");
+        } catch (cleanupError: unknown) {
+          logger.warn(`[ExecuteService] Failed to start session auto-cleanup: ${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`);
+        }
 
         logger.debug("[ExecuteService] Service initialized successfully");
       })();
@@ -128,100 +192,66 @@ export class ExecuteService {
     await this.initPromise;
   }
 
-  /**
-   * Execute natural language query using Plan → Confirm → Execute pipeline.
-   *
-   * This is the recommended entry point. It uses the new Plan-then-Execute flow:
-   * 1. **Plan**: Uses LLM function calling to generate a structured execution plan (DAG)
-   * 2. **Confirm**: Validates the plan and optionally asks for user confirmation
-   * 3. **Execute**: Executes steps in dependency order with variable substitution
-   */
-  async executeNaturalLanguage(
+  // ==================== Session-Based Execution ====================
+
+  async createSession(
     query: string,
+    type: SessionType = "direct",
+    metadata?: Record<string, unknown>,
+  ): Promise<ExecutionSession> {
+    logger.info(`[ExecuteService] Creating ${type} session for query: "${query.substring(0, 100)}..."`);
+
+    const request: CreateSessionRequest = { query, type, metadata };
+    return this.sessionManager.createSession(request);
+  }
+
+  async getSession(sessionId: string): Promise<ExecutionSession | null> {
+    return this.sessionManager.getSession(sessionId);
+  }
+
+  async sendFeedback(
+    sessionId: string,
+    feedback: FeedbackRequest,
+  ): Promise<ExecutionSession> {
+    logger.info(`[ExecuteService] Sending feedback for session ${sessionId}: ${feedback.type}`);
+    return this.sessionManager.handleFeedback(sessionId, feedback);
+  }
+
+  async executeSession(
+    sessionId: string,
     options: UnifiedExecutionOptions = {},
   ): Promise<UnifiedExecutionResult> {
-    logger.info(
-      `[ExecuteService] Executing natural language query: "${query.substring(0, 100)}..."`,
-    );
-
-    // Check if daemon is running and we should delegate to it
-    // We skip delegation if we're already running inside the daemon to avoid recursion
-    const isDaemonProcess = process.env.INTORCH_DAEMON === "true";
-    if (!isDaemonProcess && !options.simulate) {
-      try {
-        const { DaemonClient } = await import("../daemon/client.js");
-        const daemonClient = new DaemonClient();
-
-        // Active check via API heartbeat
-        const isRunning = await daemonClient.isDaemonRunning();
-        logger.info(
-          `[ExecuteService] Checking daemon status via API: ${isRunning ? "Online" : "Offline"}`,
-        );
-
-        if (isRunning) {
-          logger.info(
-            "[ExecuteService] Daemon is online, delegating execution for better performance",
-          );
-          try {
-            const result = await daemonClient.executeNaturalLanguage(
-              query,
-              options,
-            );
-            logger.info(
-              "[ExecuteService] Execution delegated to daemon successfully",
-            );
-            return result as UnifiedExecutionResult;
-          } catch (daemonError: any) {
-            logger.warn(
-              `[ExecuteService] Daemon delegation failed: ${daemonError.message}, falling back to local execution`,
-            );
-          }
-        }
-      } catch (err: any) {
-        logger.info(
-          `[ExecuteService] Failed to check daemon status: ${err.message}`,
-        );
-      }
-    }
+    logger.info(`[ExecuteService] Executing session: ${sessionId}`);
 
     try {
-      // Ensure service is initialized
       await this.initialize();
 
       if (!this.cloudIntentEngine) {
-        throw new IntentOrchError(
-          ErrorCode.ENGINE_NOT_INITIALIZED,
-          "CloudIntentEngine not initialized",
-        );
+        throw new IntentOrchError(ErrorCode.ENGINE_NOT_INITIALIZED, "CloudIntentEngine not initialized");
       }
+
+      const session = await this.sessionManager.getSession(sessionId);
+      if (!session) {
+        return { success: false, error: `Session not found: ${sessionId}` };
+      }
+
+      // Clear cache at start of each session
+      this.toolExecutor.clearToolResultCache();
 
       // Handle auto-start if requested
       if (options.autoStart) {
-        await this.handleAutoStart(query, options);
+        await this.toolExecutor.handleAutoStart(session.query, options);
       }
 
-      // Connect to running MCP servers or use simulation mode
+      // Connect to running MCP servers
       if (!options.simulate) {
-        await this.connectToRunningServers(options);
+        await this.toolExecutor.connectToRunningServers(options);
       }
 
-      // Step 1: Get available tools
-      logger.debug("[ExecuteService] Discovering available tools...");
-      const tools = await this.getAvailableTools();
-
-      logger.debug(
-        `[ExecuteService] Found ${tools.length} tools from connected servers`,
-      );
-      if (tools.length > 0) {
-        logger.debug(
-          `[ExecuteService] Tool names: ${tools.map((t: any) => t.name).join(", ")}`,
-        );
-      }
+      // Get available tools
+      const tools = await this.toolExecutor.getAvailableTools();
 
       if (tools.length === 0) {
-        logger.warn(
-          "[ExecuteService] No tools available from connected servers",
-        );
         return {
           success: false,
           error: "No MCP tools available. Please start some MCP servers first.",
@@ -229,142 +259,221 @@ export class ExecuteService {
       }
 
       this.cloudIntentEngine.setAvailableTools(tools);
-      logger.debug(
-        `[ExecuteService] Set ${tools.length} tools in CloudIntentEngine`,
-      );
+      const toolExecutor = this.toolExecutor.createToolExecutor(tools);
 
-      // Create tool executor
-      const toolExecutor = this.createToolExecutor(tools);
-
-      // Step 2: Process — Use multi-turn LLM function calling to select and execute tools
-      // Multi-turn approach: LLM can call tools one at a time, see results, and decide if more calls are needed
-      logger.debug(
-        "[ExecuteService] Processing query with multi-turn LLM function calling...",
-      );
-
-      const stepResults: any[] = [];
-      let allSuccess = true;
-      let finalResult: any = undefined;
-      const conversationHistory: Array<{ role: string; content: string }> = [
-        {
-          role: "system",
-          content: `You are a helpful assistant that selects the EXACT tool to fulfill the user's request.
-
-AVAILABLE TOOLS:
-${tools.map((t: any) => `- ${t.name || ""}: ${t.description || "No description"}`).join("\n")}
-
-RULES:
-1. Select the tool that DIRECTLY produces the answer the user wants
-2. Extract ALL parameters from the user's query and pass them to the tool
-3. For simple queries (a single action), use EXACTLY ONE tool call
-4. If the first tool you choose returns data that can be used as input to another tool, call that tool next
-5. Keep calling tools until you have the complete answer the user wants
-6. When you have the final answer, respond with the result
-
-CRITICAL: Some tools are "helper" tools that only prepare data for other tools (e.g., looking up codes or IDs). If you call a helper tool first, use its result to call the next tool that produces the final answer.`,
-        },
-        { role: "user", content: query },
-      ];
-
-      const MAX_TURNS = 5;
-      let turnCount = 0;
-
-      while (turnCount < MAX_TURNS) {
-        turnCount++;
-        logger.debug(
-          `[ExecuteService] Multi-turn iteration ${turnCount}/${MAX_TURNS}...`,
-        );
-
-        const functionCallResult =
-          await this.cloudIntentEngine.processQueryWithHistory(
-            conversationHistory,
-            {
-              toolChoice: "auto",
-            },
-          );
-
-        if (
-          !functionCallResult.hasToolCall ||
-          functionCallResult.toolCalls.length === 0
-        ) {
-          // LLM decided not to call any more tools — use the text response as final result
-          if (functionCallResult.text) {
-            finalResult = functionCallResult.text;
-          }
-          logger.debug(
-            `[ExecuteService] LLM finished after ${turnCount} turn(s), no more tool calls needed`,
-          );
-          break;
+      // ==================== Phase 1: Plan ====================
+      let plan = session.plan;
+      if (!plan && session.state === "planning") {
+        try {
+          plan = await this.cloudIntentEngine.planQuery(session.query);
+        } catch (planError: unknown) {
+          logger.warn(`[ExecuteService] planQuery failed: ${planError instanceof Error ? planError.message : String(planError)}. Falling back to direct ReAct execution.`);
+          plan = {
+            id: `plan_${Date.now()}`,
+            query: session.query,
+            steps: [],
+            confirmed: false,
+            createdAt: new Date(),
+            summary: "Plan generation failed, using direct ReAct execution.",
+          };
         }
+        await this.sessionManager.storePlan(sessionId, plan);
 
-        // Execute each tool call from this turn
-        for (const tc of functionCallResult.toolCalls) {
+        const updatedSession = await this.sessionManager.getSession(sessionId);
+        if (updatedSession?.state === "reviewing") {
+          return {
+            success: true,
+            result: plan,
+            status: "planning",
+            steps: plan!.steps.map((s): PlanStepRecord => ({
+              id: s.id,
+              toolName: s.toolName,
+              description: s.description,
+              parameters: s.arguments,
+            })),
+          };
+        }
+      }
+
+      // ==================== Phase 2: Multi-turn ReAct Execution ====================
+      const stepResults: StepResult[] = [];
+      let allSuccess = true;
+      let finalResult: unknown = undefined;
+      let conversationHistory: Array<{ role: string; content: string }> = [];
+
+      const systemPrompt = this.cloudIntentEngine["buildSystemPrompt"]();
+      conversationHistory.push({ role: "system", content: systemPrompt });
+      conversationHistory.push({ role: "user", content: session.query });
+
+      if (plan && plan.steps.length > 0) {
+        const planSummary = plan.summary || `I've analyzed the query and created a plan with ${plan.steps.length} steps.`;
+        conversationHistory.push({ role: "assistant", content: `${planSummary}\n\nLet me start executing the plan.` });
+      }
+
+      // Execute initial plan steps
+      if (plan && plan.steps.length > 0) {
+        for (const step of plan.steps) {
           const stepStartTime = Date.now();
-          const stepId = `step_${stepResults.length + 1}`;
-
           try {
-            logger.debug(
-              `[ExecuteService] Calling tool: ${tc.toolName} with args: ${JSON.stringify(tc.arguments)}`,
-            );
-            const result = await toolExecutor(tc.toolName, tc.arguments);
+            const result = await toolExecutor(step.toolName, step.arguments);
             const duration = Date.now() - stepStartTime;
 
-            stepResults.push({
-              stepId,
-              toolName: tc.toolName,
-              arguments: tc.arguments,
+            const stepResult: StepResult = {
+              stepId: step.id,
+              toolName: step.toolName,
               success: true,
               result,
               duration,
-            });
+              timestamp: new Date().toISOString(),
+            };
+
+            await this.sessionManager.recordStepResult(sessionId, stepResult);
+            stepResults.push(stepResult);
             finalResult = result;
 
-            logger.debug(
-              `[ExecuteService] Step ${stepId} (${tc.toolName}) completed in ${duration}ms`,
-            );
+            logger.info(`[ExecuteService] Plan step ${step.id} (${step.toolName}) completed in ${duration}ms`);
 
-            // Add tool result to conversation history for next turn
-            const resultStr =
-              typeof result === "string" ? result : JSON.stringify(result);
+            const resultStr = typeof result === 'object' ? JSON.stringify(result) : String(result);
             conversationHistory.push({
-              role: "assistant",
-              content: `[Tool call: ${tc.toolName}]\nResult: ${resultStr.substring(0, 2000)}`,
+              role: "user",
+              content: `Result of ${step.toolName}: ${resultStr}\n\nBased on this result, what should I do next? If the task is complete, respond with a summary. Otherwise, call the next tool.`,
             });
-          } catch (error: any) {
+          } catch (error: unknown) {
             const duration = Date.now() - stepStartTime;
             allSuccess = false;
-            stepResults.push({
-              stepId,
-              toolName: tc.toolName,
-              success: false,
-              error: error.message,
-              duration,
-            });
-            logger.error(
-              `[ExecuteService] Step ${stepId} (${tc.toolName}) failed: ${error.message}`,
-            );
 
-            // Add error to conversation history
+            const stepResult: StepResult = {
+              stepId: step.id,
+              toolName: step.toolName,
+              success: false,
+              error: (error instanceof Error ? error.message : String(error)),
+              duration,
+              timestamp: new Date().toISOString(),
+            };
+
+            await this.sessionManager.recordStepResult(sessionId, stepResult);
+            stepResults.push(stepResult);
+
+            logger.error(`[ExecuteService] Plan step ${step.id} (${step.toolName}) failed: ${(error instanceof Error ? error.message : String(error))}`);
+
             conversationHistory.push({
-              role: "assistant",
-              content: `[Tool call: ${tc.toolName}]\nError: ${error.message}`,
+              role: "user",
+              content: `Error calling ${step.toolName}: ${(error instanceof Error ? error.message : String(error))}\n\nPlease try a different approach or inform the user.`,
             });
             break;
           }
         }
-
-        if (!allSuccess) break;
       }
 
-      // Cleanup if not keeping connection alive
+      // Continue with multi-turn ReAct
+      if (allSuccess) {
+        const maxTurns = options.maxReActTurns !== undefined ? options.maxReActTurns : 10;
+        let turnCount = 0;
+        const reactStartTime = Date.now();
+
+        while (turnCount < maxTurns) {
+          turnCount++;
+
+          if (Date.now() - reactStartTime > this.toolExecutor.MAX_REACT_EXECUTION_TIME_MS) {
+            logger.warn(`[ExecuteService] ReAct loop exceeded max execution time (${this.toolExecutor.MAX_REACT_EXECUTION_TIME_MS}ms), terminating`);
+            conversationHistory.push({
+              role: "user",
+              content: "The execution is taking too long. Please summarize what you've done so far and stop.",
+            });
+            break;
+          }
+
+          if (conversationHistory.length > this.toolExecutor.MAX_CONVERSATION_HISTORY_LENGTH) {
+            const trimmedCount = conversationHistory.length - this.toolExecutor.MAX_CONVERSATION_HISTORY_LENGTH;
+            logger.debug(`[ExecuteService] Trimming conversation history: ${conversationHistory.length} -> ${this.toolExecutor.MAX_CONVERSATION_HISTORY_LENGTH} messages`);
+            const systemMsg = conversationHistory[0];
+            const queryMsg = conversationHistory[1];
+            const recentMessages = conversationHistory.slice(-(this.toolExecutor.MAX_CONVERSATION_HISTORY_LENGTH - 2));
+            conversationHistory = [systemMsg, queryMsg, ...recentMessages];
+            logger.debug(`[ExecuteService] Trimmed ${trimmedCount} messages from conversation history`);
+          }
+
+          const functionResult = await this.cloudIntentEngine.processQueryWithHistory(
+            conversationHistory,
+            { toolChoice: "auto" },
+          );
+
+          if (!functionResult.hasToolCall || functionResult.toolCalls.length === 0) {
+            if (functionResult.text) {
+              conversationHistory.push({ role: "assistant", content: functionResult.text });
+            }
+            break;
+          }
+
+          for (const toolCall of functionResult.toolCalls) {
+            const stepStartTime = Date.now();
+
+            try {
+              const result = await toolExecutor(toolCall.toolName, toolCall.arguments);
+              const duration = Date.now() - stepStartTime;
+
+              const stepResult: StepResult = {
+                stepId: `turn_${turnCount}_${toolCall.toolName}`,
+                toolName: toolCall.toolName,
+                success: true,
+                result,
+                duration,
+                timestamp: new Date().toISOString(),
+              };
+
+              await this.sessionManager.recordStepResult(sessionId, stepResult);
+              stepResults.push(stepResult);
+              finalResult = result;
+
+              logger.info(`[ExecuteService] ReAct turn ${turnCount}: ${toolCall.toolName} completed in ${duration}ms`);
+
+              const resultStr = typeof result === 'object' ? JSON.stringify(result) : String(result);
+              conversationHistory.push({
+                role: "user",
+                content: `Result of ${toolCall.toolName}: ${resultStr}\n\nBased on this result, what should I do next? If the task is complete, respond with a summary. Otherwise, call the next tool.`,
+              });
+            } catch (error: unknown) {
+              const duration = Date.now() - stepStartTime;
+              allSuccess = false;
+
+              const stepResult: StepResult = {
+                stepId: `turn_${turnCount}_${toolCall.toolName}`,
+                toolName: toolCall.toolName,
+                success: false,
+                error: (error instanceof Error ? error.message : String(error)),
+                duration,
+                timestamp: new Date().toISOString(),
+              };
+
+              await this.sessionManager.recordStepResult(sessionId, stepResult);
+              stepResults.push(stepResult);
+
+              logger.error(`[ExecuteService] ReAct turn ${turnCount}: ${toolCall.toolName} failed: ${(error instanceof Error ? error.message : String(error))}`);
+
+              conversationHistory.push({
+                role: "user",
+                content: `Error calling ${toolCall.toolName}: ${(error instanceof Error ? error.message : String(error))}\n\nPlease try a different approach or inform the user.`,
+              });
+              break;
+            }
+          }
+
+          if (!allSuccess) break;
+        }
+      }
+
+      // Finalize session
+      if (allSuccess) {
+        await this.sessionManager.completeSession(sessionId);
+      } else {
+        await this.sessionManager.failSession(sessionId);
+      }
+
       if (!options.keepAlive) {
-        await this.cleanupConnections();
+        await this.toolExecutor.cleanupConnections();
       }
 
-      const totalDuration = stepResults.reduce(
-        (sum, sr) => sum + (sr.duration || 0),
-        0,
-      );
+      const totalDuration = stepResults.reduce((sum, sr) => sum + (sr.duration || 0), 0);
 
       return {
         success: allSuccess,
@@ -372,7 +481,6 @@ CRITICAL: Some tools are "helper" tools that only prepare data for other tools (
         executionSteps: stepResults.map((sr) => ({
           name: sr.toolName,
           toolName: sr.toolName,
-          arguments: sr.arguments,
           success: sr.success,
           result: sr.result,
           error: sr.error,
@@ -385,211 +493,244 @@ CRITICAL: Some tools are "helper" tools that only prepare data for other tools (
           totalDuration,
           averageStepDuration: totalDuration / Math.max(stepResults.length, 1),
         },
-        error: allSuccess
-          ? undefined
-          : stepResults.find((sr) => !sr.success)?.error || "Execution failed",
+        error: allSuccess ? undefined : stepResults.find((sr) => !sr.success)?.error || "Execution failed",
       };
-    } catch (error: any) {
-      logger.error(
-        `[ExecuteService] Failed to execute natural language query: ${error.message}`,
-      );
-      return {
-        success: false,
-        error: error.message,
-      };
+    } catch (error: unknown) {
+      logger.error(`[ExecuteService] Failed to execute session: ${(error instanceof Error ? error.message : String(error))}`);
+      return { success: false, error: (error instanceof Error ? error.message : String(error)) };
     }
   }
 
-  /**
-   * Execute workflow from JSON file
-   */
-  async executeWorkflowFromFile(
-    filePath: string,
-    params: Record<string, any> = {},
+  async executeNaturalLanguage(
+    query: string,
     options: UnifiedExecutionOptions = {},
-  ): Promise<WorkflowExecutionResult> {
-    logger.info(`[ExecuteService] Executing workflow from file: ${filePath}`);
+  ): Promise<UnifiedExecutionResult> {
+    logger.info(`[ExecuteService] Executing natural language query: "${query.substring(0, 100)}..."`);
 
-    try {
-      const fs = await import("fs/promises");
-      const data = await fs.readFile(filePath, "utf-8");
-      const workflow = JSON.parse(data);
-
-      return await this.executeWorkflow(workflow, params, options);
-    } catch (error: any) {
-      logger.error(
-        `[ExecuteService] Failed to execute workflow from file: ${error.message}`,
-      );
-      return {
-        success: false,
-        error: error.message,
-      };
+    // Try daemon delegation first
+    const daemonResult = await this.daemonDelegator.tryDelegate(query, options);
+    if (daemonResult) {
+      return daemonResult;
     }
+
+    // Fall back to local execution with retries
+    const MAX_RETRIES = 2;
+    let lastError: Error | null = null;
+
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        if (attempt > 0) {
+          const backoffMs = 1000 * Math.pow(2, attempt - 1);
+          logger.info(`[ExecuteService] Retry attempt ${attempt}/${MAX_RETRIES} after ${backoffMs}ms backoff`);
+          await new Promise((resolve) => setTimeout(resolve, backoffMs));
+        }
+
+        const session = await this.createSession(query, "direct");
+        return await this.executeSession(session.id, options);
+      } catch (error: unknown) {
+        lastError = error instanceof Error ? error : new Error(String(error));
+        if (attempt < MAX_RETRIES) {
+          logger.warn(`[ExecuteService] Attempt ${attempt + 1}/${MAX_RETRIES + 1} failed: ${(error instanceof Error ? error.message : String(error))}. Will retry.`);
+        }
+      }
+    }
+
+    logger.error(`[ExecuteService] Failed to execute natural language query after ${MAX_RETRIES + 1} attempts: ${lastError?.message}`);
+    return { success: false, error: lastError?.message || "Execution failed after retries" };
   }
 
-  /**
-   * Execute named workflow
-   */
-  async executeNamedWorkflow(
-    workflowName: string,
-    params: Record<string, any> = {},
-    options: UnifiedExecutionOptions = {},
-  ): Promise<WorkflowExecutionResult> {
-    logger.info(`[ExecuteService] Executing named workflow: "${workflowName}"`);
+  // ==================== Interactive Session Methods ====================
 
-    try {
-      const workflowManager = getWorkflowManager();
-
-      if (!(await workflowManager.exists(workflowName))) {
-        throw new IntentOrchError(
-          ErrorCode.WORKFLOW_NOT_FOUND,
-          `Workflow "${workflowName}" not found`,
-        );
-      }
-
-      const workflow = await workflowManager.load(workflowName);
-      return await this.executeWorkflow(workflow, params, options);
-    } catch (error: any) {
-      logger.error(
-        `[ExecuteService] Failed to execute named workflow: ${error.message}`,
-      );
-      return {
-        success: false,
-        error: error.message,
-      };
-    }
-  }
-
-  /**
-   * Execute workflow object
-   */
-  async executeWorkflow(
-    workflow: any,
-    params: Record<string, any> = {},
-    options: UnifiedExecutionOptions = {},
-  ): Promise<WorkflowExecutionResult> {
-    logger.info(
-      `[ExecuteService] Executing workflow: ${workflow.name || "unnamed"}`,
-    );
-
-    try {
-      const workflowEngine = new WorkflowEngine();
-
-      // Handle auto-start if requested
-      if (options.autoStart) {
-        await this.ensureServersForWorkflow(workflow, options);
-      }
-
-      // Connect to running servers if not in simulation mode
-      if (!options.simulate) {
-        await this.connectToRunningServers(options);
-      }
-
-      // Execute the workflow
-      const results = await workflowEngine.execute(workflow, params);
-
-      // Cleanup if not keeping connection alive
-      if (!options.keepAlive) {
-        await this.cleanupConnections();
-      }
-
-      return {
-        success: true,
-        results,
-      };
-    } catch (error: any) {
-      logger.error(
-        `[ExecuteService] Failed to execute workflow: ${error.message}`,
-      );
-      return {
-        success: false,
-        error: error.message,
-      };
-    }
-  }
-
-  // ==================== Public API Methods (for daemon server) ====================
-
-  /**
-   * Parse intent using the unified execution service
-   * Returns workflow steps without executing them
-   */
-  async parseIntent(
-    intent: string,
-    context?: any,
-  ): Promise<{
-    steps: any[];
-    status: string;
-    confidence: number;
-    explanation: string;
-  }> {
-    logger.info(
-      `[ExecuteService] Parsing intent: "${intent.substring(0, 100)}..."`,
-    );
+  async startInteractiveSession(
+    query: string,
+    _userId?: string,
+  ): Promise<{ sessionId: string; guidance: Record<string, unknown>; session: ExecutionSession | null }> {
+    logger.info(`[ExecuteService] Starting interactive session for query: "${query.substring(0, 100)}..."`);
 
     try {
       await this.initialize();
 
       if (!this.cloudIntentEngine) {
-        throw new IntentOrchError(
-          ErrorCode.ENGINE_NOT_INITIALIZED,
-          "CloudIntentEngine not initialized",
-        );
+        throw new IntentOrchError(ErrorCode.ENGINE_NOT_INITIALIZED, "CloudIntentEngine not initialized");
       }
 
-      // Connect to running servers
-      await this.connectToRunningServers({});
+      await this.toolExecutor.connectToRunningServers({});
 
-      // Get available tools
-      const tools = await this.getAvailableTools();
-
-      if (tools.length === 0) {
-        return {
-          steps: [],
-          status: "capability_missing",
-          confidence: 0,
-          explanation:
-            "No MCP tools available. Please start some MCP servers first.",
-        };
+      const tools = await this.toolExecutor.getAvailableTools();
+      if (tools.length > 0) {
+        this.cloudIntentEngine.setAvailableTools(tools);
       }
 
-      this.cloudIntentEngine.setAvailableTools(tools);
+      const session = await this.createSession(query, "interactive");
 
-      // Plan the query
-      const plan = await this.cloudIntentEngine.planQuery(intent);
+      const plan = await this.cloudIntentEngine.planQuery(query);
+      await this.sessionManager.storePlan(session.id, plan);
 
-      // Convert plan steps to workflow steps
-      const steps = plan.steps.map((step: any) => ({
-        id: `step_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-        type: "tool",
-        serverName: step.serverName || step.serverId || "generic-service",
-        serverId: step.serverName || step.serverId || "generic-service",
-        toolName: step.toolName,
-        parameters: step.arguments || {},
-      }));
+      const updatedSession = await this.sessionManager.getSession(session.id);
 
       return {
-        steps,
-        status: steps.length > 0 ? "success" : "partial",
-        confidence: steps.length > 0 ? 0.8 : 0,
-        explanation: plan.summary || `Parsed ${steps.length} steps`,
+        sessionId: session.id,
+        guidance: {
+          type: "plan",
+          message: plan.summary || `Generated plan with ${plan.steps.length} steps`,
+          steps: plan.steps,
+          requiresResponse: true,
+        },
+        session: updatedSession,
       };
-    } catch (error: any) {
-      logger.error(`[ExecuteService] Failed to parse intent: ${error.message}`);
+    } catch (error: unknown) {
+      logger.error(`[ExecuteService] Failed to start interactive session: ${(error instanceof Error ? error.message : String(error))}`);
+      throw error;
+    }
+  }
+
+  async processInteractiveFeedback(
+    sessionId: string,
+    response: { type?: 'confirm' | 'modify' | 'reject' | 'regenerate'; message?: string; modifiedPlan?: ToolExecutionPlan },
+  ): Promise<{
+    success: boolean;
+    guidance?: Record<string, unknown>;
+    session?: ExecutionSession;
+    readyForExecution?: boolean;
+  }> {
+    logger.info(`[ExecuteService] Processing feedback for session: ${sessionId}`);
+
+    try {
+      const feedbackType = response.type || "confirm";
+      const feedback: FeedbackRequest = {
+        type: feedbackType,
+        message: response.message || "",
+        modifiedPlan: response.modifiedPlan,
+      };
+
+      const session = await this.sessionManager.handleFeedback(sessionId, feedback);
+      const readyForExecution = session.state === "confirmed";
+
       return {
-        steps: [],
-        status: "capability_missing",
-        confidence: 0,
-        explanation: `Failed to parse intent: ${error.message}`,
+        success: true,
+        guidance: {
+          type: readyForExecution ? "confirmation" : "feedback",
+          message: readyForExecution
+            ? "Plan confirmed. Ready to execute."
+            : `Feedback received. Session state: ${session.state}`,
+          requiresResponse: !readyForExecution,
+        },
+        session,
+        readyForExecution,
+      };
+    } catch (error: unknown) {
+      logger.error(`[ExecuteService] Failed to process feedback: ${(error instanceof Error ? error.message : String(error))}`);
+      return {
+        success: false,
+        guidance: { type: "error", message: (error instanceof Error ? error.message : String(error)), requiresResponse: false },
       };
     }
   }
 
-  /**
-   * Execute pre-parsed steps directly
-   */
+  async executeInteractiveSession(
+    sessionId: string,
+    options: UnifiedExecutionOptions = {},
+  ): Promise<{
+    success: boolean;
+    result?: unknown;
+    executionSteps?: StepExecutionRecord[];
+    statistics?: ExecutionStatistics;
+    error?: string;
+  }> {
+    logger.info(`[ExecuteService] Executing interactive session: ${sessionId}`);
+    const result = await this.executeSession(sessionId, options);
+
+    return {
+      success: result.success,
+      result: result.result,
+      executionSteps: result.executionSteps,
+      statistics: result.statistics,
+      error: result.error,
+    };
+  }
+
+  async getActiveInteractiveSessions(): Promise<ExecutionSession[]> {
+    return this.sessionManager.getActiveSessions();
+  }
+
+  async getInteractiveSession(sessionId: string): Promise<ExecutionSession | null> {
+    return this.sessionManager.getSession(sessionId);
+  }
+
+  async cleanupInteractiveSessions(maxAgeMs: number = 24 * 60 * 60 * 1000): Promise<number> {
+    return this.sessionManager.cleanupOldSessions(maxAgeMs);
+  }
+
+  // ==================== Workflow Methods ====================
+
+  async executeWorkflowFromFile(
+    filePath: string,
+    params: Record<string, any> = {},
+    options: UnifiedExecutionOptions = {},
+  ): Promise<WorkflowExecutionResult> {
+    return this.workflowOrchestrator.executeWorkflowFromFile(filePath, params, options, this.toolExecutor);
+  }
+
+  async executeNamedWorkflow(
+    workflowName: string,
+    params: Record<string, any> = {},
+    options: UnifiedExecutionOptions = {},
+  ): Promise<WorkflowExecutionResult> {
+    return this.workflowOrchestrator.executeNamedWorkflow(workflowName, params, options, this.toolExecutor);
+  }
+
+  async executeWorkflow(
+    workflow: any,
+    params: Record<string, any> = {},
+    options: UnifiedExecutionOptions = {},
+  ): Promise<WorkflowExecutionResult> {
+    return this.workflowOrchestrator.executeWorkflow(workflow, params, options, this.toolExecutor);
+  }
+
+  // ==================== Public API Methods ====================
+
+  async parseIntent(
+    intent: string,
+    context?: Record<string, unknown>,
+    options?: { mode?: 'plan_only' | 'plan_and_execute' },
+  ): Promise<{
+    steps: PlanStepRecord[];
+    status: string;
+    confidence: number;
+    explanation: string;
+    executionResult?: UnifiedExecutionResult;
+  }> {
+    logger.info(`[ExecuteService] Parsing intent: "${intent.substring(0, 100)}..." (mode: ${options?.mode || 'plan_only'})`);
+
+    try {
+      await this.initialize();
+
+      if (!this.cloudIntentEngine) {
+        throw new IntentOrchError(ErrorCode.ENGINE_NOT_INITIALIZED, "CloudIntentEngine not initialized");
+      }
+
+      return await this.planExecutor.parseIntent(
+        intent,
+        context,
+        options,
+        this.cloudIntentEngine,
+        this.toolExecutor,
+        this.parameterNormalizer,
+      );
+    } catch (error: unknown) {
+      const errMsg = error instanceof Error ? error.message : String(error);
+      logger.error(`[ExecuteService] Failed to parse intent: ${errMsg}`);
+      return {
+        steps: [],
+        status: "capability_missing",
+        confidence: 0,
+        explanation: `Failed to parse intent: ${errMsg}`,
+      };
+    }
+  }
+
   async executeSteps(
-    steps: any[],
+    steps: PlanStepRecord[],
     options: UnifiedExecutionOptions = {},
   ): Promise<UnifiedExecutionResult> {
     logger.info(`[ExecuteService] Executing ${steps.length} pre-parsed steps`);
@@ -598,724 +739,19 @@ CRITICAL: Some tools are "helper" tools that only prepare data for other tools (
       await this.initialize();
 
       if (!this.cloudIntentEngine) {
-        throw new IntentOrchError(
-          ErrorCode.ENGINE_NOT_INITIALIZED,
-          "CloudIntentEngine not initialized",
-        );
+        throw new IntentOrchError(ErrorCode.ENGINE_NOT_INITIALIZED, "CloudIntentEngine not initialized");
       }
 
-      // Connect to running servers
-      if (!options.simulate) {
-        await this.connectToRunningServers(options);
-      }
-
-      // Get available tools
-      const tools = await this.getAvailableTools();
-
-      if (tools.length === 0) {
-        return {
-          success: false,
-          error: "No MCP tools available. Please start some MCP servers first.",
-        };
-      }
-
-      this.cloudIntentEngine.setAvailableTools(tools);
-
-      // Create tool executor
-      const toolExecutor = this.createToolExecutor(tools);
-
-      // Execute each step sequentially
-      const stepResults: any[] = [];
-      let allSuccess = true;
-
-      for (const step of steps) {
-        try {
-          const result = await toolExecutor(
-            step.toolName,
-            step.parameters || {},
-          );
-          stepResults.push({
-            name: step.toolName,
-            toolName: step.toolName,
-            success: true,
-            result,
-            duration: 0,
-          });
-        } catch (error: any) {
-          allSuccess = false;
-          stepResults.push({
-            name: step.toolName,
-            toolName: step.toolName,
-            success: false,
-            error: error.message,
-            duration: 0,
-          });
-        }
-      }
-
-      // Cleanup if not keeping connection alive
-      if (!options.keepAlive) {
-        await this.cleanupConnections();
-      }
-
-      return {
-        success: allSuccess,
-        result: stepResults,
-        executionSteps: stepResults,
-        statistics: {
-          totalSteps: stepResults.length,
-          successfulSteps: stepResults.filter((sr) => sr.success).length,
-          failedSteps: stepResults.filter((sr) => !sr.success).length,
-          totalDuration: 0,
-          averageStepDuration: 0,
-        },
-        error: allSuccess ? undefined : "Some steps failed",
-      };
-    } catch (error: any) {
-      logger.error(
-        `[ExecuteService] Failed to execute steps: ${error.message}`,
-      );
-      return {
-        success: false,
-        error: error.message,
-      };
-    }
-  }
-
-  /**
-   * Start an interactive session
-   */
-  async startInteractiveSession(
-    query: string,
-    userId?: string,
-  ): Promise<{ sessionId: string; guidance: any; session: any }> {
-    logger.info(
-      `[ExecuteService] Starting interactive session for query: "${query.substring(0, 100)}..."`,
-    );
-
-    try {
-      await this.initialize();
-
-      if (!this.cloudIntentEngine) {
-        throw new IntentOrchError(
-          ErrorCode.ENGINE_NOT_INITIALIZED,
-          "CloudIntentEngine not initialized",
-        );
-      }
-
-      // Connect to running servers
-      await this.connectToRunningServers({});
-
-      // Get available tools
-      const tools = await this.getAvailableTools();
-
-      if (tools.length > 0) {
-        this.cloudIntentEngine.setAvailableTools(tools);
-      }
-
-      // Plan the query
-      const plan = await this.cloudIntentEngine.planQuery(query);
-
-      const sessionId = `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-
-      return {
-        sessionId,
-        guidance: {
-          type: "plan",
-          message:
-            plan.summary || `Generated plan with ${plan.steps.length} steps`,
-          steps: plan.steps,
-          requiresResponse: false,
-        },
-        session: {
-          sessionId,
-          query,
-          plan,
-          state: "planning",
-          createdAt: new Date().toISOString(),
-        },
-      };
-    } catch (error: any) {
-      logger.error(
-        `[ExecuteService] Failed to start interactive session: ${error.message}`,
-      );
-      throw error;
-    }
-  }
-
-  /**
-   * Process interactive feedback
-   */
-  async processInteractiveFeedback(
-    sessionId: string,
-    response: any,
-  ): Promise<{
-    success: boolean;
-    guidance?: any;
-    session?: any;
-    readyForExecution?: boolean;
-  }> {
-    logger.info(
-      `[ExecuteService] Processing feedback for session: ${sessionId}`,
-    );
-
-    // Simple implementation: confirm and return ready for execution
-    return {
-      success: true,
-      guidance: {
-        type: "confirmation",
-        message: "Feedback received. Ready to execute.",
-        requiresResponse: false,
-      },
-      session: { sessionId, state: "confirmed" },
-      readyForExecution: true,
-    };
-  }
-
-  /**
-   * Execute an interactive session
-   */
-  async executeInteractiveSession(
-    sessionId: string,
-    options: UnifiedExecutionOptions = {},
-  ): Promise<{
-    success: boolean;
-    result?: any;
-    executionSteps?: any[];
-    statistics?: any;
-    error?: string;
-  }> {
-    logger.info(`[ExecuteService] Executing interactive session: ${sessionId}`);
-
-    try {
-      await this.initialize();
-
-      if (!this.cloudIntentEngine) {
-        throw new IntentOrchError(
-          ErrorCode.ENGINE_NOT_INITIALIZED,
-          "CloudIntentEngine not initialized",
-        );
-      }
-
-      // Connect to running servers
-      if (!options.simulate) {
-        await this.connectToRunningServers(options);
-      }
-
-      // Get available tools
-      const tools = await this.getAvailableTools();
-
-      if (tools.length === 0) {
-        return {
-          success: false,
-          error: "No MCP tools available.",
-        };
-      }
-
-      this.cloudIntentEngine.setAvailableTools(tools);
-
-      // Create tool executor
-      const toolExecutor = this.createToolExecutor(tools);
-
-      // Execute the plan (we don't have the plan stored, so we just return success)
-      // In a full implementation, we'd retrieve the stored plan by sessionId
-
-      // Cleanup if not keeping connection alive
-      if (!options.keepAlive) {
-        await this.cleanupConnections();
-      }
-
-      return {
-        success: true,
-        result: "Session executed",
-        executionSteps: [],
-        statistics: {
-          totalSteps: 0,
-          successfulSteps: 0,
-          failedSteps: 0,
-          totalDuration: 0,
-          averageStepDuration: 0,
-        },
-      };
-    } catch (error: any) {
-      logger.error(
-        `[ExecuteService] Failed to execute interactive session: ${error.message}`,
-      );
-      return {
-        success: false,
-        error: error.message,
-      };
-    }
-  }
-
-  /**
-   * Get all active interactive sessions
-   */
-  getActiveInteractiveSessions(): any[] {
-    return [];
-  }
-
-  /**
-   * Get a specific interactive session
-   */
-  getInteractiveSession(sessionId: string): any {
-    return null;
-  }
-
-  /**
-   * Cleanup old interactive sessions
-   */
-  cleanupInteractiveSessions(maxAgeMs: number): number {
-    return 0;
-  }
-
-  // ==================== Private Methods ====================
-
-  private async handleAutoStart(
-    query: string,
-    options: UnifiedExecutionOptions,
-  ): Promise<void> {
-    if (!options.autoStart) return;
-
-    logger.debug("[ExecuteService] Handling auto-start");
-
-    const autoStartManager = new AutoStartManager();
-    const requiredServers =
-      await autoStartManager.analyzeIntentForServers(query);
-
-    if (requiredServers.length > 0) {
-      const results =
-        await autoStartManager.ensureServersRunning(requiredServers);
-
-      if (!autoStartManager.areAllServersReady(results)) {
-        throw new IntentOrchError(
-          ErrorCode.SERVER_START_FAILED,
-          "Some required servers failed to start",
-        );
-      }
-
-      logger.debug(
-        `[ExecuteService] Auto-started ${requiredServers.length} servers`,
-      );
-    }
-  }
-
-  // Track URLs we've already attempted to connect to (for SSE/HTTP services)
-  private connectedUrls: Set<string> = new Set();
-
-  private async connectToRunningServers(
-    options: UnifiedExecutionOptions,
-  ): Promise<void> {
-    const processManager = getProcessManager();
-    const runningServers = await processManager.listRunning();
-
-    if (runningServers.length === 0) {
-      logger.warn(
-        "[ExecuteService] No running MCP servers found in process store",
-      );
-
-      // Fallback: try to find running servers via ps command (for --no-daemon started servers)
-      try {
-        const { execSync } = await import("child_process");
-        const psOutput = execSync(
-          'ps aux | grep -E "node.*mcp" | grep -v grep',
-          { encoding: "utf8", timeout: 5000 },
-        );
-        const lines = psOutput
-          .trim()
-          .split("\n")
-          .filter((l) => l.trim());
-
-        if (lines.length > 0) {
-          logger.info(
-            `[ExecuteService] Found ${lines.length} potential MCP processes via ps`,
-          );
-
-          // First, try to find and connect to all cached manifests (including baidu-map, etc.)
-          // This is more comprehensive than just KnownServers
-          const manifestsToTry: Array<{ name: string; manifest: any }> = [];
-
-          // Collect from cache directory
-          try {
-            const fs = await import("fs/promises");
-            const path = await import("path");
-            const { INTORCH_HOME } = await import("../core/constants.js");
-            const cacheDir = path.join(INTORCH_HOME, "cache", "manifests");
-            const files = await fs.readdir(cacheDir);
-            for (const file of files) {
-              if (!file.endsWith(".json")) continue;
-              try {
-                const manifestPath = path.join(cacheDir, file);
-                const content = await fs.readFile(manifestPath, "utf-8");
-                const manifest = JSON.parse(content);
-                const serverName = manifest.name || file.replace(".json", "");
-                manifestsToTry.push({ name: serverName, manifest });
-              } catch (e: any) {
-                // Skip invalid manifests
-              }
-            }
-          } catch (cacheError: any) {
-            logger.debug(
-              `[ExecuteService] Cache read failed: ${cacheError.message}`,
-            );
-          }
-
-          // Also add KnownServers that might not be in cache
-          const registryClient = getRegistryClient();
-          for (const serverName of KnownServers) {
-            if (manifestsToTry.some((m) => m.name === serverName)) continue;
-            try {
-              const manifest =
-                await registryClient.getCachedManifest(serverName);
-              if (manifest) {
-                manifestsToTry.push({ name: serverName, manifest });
-              }
-            } catch (e: any) {
-              // Skip
-            }
-          }
-
-          // Try to connect to each manifest
-          for (const { name: serverName, manifest } of manifestsToTry) {
-            if (this.connectedServers.has(serverName)) continue;
-            
-            // Check URL-level dedup for SSE/HTTP services
-            const transportUrl = manifest.transport?.url;
-            if (transportUrl && this.connectedUrls.has(transportUrl)) {
-              logger.debug(
-                `[ExecuteService] Already connected to URL ${transportUrl}, skipping ${serverName}`,
-              );
-              continue;
-            }
-            
-            try {
-              logger.debug(
-                `[ExecuteService] Attempting to connect to cached server: ${serverName}`,
-              );
-              await this.connectToServer(serverName, manifest);
-            } catch (err: any) {
-              logger.debug(
-                `[ExecuteService] Failed to connect to cached server ${serverName}: ${err.message}`,
-              );
-            }
-          }
-        }
-      } catch (psError: any) {
-        logger.debug(`[ExecuteService] ps fallback failed: ${psError.message}`);
-      }
-
-      return;
-    }
-
-    logger.debug(
-      `[ExecuteService] Connecting to ${runningServers.length} running servers`,
-    );
-
-    for (const server of runningServers) {
-      try {
-        const registryClient = getRegistryClient();
-        let manifest = await registryClient.getCachedManifest(
-          server.serverName,
-        );
-
-        // If manifest is not cached, try to fetch it
-        if (!manifest) {
-          logger.debug(
-            `[ExecuteService] Manifest not cached for ${server.serverName}, fetching...`,
-          );
-          try {
-            manifest = await registryClient.fetchManifest(server.serverName);
-          } catch (fetchError: any) {
-            logger.warn(
-              `[ExecuteService] Failed to fetch manifest for ${server.serverName}: ${fetchError.message}`,
-            );
-            continue;
-          }
-        }
-
-        if (manifest) {
-          // Check URL-level dedup for SSE/HTTP services
-          const transportUrl = manifest.transport?.url;
-          if (transportUrl && this.connectedUrls.has(transportUrl)) {
-            logger.debug(
-              `[ExecuteService] Already connected to URL ${transportUrl}, skipping ${server.serverName}`,
-            );
-            continue;
-          }
-          
-          await this.connectToServer(server.serverName, manifest);
-        }
-      } catch (error: any) {
-        logger.warn(
-          `[ExecuteService] Failed to connect to ${server.serverName}: ${error.message}`,
-        );
-      }
-    }
-  }
-
-  private async connectToServer(
-    serverName: string,
-    manifest: any,
-  ): Promise<void> {
-    if (this.connectedServers.has(serverName)) {
-      return; // Already connected
-    }
-
-    try {
-      // Determine transport type from manifest
-      const transportType = manifest.transport?.type || "stdio";
-      const isExternal = ["sse", "http", "websocket", "tcp"].includes(transportType);
-
-      // Try to find an existing process handle from ProcessManager
-      const processManager = getProcessManager();
-      const runningInfo = await processManager.getByServerName(serverName);
-      
-      let existingProcess: any = null;
-
-      if (!isExternal) {
-        existingProcess = await processManager.getProcessHandleByServerName(serverName);
-
-        if (!existingProcess && runningInfo && runningInfo.status === "running") {
-          logger.debug(
-            `[ExecuteService] Found running local process ${runningInfo.pid} for ${serverName} in store, stopping it first to avoid conflicts`,
-          );
-          try {
-            await processManager.stop(runningInfo.pid);
-            // Wait a moment for the process to fully stop
-            await new Promise((resolve) => setTimeout(resolve, 1000));
-          } catch (stopError: any) {
-            logger.warn(
-              `[ExecuteService] Failed to stop existing process for ${serverName}: ${stopError.message}`,
-            );
-          }
-        }
-      }
-
-      // Build environment variables including required secrets from manifest
-      const envVars: Record<string, string> = { ...process.env } as Record<
-        string,
-        string
-      >;
-      
-      // ... (rest of env var logic)
-      if (manifest.runtime?.env && manifest.runtime.env.length > 0) {
-        logger.debug(
-          `[ExecuteService] Manifest requires env vars: ${manifest.runtime.env.join(", ")}`,
-        );
-        const { getSecretManager } = await import("../secret/manager.js");
-        const secretManager = getSecretManager();
-        for (const envName of manifest.runtime.env) {
-          if (!envVars[envName]) {
-            try {
-              const secretValue = await secretManager.get(envName);
-              logger.debug(
-                `[ExecuteService] Secret ${envName} resolved: ${secretValue ? "found (length=" + secretValue.length + ")" : "not found"}`,
-              );
-              if (secretValue) {
-                envVars[envName] = secretValue;
-              }
-            } catch (e: any) {
-              logger.debug(
-                `[ExecuteService] Failed to get secret ${envName}: ${e.message}`,
-              );
-            }
-          } else {
-            logger.debug(
-              `[ExecuteService] Env var ${envName} already set in process.env`,
-            );
-          }
-        }
-      }
-
-      let transportConfig: any;
-      if (transportType === "sse") {
-        transportConfig = {
-          type: "sse" as const,
-          url: manifest.transport?.url || `http://localhost:${manifest.runtime?.port || 3000}/sse`,
-          headers: manifest.transport?.headers,
-        };
-      } else if (transportType === "http") {
-        transportConfig = {
-          type: "http" as const,
-          url: manifest.transport?.url || `http://localhost:${manifest.runtime?.port || 3000}`,
-          headers: manifest.transport?.headers,
-        };
-      } else {
-        transportConfig = {
-          type: "stdio" as const,
-          command: manifest.runtime.command,
-          args: manifest.runtime.args || [],
-          env: envVars,
-          existingProcess: existingProcess,
-        };
-      }
-
-      const client = new MCPClient({
-        transport: transportConfig,
-        serverName: serverName,
-      });
-
-      // Handle transport errors to prevent process crash
-      client.on("error", (error) => {
-        logger.warn(
-          `[ExecuteService] MCP Client error for ${serverName}: ${error.message || error}`,
-        );
-      });
-
-      await client.connect();
-
-      this.connectedServers.set(serverName, {
-        name: serverName,
-        client,
-      });
-
-      // Record the URL for deduplication (SSE/HTTP services)
-      if (manifest.transport?.url) {
-        this.connectedUrls.add(manifest.transport.url);
-      }
-
-      logger.debug(`[ExecuteService] Connected to server: ${serverName}`);
-    } catch (error: any) {
-      logger.error(
-        `[ExecuteService] Failed to connect to server ${serverName}: ${error.message}`,
-      );
-      throw error;
-    }
-  }
-
-  private async getAvailableTools(): Promise<any[]> {
-    const tools: any[] = [];
-
-    for (const [name, server] of this.connectedServers) {
-      try {
-        // Fetch tools from server with timeout
-        logger.debug(`[ExecuteService] Fetching tools from server: ${name}`);
-        const serverTools = await Promise.race([
-          server.client.listTools(),
-          new Promise<never>((_, reject) =>
-            setTimeout(
-              () =>
-                reject(
-                  new Error(`Request timeout after ${Timeouts.TOOL_LIST}ms`),
-                ),
-              Timeouts.TOOL_LIST,
-            ),
-          ),
-        ]);
-
-        // Add server name to each tool
-        const toolsWithServer = serverTools.map((tool: any) => ({
-          ...tool,
-          serverName: name,
-        }));
-
-        tools.push(...toolsWithServer);
-      } catch (error: any) {
-        logger.warn(
-          `[ExecuteService] Failed to list tools for server ${name}: ${error.message}`,
-        );
-      }
-    }
-
-    return tools;
-  }
-
-  private createToolExecutor(
-    tools: any[],
-  ): (toolName: string, params: Record<string, any>) => Promise<any> {
-    // Create a mapping from tool name to server name
-    const toolToServer = new Map<string, string>();
-    for (const tool of tools) {
-      if (tool.name && tool.serverName) {
-        toolToServer.set(tool.name, tool.serverName);
-      }
-    }
-
-    return async (
-      toolName: string,
-      params: Record<string, any>,
-    ): Promise<any> => {
-      const serverName = toolToServer.get(toolName);
-
-      if (!serverName) {
-        throw new IntentOrchError(
-          ErrorCode.TOOL_NOT_FOUND,
-          `Tool ${toolName} not found in any connected server`,
-        );
-      }
-
-      const server = this.connectedServers.get(serverName);
-      if (!server) {
-        throw new IntentOrchError(
-          ErrorCode.SERVER_DISCONNECTED,
-          `Server ${serverName} for tool ${toolName} is no longer connected`,
-        );
-      }
-
-      logger.debug(
-        `[ExecuteService] Calling tool ${toolName} on server ${serverName}`,
-      );
-      return await server.client.callTool(toolName, params);
-    };
-  }
-
-  private async ensureServersForWorkflow(
-    workflow: any,
-    options: UnifiedExecutionOptions,
-  ): Promise<void> {
-    const requiredServers = new Set<string>();
-
-    for (const step of workflow.steps || []) {
-      if (step.serverId || step.serverName) {
-        requiredServers.add(step.serverId || step.serverName);
-      }
-    }
-
-    if (requiredServers.size > 0) {
-      const autoStartManager = new AutoStartManager();
-      const results = await autoStartManager.ensureServersRunning(
-        Array.from(requiredServers),
-      );
-
-      if (!autoStartManager.areAllServersReady(results)) {
-        throw new IntentOrchError(
-          ErrorCode.SERVER_START_FAILED,
-          "Some required servers failed to start",
-        );
-      }
-    }
-  }
-
-  private async cleanupConnections(): Promise<void> {
-    logger.debug("[ExecuteService] Cleaning up connections");
-
-    const disconnectPromises: Promise<void>[] = [];
-    for (const [name] of this.connectedServers) {
-      disconnectPromises.push(this.disconnectServer(name));
-    }
-
-    await Promise.allSettled(disconnectPromises);
-    this.connectedServers.clear();
-  }
-
-  private async disconnectServer(serverName: string): Promise<void> {
-    const server = this.connectedServers.get(serverName);
-    if (server) {
-      try {
-        await server.client.disconnect();
-        logger.debug(
-          `[ExecuteService] Disconnected from server: ${serverName}`,
-        );
-      } catch (error: any) {
-        logger.error(
-          `[ExecuteService] Failed to disconnect from server ${serverName}: ${error.message}`,
-        );
-      }
+      return await this.planExecutor.executeSteps(steps, options, this.cloudIntentEngine, this.toolExecutor);
+    } catch (error: unknown) {
+      const errMsg = error instanceof Error ? error.message : String(error);
+      logger.error(`[ExecuteService] Failed to execute steps: ${errMsg}`);
+      return { success: false, error: errMsg };
     }
   }
 }
 
-// Singleton instance for easy access
+// Singleton instance
 let unifiedExecutionServiceInstance: ExecuteService | null = null;
 
 export function getExecuteService(): ExecuteService {

@@ -39,10 +39,10 @@ export class OllamaProvider extends BaseLLMProvider {
         success: false,
         message: `Ollama service error: ${response.status}`,
       };
-    } catch (error: any) {
+    } catch (error: unknown) {
       return {
         success: false,
-        message: `Connection test failed: ${error.message}`,
+        message: `Connection test failed: ${(error instanceof Error ? error.message : String(error))}`,
       };
     }
   }
@@ -51,7 +51,7 @@ export class OllamaProvider extends BaseLLMProvider {
     const endpoint = this.getBaseUrl();
     const model = this.getModel();
 
-    const requestBody: any = {
+    const requestBody: Record<string, unknown> = {
       model,
       messages: options.messages,
       stream: false,
@@ -95,7 +95,7 @@ export class OllamaProvider extends BaseLLMProvider {
       provider: "ollama",
       model,
       toolCalls: toolCalls
-        ? toolCalls.map((tc: any, idx: number) => ({
+        ? toolCalls.map((tc: { id?: string; function?: { name?: string; arguments?: unknown } }, idx: number) => ({
             id: tc.id || `call_${idx}`,
             type: "function",
             function: {

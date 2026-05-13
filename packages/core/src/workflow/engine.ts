@@ -16,8 +16,8 @@ export class WorkflowEngine {
 
   async execute(
     workflow: Workflow,
-    userInputs: Record<string, any>,
-  ): Promise<any> {
+    userInputs: Record<string, unknown>,
+  ): Promise<unknown> {
     // Force reload secrets from disk to ensure we have the latest data
     const sm = getSecretManager();
     await sm.load();
@@ -67,14 +67,14 @@ export class WorkflowEngine {
 
           // Record step success
           await recorder.completeStep(executionId, stepIndex, "success", result);
-        } catch (stepError: any) {
+        } catch (stepError: unknown) {
           // Record step failure
           await recorder.completeStep(
             executionId,
             stepIndex,
             "failed",
             undefined,
-            stepError.message,
+            stepError instanceof Error ? stepError.message : String(stepError),
           );
 
           // Re-throw to fail the entire workflow
@@ -89,9 +89,9 @@ export class WorkflowEngine {
       await recorder.completeExecution(executionId, "success", undefined, output);
 
       return output;
-    } catch (error: any) {
+    } catch (error: unknown) {
       // Record failed execution
-      await recorder.completeExecution(executionId, "failed", error.message);
+      await recorder.completeExecution(executionId, "failed", (error instanceof Error ? error.message : String(error)));
       throw error;
     } finally {
       // Cleanup connections
@@ -105,7 +105,7 @@ export class WorkflowEngine {
   private async executeStep(
     step: WorkflowStep,
     context: WorkflowContext,
-  ): Promise<any> {
+  ): Promise<unknown> {
     const resolvedArgs = ExpressionEvaluator.resolve(
       step.parameters || {},
       context,
@@ -155,11 +155,11 @@ export class WorkflowEngine {
       try {
         const response = await client.callTool(toolName, resolvedArgs);
         return response;
-      } catch (error: any) {
+      } catch (error: unknown) {
         attempt++;
         if (attempt >= maxAttempts) {
           logger.error(
-            `❌ Step ${step.id} failed after ${maxAttempts} attempts: ${error.message}`,
+            `❌ Step ${step.id} failed after ${maxAttempts} attempts: ${(error instanceof Error ? error.message : String(error))}`,
           );
           throw error;
         }
@@ -207,9 +207,9 @@ export class WorkflowEngine {
 
   private async resolveInputs(
     workflow: Workflow,
-    userInputs: Record<string, any>,
-  ) {
-    const resolved: any = {};
+    userInputs: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> {
+    const resolved: Record<string, unknown> = {};
     const inputs = workflow.inputs || [];
     for (const input of inputs) {
       const value = userInputs[input.id] ?? input.default;
@@ -252,10 +252,11 @@ export class WorkflowEngine {
 
       // Determine transport type from manifest
       const transportType = manifest.transport?.type || "stdio";
-      let transportConfig: any;
+      let transportConfig: Record<string, unknown>;
 
       if (transportType === "sse" || transportType === "http") {
-        const url = manifest.transport?.url || (manifest.runtime as any)?.url;
+        const runtime = manifest.runtime as Record<string, unknown> | undefined;
+        const url = manifest.transport?.url || (runtime?.url as string | undefined);
         if (!url) {
           throw new Error(
             `Invalid manifest for server ${serverName}: missing URL for ${transportType} transport`,
@@ -301,13 +302,13 @@ export class WorkflowEngine {
       logger.info(
         `✅ MCP client created and connected for server: ${serverName} (${transportType})`,
       );
-    } catch (error: any) {
+    } catch (error: unknown) {
       logger.error(
         `❌ Failed to create MCP client for server ${serverName}:`,
-        error.message,
+        (error instanceof Error ? error.message : String(error)),
       );
       throw new Error(
-        `Failed to create MCP client for server ${serverName}: ${error.message}`,
+        `Failed to create MCP client for server ${serverName}: ${(error instanceof Error ? error.message : String(error))}`,
       );
     }
   }

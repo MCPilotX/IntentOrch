@@ -13,6 +13,7 @@ import { getProcessManager } from "../../process-manager/manager.js";
 import { getRegistryClient } from "../../registry/client.js";
 import { MCPClient } from "../../mcp/client.js";
 import { sendJson, type RouteContext } from "./index.js";
+import { logger } from "../../core/logger.js";
 
 export async function handleWorkflowRoutes(
   ctx: RouteContext,
@@ -58,10 +59,10 @@ export async function handleWorkflowRoutes(
           return true;
         }
         sendJson(res, 200, { workflow });
-      } catch (error: any) {
+      } catch (error: unknown) {
         sendJson(res, 500, {
           error: "Internal Server Error",
-          message: `Failed to load workflow: ${error.message}`,
+          message: `Failed to load workflow: ${(error instanceof Error ? error.message : String(error))}`,
         });
       }
       return true;
@@ -74,10 +75,10 @@ export async function handleWorkflowRoutes(
           success: true,
           message: `Workflow ${id} deleted successfully`,
         });
-      } catch (error: any) {
+      } catch (error: unknown) {
         sendJson(res, 500, {
           error: "Internal Server Error",
-          message: `Failed to delete workflow: ${error.message}`,
+          message: `Failed to delete workflow: ${(error instanceof Error ? error.message : String(error))}`,
         });
       }
       return true;
@@ -126,9 +127,9 @@ export async function handleWorkflowRoutes(
           },
         });
 
-        client.on("error", (error: any) => {
-          console.warn(
-            `[Daemon] MCP Client error for ${sid}: ${error.message || error}`,
+        client.on("error", (error: unknown) => {
+          logger.warn(
+            `[Daemon] MCP Client error for ${sid}: ${(error instanceof Error ? error.message : String(error)) || error}`,
           );
         });
 
@@ -143,11 +144,11 @@ export async function handleWorkflowRoutes(
           output: out,
         });
         await client.disconnect();
-      } catch (e: any) {
+      } catch (e: unknown) {
         results.push({
           toolName: s.toolName,
           status: "error",
-          error: e.message,
+          error: (e instanceof Error ? e.message : String(e)),
         });
       }
     }
@@ -161,7 +162,7 @@ export async function handleWorkflowRoutes(
       };
       await getWorkflowManager().save(updatedWorkflow);
     } catch (updateError) {
-      console.error(
+      logger.error(
         "[Daemon] Failed to update workflow lastExecutedAt:",
         updateError,
       );

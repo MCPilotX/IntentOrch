@@ -4,14 +4,14 @@ import lodash from "lodash";
 import jexl from "jexl";
 
 // Add length transform to Jexl
-jexl.addTransform("length", (val: any) => {
+jexl.addTransform("length", (val: unknown) => {
   if (Array.isArray(val) || typeof val === "string") return val.length;
-  if (typeof val === "object" && val !== null) return Object.keys(val).length;
+  if (typeof val === "object" && val !== null) return Object.keys(val as Record<string, unknown>).length;
   return 0;
 });
 
 export class ExpressionEvaluator {
-  static resolve(value: any, context: WorkflowContext): any {
+  static resolve(value: unknown, context: WorkflowContext): unknown {
     // 1. If it's a direct reference like "{{input.name}}", return the actual type (not just string)
     // Priority: Single interpolation should preserve type
     if (
@@ -38,7 +38,7 @@ export class ExpressionEvaluator {
       return value.replace(/\{\{(.+?)\}\}/g, (_, expression) => {
         const path = expression.trim();
 
-        let resolvedValue: any;
+        let resolvedValue: unknown;
         if (path.startsWith("input.")) {
           resolvedValue = context.inputs[path.slice(6)];
         } else if (path.startsWith("secret.")) {
@@ -56,8 +56,8 @@ export class ExpressionEvaluator {
     }
 
     if (typeof value === "object" && value !== null) {
-      const resolved: any = {};
-      for (const [k, v] of Object.entries(value)) {
+      const resolved: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
         resolved[k] = this.resolve(v, context);
       }
       return resolved;

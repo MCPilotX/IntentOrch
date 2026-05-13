@@ -49,7 +49,7 @@ export class Logger {
   private formatMessage(
     level: LogLevel,
     message: string,
-    context?: any,
+    context?: unknown,
   ): string {
     const timestamp = new Date().toISOString();
     const contextStr = context ? ` ${JSON.stringify(context)}` : "";
@@ -70,15 +70,16 @@ export class Logger {
       }
 
       fs.appendFileSync(this.logFile, message + "\n", "utf8");
-    } catch (error: any) {
+    } catch (error: unknown) {
       // If file write fails, at least output to console
+      const errMsg = error instanceof Error ? error.message : String(error);
       console.error(
-        `Failed to write to log file ${this.logFile}: ${error.message}`,
+        `Failed to write to log file ${this.logFile}: ${errMsg}`,
       );
     }
   }
 
-  debug(message: string, context?: any) {
+  debug(message: string, context?: unknown) {
     if (this.shouldLog(LogLevel.DEBUG)) {
       const formatted = this.formatMessage(LogLevel.DEBUG, message, context);
       console.debug(formatted);
@@ -86,7 +87,7 @@ export class Logger {
     }
   }
 
-  info(message: string, context?: any) {
+  info(message: string, context?: unknown) {
     if (this.shouldLog(LogLevel.INFO)) {
       const formatted = this.formatMessage(LogLevel.INFO, message, context);
       console.info(formatted);
@@ -94,7 +95,7 @@ export class Logger {
     }
   }
 
-  warn(message: string, context?: any) {
+  warn(message: string, context?: unknown) {
     if (this.shouldLog(LogLevel.WARN)) {
       const formatted = this.formatMessage(LogLevel.WARN, message, context);
       console.warn(formatted);
@@ -102,7 +103,7 @@ export class Logger {
     }
   }
 
-  error(message: string, context?: any) {
+  error(message: string, context?: unknown) {
     if (this.shouldLog(LogLevel.ERROR)) {
       const formatted = this.formatMessage(LogLevel.ERROR, message, context);
       console.error(formatted);
@@ -110,23 +111,23 @@ export class Logger {
     }
   }
 
-  logRequest(command: string, data?: any) {
+  logRequest(command: string, data?: unknown) {
     this.info(`Received command: ${command}`, { data });
   }
 
-  logServiceEvent(serviceName: string, event: string, details?: any) {
+  logServiceEvent(serviceName: string, event: string, details?: unknown) {
     this.info(`Service ${serviceName}: ${event}`, details);
   }
 
-  logAIQuery(query: string, result?: any) {
+  logAIQuery(query: string, result?: unknown) {
     this.info(`AI Query: "${query}"`, { result });
   }
 
-  logConfigUpdate(configType: string, config: any) {
+  logConfigUpdate(configType: string, config: Record<string, unknown>) {
     // Safely record configuration updates, hide sensitive information
     const safeConfig = { ...config };
     if (safeConfig.apiKey) {
-      safeConfig.apiKey = "***" + safeConfig.apiKey.slice(-4);
+      safeConfig.apiKey = "***" + String(safeConfig.apiKey).slice(-4);
     }
     this.info(`Configuration updated: ${configType}`, { config: safeConfig });
   }

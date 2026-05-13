@@ -50,7 +50,7 @@ export async function handleAIRoutes(
           : "AI connection failed",
         details: result,
       });
-    } catch (error: any) {
+    } catch (error: unknown) {
       if (error instanceof SyntaxError) {
         sendJson(res, 400, {
           success: false,
@@ -61,7 +61,7 @@ export async function handleAIRoutes(
         sendJson(res, 500, {
           success: false,
           error: "AI Test Failed",
-          message: error.message,
+          message: (error instanceof Error ? error.message : String(error)),
         });
       }
     }

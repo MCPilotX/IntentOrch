@@ -16,6 +16,7 @@ import { logger } from "../core/logger.js";
 import { LLMClient, getLLMClient } from "./llm-client.js";
 import type { AIConfig } from "../core/types.js";
 import type { Tool } from "../mcp/types.js";
+import type { ToolInfo } from "../execution/tool-executor/index.js";
 import { ParameterMapper, ValidationLevel } from "../mcp/parameter-mapper.js";
 import { Timeouts, LLMDefaults } from "../core/constants.js";
 import type {
@@ -157,7 +158,7 @@ export interface FunctionCallingResult {
 export class CloudIntentEngine {
   private llmClient: LLMClient;
   private config: CloudIntentEngineConfig;
-  private availableTools: Tool[] = [];
+  private availableTools: ToolInfo[] = [];
 
   constructor(config: CloudIntentEngineConfig) {
     this.config = config;
@@ -176,7 +177,7 @@ export class CloudIntentEngine {
   /**
    * Set available tools for the engine
    */
-  setAvailableTools(tools: Tool[]): void {
+  setAvailableTools(tools: ToolInfo[]): void {
     this.availableTools = tools;
     logger.debug(`[CloudIntentEngine] Set ${tools.length} available tools`);
   }
@@ -184,21 +185,23 @@ export class CloudIntentEngine {
   /**
    * Get available tools
    */
-  getAvailableTools(): Tool[] {
+  getAvailableTools(): ToolInfo[] {
     return [...this.availableTools];
   }
 
   /**
    * Step 1: Plan — Generate a tool execution plan from a user query.
    *
-   * Uses LLM function calling to generate a structured plan (DAG) with:
-   * - Tool selection based on available MCP tools
-   * - Parameter extraction from the query
-   * - Dependency ordering between steps
+   * Uses LLM function calling to determine which tools to call.
+   * The LLM returns tool calls that become the plan steps.
    *
-   * The plan is returned WITHOUT executing any tools. The caller should:
-   * 1. Present the plan to the user for confirmation
-   * 2. Execute the plan after confirmation
+   * Note: For complex queries requiring multiple sequential tool calls,
+   * the execution loop in ExecuteService will handle multi-turn ReAct:
+   * 1. LLM returns first batch of tool calls
+   * 2. Execute them
+   * 3. Feed results back to LLM
+   * 4. LLM returns next batch
+   * 5. Repeat until done
    */
   async planQuery(
     query: string,
@@ -221,7 +224,7 @@ export class CloudIntentEngine {
     const userMessage = this.buildUserMessage(query);
 
     try {
-      // Call LLM with function calling
+      // Call LLM with function calling to determine which tools to use
       const response = await this.llmClient.chat({
         messages: [
           { role: "system", content: systemPrompt },
@@ -264,7 +267,6 @@ export class CloudIntentEngine {
       };
     }
   }
-
   /**
    * Step 2: Confirm — Validate and confirm a plan with user interaction.
    *
@@ -603,10 +605,10 @@ Your task is to analyze the user's request and generate a plan that:
 3. Orders steps correctly (dependencies first)
 4. Provides clear descriptions for each step
 
-IMPORTANT: Return your response as a structured plan with steps. Each step must specify:
-- The tool to use
-- The parameters to pass
-- Any dependencies on previous steps`;
+IMPORTANT: Use the available tools via function calling to fulfill the user's request.
+Call the appropriate tools with the correct parameters extracted from the user's query.
+You may need to call multiple tools sequentially to complete complex requests.
+After each tool call, you will receive the result and can decide what to do next.`;
   }
 
   /**
@@ -615,7 +617,7 @@ IMPORTANT: Return your response as a structured plan with steps. Each step must 
   private buildUserMessage(query: string): string {
     return `User request: ${query}
 
-Please generate a structured execution plan to fulfill this request.`;
+Please use the available tools to fulfill this request. Call the appropriate tools with the correct parameters.`;
   }
 
   /**
@@ -640,8 +642,7 @@ Please generate a structured execution plan to fulfill this request.`;
     // Build a tool name -> server name lookup from available tools
     const toolServerMap = new Map<string, string>();
     for (const tool of this.availableTools) {
-      const serverName = (tool as unknown as Record<string, unknown>)
-        .serverName as string | undefined;
+      const serverName = tool.serverName;
       if (serverName && !toolServerMap.has(tool.name)) {
         toolServerMap.set(tool.name, serverName);
       }

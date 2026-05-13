@@ -17,6 +17,7 @@ import { getRegistryClient } from "../../registry/client.js";
 import { getToolRegistry } from "../../tool-registry/registry.js";
 import { getLogPath } from "../../utils/paths.js";
 import { sendJson, type RouteContext } from "./index.js";
+import { logger } from "../../core/logger.js";
 
 export async function handleServerRoutes(
   ctx: RouteContext,
@@ -72,7 +73,7 @@ export async function handleServerRoutes(
 
       // Enrich all with tools
       const enrichedServers = await Promise.all(
-        servers.map(async (server: any) => {
+        servers.map(async (server: Record<string, unknown>) => {
           const serverKey = server.serverName || server.name;
           const tools = await toolRegistry.findToolsByServer(serverKey);
           return {
@@ -83,11 +84,11 @@ export async function handleServerRoutes(
       );
 
       sendJson(res, 200, { servers: enrichedServers });
-    } catch (error: any) {
-      console.error("[Daemon] Error getting servers:", error);
+    } catch (error: unknown) {
+      logger.error("[Daemon] Error getting servers:", error);
       sendJson(res, 500, {
         error: "Internal Server Error",
-        message: error.message,
+        message: (error instanceof Error ? error.message : String(error)),
       });
     }
     return true;
@@ -113,15 +114,15 @@ export async function handleServerRoutes(
       // Register tools
       await getToolRegistry().registerToolsFromManifest(
         serverNameOrUrl,
-        manifest,
+        manifest as unknown as Record<string, unknown>,
       );
 
       // Check if the server is already running before starting
       const existingProcesses = await getProcessManager().list();
       const runningServer = existingProcesses.find(
-        (p: any) =>
+        (p: Record<string, unknown>) =>
           p.manifest &&
-          p.manifest.name === manifest.name &&
+          (p.manifest as Record<string, unknown>).name === manifest.name &&
           p.status === "running",
       );
 
@@ -165,7 +166,7 @@ export async function handleServerRoutes(
         alreadyRunning: false,
         external: processInfo.external || false,
       });
-    } catch (error: any) {
+    } catch (error: unknown) {
       if (error instanceof SyntaxError) {
         sendJson(res, 400, {
           error: "Invalid JSON",
@@ -182,7 +183,7 @@ export async function handleServerRoutes(
         if (manifest) {
           sendJson(res, 500, {
             error: "Server Startup Failed",
-            message: `Failed to start server: ${error.message}`,
+            message: `Failed to start server: ${(error instanceof Error ? error.message : String(error))}`,
             details: {
               manifestName: manifest.name,
               manifestVersion: manifest.version,
@@ -199,7 +200,7 @@ export async function handleServerRoutes(
 
       sendJson(res, 500, {
         error: "Server Startup Failed",
-        message: `Failed to start server: ${error.message}`,
+        message: `Failed to start server: ${(error instanceof Error ? error.message : String(error))}`,
         suggestion:
           "Check if the server name/URL is valid and all required secrets are set",
       });
@@ -231,7 +232,7 @@ export async function handleServerRoutes(
         })),
         total: manifests.length,
       });
-    } catch (error: any) {
+    } catch (error: unknown) {
       if (error instanceof SyntaxError) {
         sendJson(res, 400, {
           error: "Invalid JSON",
@@ -241,7 +242,7 @@ export async function handleServerRoutes(
         sendJson(res, 400, {
           success: false,
           error: "Import Failed",
-          message: error.message,
+          message: (error instanceof Error ? error.message : String(error)),
           suggestion:
             'Please check that the config is valid Claude Desktop format (has "mcpServers" field)',
         });
@@ -265,14 +266,14 @@ export async function handleServerRoutes(
 
       const manifest =
         await getRegistryClient().fetchManifest(serverNameOrUrl);
-      console.log(
+      logger.info(
         "[Daemon] Pulled manifest:",
         JSON.stringify(manifest, null, 2).substring(0, 500),
       );
 
       await getToolRegistry().registerToolsFromManifest(
         serverNameOrUrl,
-        manifest,
+        manifest as unknown as Record<string, unknown>,
       );
 
       sendJson(res, 200, {
@@ -284,7 +285,7 @@ export async function handleServerRoutes(
           description: manifest.description,
         },
       });
-    } catch (error: any) {
+    } catch (error: unknown) {
       if (error instanceof SyntaxError) {
         sendJson(res, 400, {
           error: "Invalid JSON",
@@ -294,7 +295,7 @@ export async function handleServerRoutes(
         sendJson(res, 400, {
           success: false,
           error: "Manifest Pull Failed",
-          message: `Failed to pull manifest: ${error.message}`,
+          message: `Failed to pull manifest: ${(error instanceof Error ? error.message : String(error))}`,
           suggestion:
             "Check if the server name/URL is valid and accessible",
         });
@@ -373,8 +374,8 @@ export async function handleServerRoutes(
         logs: logContent,
         logPath,
       });
-    } catch (error: any) {
-      if (error.code === "ENOENT") {
+    } catch (error: unknown) {
+      if ((error && typeof error === "object" && "code" in error ? (error as { code: string }).code : undefined) === "ENOENT") {
         sendJson(res, 404, {
           error: "Logs Not Found",
           message: `Log file for PID ${pid} not found`,
@@ -382,7 +383,7 @@ export async function handleServerRoutes(
       } else {
         sendJson(res, 500, {
           error: "Internal Server Error",
-          message: `Failed to read logs: ${error.message}`,
+          message: `Failed to read logs: ${(error instanceof Error ? error.message : String(error))}`,
         });
       }
     }
@@ -417,10 +418,10 @@ export async function handleServerRoutes(
         message: `Server with PID ${pid} stopped successfully`,
         pid,
       });
-    } catch (error: any) {
+    } catch (error: unknown) {
       sendJson(res, 500, {
         error: "Failed to Stop Server",
-        message: `Failed to stop server: ${error.message}`,
+        message: `Failed to stop server: ${(error instanceof Error ? error.message : String(error))}`,
       });
     }
     return true;

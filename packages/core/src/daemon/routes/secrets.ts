@@ -20,10 +20,10 @@ export async function handleSecretsRoutes(
       const secretManager = getSecretManager();
       const keys = await secretManager.list();
       sendJson(res, 200, { secrets: keys });
-    } catch (error: any) {
+    } catch (error: unknown) {
       sendJson(res, 500, {
         error: "Failed to list secrets",
-        message: error.message,
+        message: (error instanceof Error ? error.message : String(error)),
       });
     }
     return true;
@@ -55,7 +55,7 @@ export async function handleSecretsRoutes(
         success: true,
         message: `Secret '${key}' set successfully`,
       });
-    } catch (error: any) {
+    } catch (error: unknown) {
       if (error instanceof SyntaxError) {
         sendJson(res, 400, {
           error: "Invalid JSON",
@@ -64,7 +64,7 @@ export async function handleSecretsRoutes(
       } else {
         sendJson(res, 500, {
           error: "Failed to set secret",
-          message: error.message,
+          message: (error instanceof Error ? error.message : String(error)),
         });
       }
     }
@@ -81,10 +81,10 @@ export async function handleSecretsRoutes(
         success: true,
         message: `Secret '${key}' deleted successfully`,
       });
-    } catch (error: any) {
+    } catch (error: unknown) {
       sendJson(res, 500, {
         error: "Failed to delete secret",
-        message: error.message,
+        message: (error instanceof Error ? error.message : String(error)),
       });
     }
     return true;

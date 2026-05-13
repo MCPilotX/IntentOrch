@@ -100,7 +100,7 @@ export enum ErrorSeverity {
  * Error Context Information
  */
 export interface ErrorContext {
-  [key: string]: any;
+  [key: string]: unknown;
   timestamp?: Date;
   userId?: string;
   requestId?: string;
@@ -239,8 +239,8 @@ export class ErrorFactory {
     message: string,
     context: ErrorContext = {},
     cause?: Error,
-  ): MCPilotError {
-    return new MCPilotError(
+  ): IntentOrchError {
+    return new IntentOrchError(
       ErrorCode.CONFIG_INVALID,
       message,
       ErrorSeverity.HIGH,
@@ -270,8 +270,8 @@ export class ErrorFactory {
   static serviceNotFound(
     serviceName: string,
     context: ErrorContext = {},
-  ): MCPilotError {
-    return new MCPilotError(
+  ): IntentOrchError {
+    return new IntentOrchError(
       ErrorCode.SERVICE_NOT_FOUND,
       `Service '${serviceName}' not found`,
       ErrorSeverity.MEDIUM,
@@ -298,8 +298,8 @@ export class ErrorFactory {
     path: string,
     context: ErrorContext = {},
     cause?: Error,
-  ): MCPilotError {
-    return new MCPilotError(
+  ): IntentOrchError {
+    return new IntentOrchError(
       ErrorCode.RUNTIME_DETECTION_FAILED,
       `Failed to detect runtime for path: ${path}`,
       ErrorSeverity.MEDIUM,
@@ -329,8 +329,8 @@ export class ErrorFactory {
     serviceName: string,
     context: ErrorContext = {},
     cause?: Error,
-  ): MCPilotError {
-    return new MCPilotError(
+  ): IntentOrchError {
+    return new IntentOrchError(
       ErrorCode.PROCESS_START_FAILED,
       `Failed to start process for service '${serviceName}'`,
       ErrorSeverity.HIGH,
@@ -360,8 +360,8 @@ export class ErrorFactory {
     operation: string,
     resource: string,
     context: ErrorContext = {},
-  ): MCPilotError {
-    return new MCPilotError(
+  ): IntentOrchError {
+    return new IntentOrchError(
       ErrorCode.PERMISSION_DENIED,
       `Permission denied for ${operation} on ${resource}`,
       ErrorSeverity.HIGH,
@@ -389,8 +389,8 @@ export class ErrorFactory {
     url: string,
     context: ErrorContext = {},
     cause?: Error,
-  ): MCPilotError {
-    return new MCPilotError(
+  ): IntentOrchError {
+    return new IntentOrchError(
       ErrorCode.NETWORK_ERROR,
       `Network error during ${operation} to ${url}`,
       ErrorSeverity.MEDIUM,
@@ -419,8 +419,8 @@ export class ErrorFactory {
   static notImplemented(
     feature: string,
     context: ErrorContext = {},
-  ): MCPilotError {
-    return new MCPilotError(
+  ): IntentOrchError {
+    return new IntentOrchError(
       ErrorCode.NOT_IMPLEMENTED,
       `Feature '${feature}' is not implemented yet`,
       ErrorSeverity.LOW,
@@ -449,8 +449,8 @@ export class ErrorFactory {
     field: string,
     reason: string,
     context: ErrorContext = {},
-  ): MCPilotError {
-    return new MCPilotError(
+  ): IntentOrchError {
+    return new IntentOrchError(
       ErrorCode.VALIDATION_FAILED,
       `Validation failed for field '${field}': ${reason}`,
       ErrorSeverity.MEDIUM,
@@ -473,10 +473,11 @@ export class ErrorFactory {
 
 /**
  * Error Handler - Handle, log and recover from errors
+ * Uses IntentOrchError as the unified error type.
  */
 export class ErrorHandler {
   private static instance: ErrorHandler;
-  private handlers: Array<(error: MCPilotError) => Promise<void>> = [];
+  private handlers: Array<(error: IntentOrchError) => Promise<void>> = [];
 
   private constructor() {}
 
@@ -490,19 +491,19 @@ export class ErrorHandler {
   /**
    * Register error handler
    */
-  registerHandler(handler: (error: MCPilotError) => Promise<void>): void {
+  registerHandler(handler: (error: IntentOrchError) => Promise<void>): void {
     this.handlers.push(handler);
   }
 
   /**
-   * Handle error
+   * Handle error — converts any Error to IntentOrchError then dispatches to registered handlers
    */
-  async handle(error: Error | MCPilotError): Promise<void> {
-    // Convert to MCPilotError (if not already)
-    const mcError =
-      error instanceof MCPilotError
+  async handle(error: Error | IntentOrchError): Promise<void> {
+    // Convert to IntentOrchError (if not already)
+    const orchError =
+      error instanceof IntentOrchError
         ? error
-        : new MCPilotError(
+        : new IntentOrchError(
             ErrorCode.UNEXPECTED_ERROR,
             error.message,
             ErrorSeverity.HIGH,
@@ -512,12 +513,12 @@ export class ErrorHandler {
           );
 
     // Log error
-    logger.error(`[IntentOrch Error] ${mcError.getSummary()}`);
+    logger.error(`[IntentOrch Error] ${orchError.getSummary()}`);
 
     // Execute all registered handlers
     for (const handler of this.handlers) {
       try {
-        await handler(mcError);
+        await handler(orchError);
       } catch (handlerError) {
         logger.error("Error handler failed:", handlerError);
       }
@@ -535,10 +536,10 @@ export class ErrorHandler {
     try {
       return await fn();
     } catch (error) {
-      const mcError =
-        error instanceof MCPilotError
+      const orchError =
+        error instanceof IntentOrchError
           ? error
-          : new MCPilotError(
+          : new IntentOrchError(
               ErrorCode.UNEXPECTED_ERROR,
               `Operation '${operation}' failed: ${error instanceof Error ? error.message : String(error)}`,
               ErrorSeverity.HIGH,
@@ -547,17 +548,18 @@ export class ErrorHandler {
               error instanceof Error ? error : undefined,
             );
 
-      await this.handle(mcError);
-      throw mcError;
+      await this.handle(orchError);
+      throw orchError;
     }
   }
 }
 
 /**
  * Default Error Handler - Console Output
+ * @deprecated Use IntentOrchError directly. This is kept for backward compatibility.
  */
 export class ConsoleErrorHandler {
-  static async handle(error: MCPilotError): Promise<void> {
+  static async handle(error: IntentOrchError): Promise<void> {
     const colors = {
       low: "\x1b[36m", // cyan
       medium: "\x1b[33m", // yellow
@@ -682,21 +684,28 @@ const errorHandler = ErrorHandler.getInstance();
 errorHandler.registerHandler(ConsoleErrorHandler.handle);
 
 // Export common functions
+
+/**
+ * Create a standardized IntentOrch error
+ */
 export function createError(
   code: ErrorCode,
   message: string,
   severity?: ErrorSeverity,
   context?: ErrorContext,
-): MCPilotError {
-  return new MCPilotError(code, message, severity, context);
+): IntentOrchError {
+  return new IntentOrchError(code, message, severity, context);
 }
 
+/**
+ * Wrap an existing Error into an IntentOrchError
+ */
 export function wrapError(
   error: Error,
   code: ErrorCode = ErrorCode.UNEXPECTED_ERROR,
   context?: ErrorContext,
-): MCPilotError {
-  return new MCPilotError(
+): IntentOrchError {
+  return new IntentOrchError(
     code,
     error.message,
     ErrorSeverity.HIGH,
@@ -706,12 +715,18 @@ export function wrapError(
   );
 }
 
-export function isMCPilotError(error: any): error is MCPilotError {
-  return error instanceof MCPilotError;
+/**
+ * Type guard — checks if an unknown value is an IntentOrchError
+ */
+export function isIntentOrchError(error: unknown): error is IntentOrchError {
+  return error instanceof IntentOrchError;
 }
 
+/**
+ * Check if an error should be retried based on its ErrorCode
+ */
 export function shouldRetry(error: Error): boolean {
-  if (!isMCPilotError(error)) {
+  if (!isIntentOrchError(error)) {
     return false;
   }
 
@@ -726,3 +741,6 @@ export function shouldRetry(error: Error): boolean {
 
   return (retryableCodes as readonly ErrorCode[]).includes(error.code);
 }
+
+/** @deprecated Use isIntentOrchError instead */
+export const isMCPilotError = isIntentOrchError;

@@ -26,7 +26,7 @@ export class SseTransport extends EventEmitter implements MCPTransport {
     this.sdkTransport = new SSEClientTransport(new URL(this.config.url), {
       eventSourceInit: {
         headers: this.config.headers
-      } as any,
+      } as Record<string, unknown>,
       requestInit: {
         headers: this.config.headers
       }
@@ -58,8 +58,8 @@ export class SseTransport extends EventEmitter implements MCPTransport {
       this._connected = true;
       this.emit("connected");
       logger.info(`[SseTransport] Official SDK connection established`);
-    } catch (error: any) {
-      logger.error(`[SseTransport] SDK Connection failed: ${error.message}`);
+    } catch (error: unknown) {
+      logger.error(`[SseTransport] SDK Connection failed: ${(error instanceof Error ? error.message : String(error))}`);
       throw error;
     }
   }
@@ -76,9 +76,9 @@ export class SseTransport extends EventEmitter implements MCPTransport {
 
     try {
       // SDK handles endpoint resolution and POSTing internally
-      await this.sdkTransport.send(message as any);
-    } catch (error: any) {
-      logger.error(`[SseTransport] SDK Send failed: ${error.message}`);
+      await this.sdkTransport.send(message as unknown as JSONRPCMessage);
+    } catch (error: unknown) {
+      logger.error(`[SseTransport] SDK Send failed: ${(error instanceof Error ? error.message : String(error))}`);
       this.emit("error", error);
       throw error;
     }

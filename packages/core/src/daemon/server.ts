@@ -9,12 +9,9 @@
 import http from "http";
 import fs from "fs/promises";
 import { getProcessManager } from "../process-manager/manager.js";
-import { getSecretManager } from "../secret/manager.js";
-import { getWorkflowManager } from "../workflow/manager.js";
+import { ProcessInfo } from "../process-manager/types.js";
 import { getRegistryClient } from "../registry/client.js";
 import { getToolRegistry } from "../tool-registry/registry.js";
-import { getIntentService } from "../ai/intent-service.js";
-import { getAIConfig } from "../utils/config.js";
 import {
   ensureInTorchDir,
   getDaemonPidPath,
@@ -22,12 +19,8 @@ import {
   getLogPath,
 } from "../utils/paths.js";
 import { DaemonConfig } from "./types.js";
-import { MCPClient } from "../mcp/client.js";
-import {
-  getExecuteService,
-  type UnifiedExecutionOptions,
-} from "../ai/execute-service.js";
 import { healthCheckScheduler } from "../kernel/health-check-scheduler.js";
+import { logger } from "../core/logger.js";
 
 // ==================== Route Handlers ====================
 import { handleStatusRoutes } from "./routes/status.js";
@@ -54,11 +47,16 @@ import {
 // ==================== Shared Types ====================
 import { sendJson, type RouteContext } from "./routes/index.js";
 
+import { Router } from "./router/router.js";
+
+import { FSLock } from "../utils/fs-lock.js";
+
 export class DaemonServer {
   private server: http.Server;
   private config: DaemonConfig;
   private startTime: number;
   private requestCount: number;
+  private router: Router;
 
   constructor(
     config: Partial<DaemonConfig> = {
@@ -73,7 +71,24 @@ export class DaemonServer {
     };
     this.startTime = Date.now();
     this.requestCount = 0;
+    this.router = this.setupRouter();
     this.server = this.createServer();
+  }
+
+  private setupRouter(): Router {
+    const router = new Router();
+    
+    // Register all routes
+    router.use("ALL", /^\/api\/status/, handleStatusRoutes);
+    router.use("ALL", /^\/api\/servers/, handleServerRoutes);
+    router.use("ALL", /^\/api\/workflows/, handleWorkflowRoutes);
+    router.use("ALL", /^\/api\/execute/, handleExecutionRoutes);
+    router.use("ALL", /^\/api\/ai/, handleAIRoutes);
+    router.use("ALL", /^\/api\/config/, handleConfigRoutes);
+    router.use("ALL", /^\/api\/secrets/, handleSecretsRoutes);
+    router.use("ALL", /^\/api\/auth/, handleAuthRoutes);
+
+    return router;
   }
 
   private createServer() {
@@ -81,7 +96,7 @@ export class DaemonServer {
       try {
         await this.handleRequest(req, res);
       } catch (e) {
-        console.error("[Daemon Error]", e);
+        logger.error("[Daemon Error]", e);
         sendJson(res, 500, {
           error: "Internal Error",
           message: (e as Error).message,
@@ -130,15 +145,8 @@ export class DaemonServer {
     }
 
     // ==================== Route Dispatch ====================
-    // Each handler returns true if it matched the route
-    if (await handleStatusRoutes(ctx)) return;
-    if (await handleServerRoutes(ctx)) return;
-    if (await handleWorkflowRoutes(ctx)) return;
-    if (await handleExecutionRoutes(ctx)) return;
-    if (await handleAIRoutes(ctx)) return;
-    if (await handleConfigRoutes(ctx)) return;
-    if (await handleSecretsRoutes(ctx)) return;
-    if (await handleAuthRoutes(ctx)) return;
+    const handled = await this.router.dispatch(ctx);
+    if (handled) return;
 
     // ==================== 404 Fallback ====================
     sendJson(res, 404, { error: "Not Found", path });
@@ -146,23 +154,46 @@ export class DaemonServer {
 
   async start() {
     ensureInTorchDir();
+
+    // Use FSLock to prevent multiple instances and handle stale PID files
+    const acquired = await FSLock.acquire(this.config.pidFile, 60000); // 1 min TTL
+    if (!acquired) {
+      const existingPid = await fs.readFile(this.config.pidFile, "utf-8").catch(() => "unknown");
+      logger.error(`[Daemon] Failed to start: Another instance is running with PID ${existingPid}`);
+      process.exit(1);
+    }
+
+    // Update PID file content (FSLock already wrote the PID, but let's be explicit)
     await fs.writeFile(this.config.pidFile, process.pid.toString());
+
+    // Setup periodic touch to keep lock alive
+    const touchInterval = setInterval(() => FSLock.touch(this.config.pidFile), 30000);
 
     return new Promise<void>((resolve) => {
       this.server.listen(this.config.port, this.config.host, async () => {
-        console.log(
+        logger.info(
           `[Daemon] Server started on ${this.config.host}:${this.config.port}`,
         );
 
         this.autoStartServers().catch((error) => {
-          console.error("[Daemon] Error auto-starting servers:", error);
+          logger.error("[Daemon] Error auto-starting servers:", error);
         });
 
         this.initHealthCheckScheduler().catch((error) => {
-          console.error(
+          logger.error(
             "[Daemon] Error initializing health check scheduler:",
             error,
           );
+        });
+
+        // Cleanup on shutdown
+        process.on("SIGTERM", () => {
+          clearInterval(touchInterval);
+          this.stop();
+        });
+        process.on("SIGINT", () => {
+          clearInterval(touchInterval);
+          this.stop();
         });
 
         resolve();
@@ -172,20 +203,20 @@ export class DaemonServer {
 
   private async initHealthCheckScheduler(): Promise<void> {
     try {
-      console.log("[Daemon] Initializing health check scheduler...");
+      logger.info("[Daemon] Initializing health check scheduler...");
       const runningServers = await getProcessManager().list();
       const runningProcesses = runningServers.filter(
-        (p: any) => p.status === "running",
+        (p: { status?: string }) => p.status === "running",
       );
 
       if (runningProcesses.length === 0) {
-        console.log(
+        logger.info(
           "[Daemon] No running servers to register for health checks",
         );
         return;
       }
 
-      console.log(
+      logger.info(
         `[Daemon] Registering ${runningProcesses.length} running servers for health checks`,
       );
 
@@ -208,27 +239,27 @@ export class DaemonServer {
           },
         );
 
-        console.log(
+        logger.info(
           `[Daemon] Registered health check for server: ${serverName} (PID: ${server.pid})`,
         );
       }
 
-      healthCheckScheduler.on("degraded", (result: any) => {
-        console.warn(
+      healthCheckScheduler.on("degraded", (result: { serverName: string; consecutiveFailures: number }) => {
+        logger.warn(
           `[Daemon] Health check: Server "${result.serverName}" is DEGRADED (${result.consecutiveFailures} consecutive failures)`,
         );
       });
 
-      healthCheckScheduler.on("recovered", (result: any) => {
-        console.log(
+      healthCheckScheduler.on("recovered", (result: { serverName: string }) => {
+        logger.info(
           `[Daemon] Health check: Server "${result.serverName}" RECOVERED`,
         );
       });
 
       healthCheckScheduler.start();
-      console.log("[Daemon] Health check scheduler started successfully");
+      logger.info("[Daemon] Health check scheduler started successfully");
     } catch (error) {
-      console.error(
+      logger.error(
         "[Daemon] Failed to initialize health check scheduler:",
         error,
       );
@@ -237,7 +268,7 @@ export class DaemonServer {
 
   private async autoStartServers(): Promise<void> {
     try {
-      console.log("[Daemon] Starting auto-start manager for MCP servers...");
+      logger.info("[Daemon] Starting auto-start manager for MCP servers...");
       const { AutoStartManager } = await import(
         "../utils/auto-start-manager.js"
       );
@@ -245,22 +276,22 @@ export class DaemonServer {
       const configuredServers = await this.getConfiguredServers();
 
       if (configuredServers.length === 0) {
-        console.log("[Daemon] No servers configured for auto-start");
+        logger.info("[Daemon] No servers configured for auto-start");
         return;
       }
 
-      console.log(
+      logger.info(
         `[Daemon] Found ${configuredServers.length} configured servers: ${configuredServers.join(", ")}`,
       );
       const results =
         await autoStartManager.ensureServersRunning(configuredServers);
       const summary = autoStartManager.getResultsSummary(results);
-      console.log(
+      logger.info(
         `[Daemon] Auto-start completed: ${summary.successful} started, ${summary.alreadyRunning} already running, ${summary.failed} failed`,
       );
 
       if (summary.failed > 0) {
-        console.warn(
+        logger.warn(
           "[Daemon] Some servers failed to start. Check logs for details.",
         );
       }
@@ -268,7 +299,7 @@ export class DaemonServer {
       await new Promise((resolve) => setTimeout(resolve, 5000));
       await this.ensureToolsRegistered(configuredServers);
     } catch (error) {
-      console.error("[Daemon] Failed to auto-start servers:", error);
+      logger.error("[Daemon] Failed to auto-start servers:", error);
     }
   }
 
@@ -295,7 +326,7 @@ export class DaemonServer {
         return config.services.autoStart;
       }
     } catch (error) {
-      console.warn(
+      logger.warn(
         "[Daemon] Failed to read auto-start configuration:",
         error,
       );
@@ -308,7 +339,7 @@ export class DaemonServer {
     serverNames: string[],
   ): Promise<void> {
     try {
-      console.log("[Daemon] Ensuring tools are registered for servers...");
+      logger.info("[Daemon] Ensuring tools are registered for servers...");
       const { MCPClient: MCPClientImport } = await import("../mcp/client.js");
       const processManager = getProcessManager();
       const toolRegistry = getToolRegistry();
@@ -316,14 +347,14 @@ export class DaemonServer {
 
       await new Promise((resolve) => setTimeout(resolve, 2000));
       const runningServers = await processManager.list();
-      console.log(
+      logger.info(
         `[Daemon] Found ${runningServers.length} running servers`,
       );
 
       for (const serverName of serverNames) {
         try {
           const serverInfo = runningServers.find(
-            (s: any) =>
+            (s: ProcessInfo) =>
               s.status === "running" &&
               (s.serverName === serverName ||
                 s.name === serverName ||
@@ -334,19 +365,19 @@ export class DaemonServer {
           );
 
           if (!serverInfo) {
-            console.log(
+            logger.info(
               `[Daemon] Server ${serverName} is not running or not found, skipping tool registration`,
             );
             continue;
           }
 
-          console.log(
+          logger.info(
             `[Daemon] Registering tools for server: ${serverName} (PID: ${serverInfo.pid})`,
           );
           const manifest =
             await registryClient.getCachedManifest(serverName);
           if (!manifest) {
-            console.warn(
+            logger.warn(
               `[Daemon] No manifest found for server ${serverName}`,
             );
             continue;
@@ -356,39 +387,39 @@ export class DaemonServer {
             manifest.tools ||
             (manifest.capabilities && manifest.capabilities.tools);
           if (!hasTools) {
-            console.log(
+            logger.info(
               `[Daemon] Manifest for ${serverName} has no tools field, trying dynamic discovery`,
             );
             await this.discoverToolsDynamically(serverInfo);
           } else {
             await toolRegistry.registerToolsFromManifest(
               serverName,
-              manifest,
+              manifest as unknown as Record<string, unknown>,
             );
-            console.log(
+            logger.info(
               `[Daemon] Tools registered from manifest for server: ${serverName}`,
             );
           }
         } catch (serverError) {
-          console.error(
+          logger.error(
             `[Daemon] Error registering tools for server ${serverName}:`,
             serverError,
           );
         }
       }
 
-      console.log("[Daemon] Tool registration completed");
+      logger.info("[Daemon] Tool registration completed");
     } catch (error) {
-      console.error(
+      logger.error(
         "[Daemon] Failed to ensure tools are registered:",
         error,
       );
     }
   }
 
-  private async discoverToolsDynamically(serverInfo: any): Promise<void> {
+  private async discoverToolsDynamically(serverInfo: { name: string; serverName?: string; transport?: { type: string; url?: string }; runtime?: { command: string; args?: string[]; env?: Record<string, string> } }): Promise<void> {
     try {
-      console.log(
+      logger.info(
         `[Daemon] Attempting dynamic tool discovery for server: ${serverInfo.name}`,
       );
       const { MCPClient: MCPClientImport } = await import(
@@ -407,20 +438,20 @@ export class DaemonServer {
         },
       });
 
-      client.on("error", (error: any) => {
-        console.warn(
+      client.on("error", (error: Error) => {
+        logger.warn(
           `[Daemon] MCP Client error for ${serverInfo.name} during discovery: ${error.message || error}`,
         );
       });
 
       await client.connect();
       const tools = await client.listTools();
-      console.log(
+      logger.info(
         `[Daemon] Discovered ${tools.length} tools dynamically from server ${serverInfo.name}`,
       );
 
       const toolRegistry = getToolRegistry();
-      const toolMetadataArray = tools.map((tool: any) => ({
+      const toolMetadataArray = tools.map((tool: { name: string; description?: string; inputSchema?: { properties?: Record<string, unknown> } }) => ({
         name: tool.name,
         description: tool.description || "",
         serverName: serverInfo.serverName,
@@ -435,11 +466,11 @@ export class DaemonServer {
         toolMetadataArray,
       );
       await client.disconnect();
-      console.log(
+      logger.info(
         `[Daemon] Dynamic tool discovery completed for ${serverInfo.name}`,
       );
     } catch (error) {
-      console.error(
+      logger.error(
         `[Daemon] Failed to discover tools dynamically for ${serverInfo.name}:`,
         error,
       );
@@ -447,6 +478,7 @@ export class DaemonServer {
   }
 
   async stop() {
+    await FSLock.release(this.config.pidFile);
     return new Promise<void>((r) => this.server.close(() => r()));
   }
 }

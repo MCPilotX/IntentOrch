@@ -1,6 +1,15 @@
 /**
  * Execution Routes (AI-powered intent parsing & step execution)
  *
+ * Session-based API (recommended):
+ * - POST /api/execute/session/create
+ * - POST /api/execute/session/:sessionId/execute
+ * - POST /api/execute/session/:sessionId/feedback
+ * - GET  /api/execute/session/:sessionId
+ * - GET  /api/execute/sessions
+ * - POST /api/execute/session/:sessionId/cancel
+ *
+ * Legacy endpoints (kept for backward compatibility):
  * - POST /api/execute/natural-language
  * - POST /api/execute/parse-intent
  * - POST /api/execute/steps
@@ -12,83 +21,329 @@
  * - POST /api/intent/parse
  */
 
+import http from "http";
 import { getExecuteService } from "../../ai/execute-service.js";
 import type { UnifiedExecutionOptions } from "../../ai/execute-service.js";
 import { sendJson, type RouteContext } from "./index.js";
+import { logger } from "../../core/logger.js";
 
 export async function handleExecutionRoutes(
   ctx: RouteContext,
 ): Promise<boolean> {
   const { path, method, res, body } = ctx;
 
-  // ==================== POST /api/execute/natural-language ====================
+  // ==================== Session-Based API (New) ====================
+
+  // POST /api/execute/session/create
+  if (path === "/api/execute/session/create" && method === "POST") {
+    return handleSessionCreate(res, body);
+  }
+
+  // POST /api/execute/session/:sessionId/execute
+  const executeMatch = path.match(
+    /^\/api\/execute\/session\/([^\/]+)\/execute$/,
+  );
+  if (executeMatch && method === "POST") {
+    return handleSessionExecute(res, executeMatch[1], body);
+  }
+
+  // POST /api/execute/session/:sessionId/feedback
+  const feedbackMatch = path.match(
+    /^\/api\/execute\/session\/([^\/]+)\/feedback$/,
+  );
+  if (feedbackMatch && method === "POST") {
+    return handleSessionFeedback(res, feedbackMatch[1], body);
+  }
+
+  // GET /api/execute/session/:sessionId
+  const getSessionMatch = path.match(
+    /^\/api\/execute\/session\/([^\/]+)$/,
+  );
+  if (getSessionMatch && method === "GET") {
+    return handleGetSession(res, getSessionMatch[1]);
+  }
+
+  // GET /api/execute/sessions
+  if (path === "/api/execute/sessions" && method === "GET") {
+    return handleListSessions(res);
+  }
+
+  // POST /api/execute/session/:sessionId/cancel
+  const cancelMatch = path.match(
+    /^\/api\/execute\/session\/([^\/]+)\/cancel$/,
+  );
+  if (cancelMatch && method === "POST") {
+    return handleSessionCancel(res, cancelMatch[1]);
+  }
+
+  // ==================== Legacy Endpoints (deprecated) ====================
+  // These endpoints are kept for backward compatibility only.
+  // They delegate to the Session API internally.
+  // Will be removed in a future major version.
+  // New clients should use the Session API endpoints above.
+
+  // POST /api/execute/natural-language
   if (
     (path === "/api/execute/natural-language" ||
       path === "/api/execute/naturalLanguage") &&
     method === "POST"
   ) {
+    logger.warn(`[Daemon] DEPRECATED endpoint called: ${path}. Use POST /api/execute/session/create instead.`);
     return handleNaturalLanguage(res, body);
   }
 
-  // ==================== POST /api/execute/parse-intent ====================
+  // POST /api/execute/parse-intent
   if (
     (path === "/api/execute/parse-intent" ||
       path === "/api/execute/parseIntent") &&
     method === "POST"
   ) {
+    logger.warn(`[Daemon] DEPRECATED endpoint called: ${path}. Use POST /api/execute/session/create instead.`);
     return handleParseIntent(res, body);
   }
 
-  // ==================== POST /api/execute/steps ====================
+  // POST /api/execute/steps
   if (
     (path === "/api/execute/steps" ||
       path === "/api/execute/execute-steps" ||
       path === "/api/execute/executeSteps") &&
     method === "POST"
   ) {
+    logger.warn(`[Daemon] DEPRECATED endpoint called: ${path}. Use POST /api/execute/session/create instead.`);
     return handleExecuteSteps(res, body);
   }
 
-  // ==================== POST /api/execute/interactive/start ====================
+  // POST /api/execute/interactive/start
   if (path === "/api/execute/interactive/start" && method === "POST") {
+    logger.warn(`[Daemon] DEPRECATED endpoint called: ${path}. Use POST /api/execute/session/create instead.`);
     return handleInteractiveStart(res, body);
   }
 
-  // ==================== POST /api/execute/interactive/respond ====================
+  // POST /api/execute/interactive/respond
   if (path === "/api/execute/interactive/respond" && method === "POST") {
+    logger.warn(`[Daemon] DEPRECATED endpoint called: ${path}. Use POST /api/execute/session/:id/feedback instead.`);
     return handleInteractiveRespond(res, body);
   }
 
-  // ==================== POST /api/execute/interactive/execute ====================
+  // POST /api/execute/interactive/execute
   if (path === "/api/execute/interactive/execute" && method === "POST") {
+    logger.warn(`[Daemon] DEPRECATED endpoint called: ${path}. Use POST /api/execute/session/:id/execute instead.`);
     return handleInteractiveExecute(res, body);
   }
 
-  // ==================== POST /api/execute/interactive/cleanup ====================
+  // POST /api/execute/interactive/cleanup
   if (path === "/api/execute/interactive/cleanup" && method === "POST") {
+    logger.warn(`[Daemon] DEPRECATED endpoint called: ${path}. Cleanup is now automatic via SessionStore.`);
     return handleInteractiveCleanup(res, body);
   }
 
-  // ==================== GET /api/execute/interactive/:sessionId ====================
+  // GET /api/execute/interactive/:sessionId
   const sessionMatch = path.match(
     /^\/api\/execute\/interactive\/([^\/]+)$/,
   );
   if (sessionMatch && method === "GET") {
+    logger.warn(`[Daemon] DEPRECATED endpoint called: ${path}. Use GET /api/execute/session/:id instead.`);
     return handleGetInteractiveSession(res, sessionMatch[1]);
   }
 
-  // ==================== POST /api/intent/parse ====================
+  // POST /api/intent/parse
   if (path === "/api/intent/parse" && method === "POST") {
+    logger.warn(`[Daemon] DEPRECATED endpoint called: ${path}. Use POST /api/execute/session/create instead.`);
     return handleIntentParse(res, body);
   }
 
   return false;
 }
 
-// ==================== Handler Implementations ====================
+// ==================== Session-Based API Handlers ====================
+
+async function handleSessionCreate(
+  res: http.ServerResponse,
+  body: string,
+): Promise<boolean> {
+  try {
+    const { query, type, metadata } = JSON.parse(body);
+
+    if (!query || typeof query !== "string") {
+      sendJson(res, 400, {
+        success: false,
+        error: "Query is required and must be a string",
+      });
+      return true;
+    }
+
+    const sessionType = type === "interactive" ? "interactive" : "direct";
+
+    logger.info(
+      `[Daemon] Creating ${sessionType} session for query: "${query.substring(0, 100)}..."`,
+    );
+
+    const executionService = getExecuteService();
+    const session = await executionService.createSession(
+      query,
+      sessionType,
+      metadata,
+    );
+
+    sendJson(res, 200, {
+      success: true,
+      sessionId: session.id,
+      session,
+    });
+  } catch (error: unknown) {
+    logger.error("[Daemon] Error creating session:", error);
+    sendJson(res, 500, {
+      success: false,
+      error: `Failed to create session: ${(error instanceof Error ? error.message : String(error))}`,
+    });
+  }
+  return true;
+}
+
+async function handleSessionExecute(
+  res: http.ServerResponse,
+  sessionId: string,
+  body: string,
+): Promise<boolean> {
+  try {
+    const { options } = body ? JSON.parse(body) : {};
+
+    logger.info(`[Daemon] Executing session: ${sessionId}`);
+
+    const executionService = getExecuteService();
+    const result = await executionService.executeSession(
+      sessionId,
+      options || {},
+    );
+
+    sendJson(res, result.success ? 200 : 400, result);
+  } catch (error: unknown) {
+    logger.error("[Daemon] Error executing session:", error);
+    sendJson(res, 500, {
+      success: false,
+      error: `Failed to execute session: ${(error instanceof Error ? error.message : String(error))}`,
+    });
+  }
+  return true;
+}
+
+async function handleSessionFeedback(
+  res: http.ServerResponse,
+  sessionId: string,
+  body: string,
+): Promise<boolean> {
+  try {
+    const { type, message, modifiedPlan } = JSON.parse(body);
+
+    if (!type || typeof type !== "string") {
+      sendJson(res, 400, {
+        success: false,
+        error: "Feedback type is required and must be a string",
+      });
+      return true;
+    }
+
+    logger.info(
+      `[Daemon] Sending feedback for session ${sessionId}: ${type}`,
+    );
+
+    const executionService = getExecuteService();
+    const session = await executionService.sendFeedback(sessionId, {
+      type: type as "confirm" | "modify" | "reject" | "regenerate",
+      message,
+      modifiedPlan,
+    });
+
+    sendJson(res, 200, {
+      success: true,
+      session,
+    });
+  } catch (error: unknown) {
+    logger.error("[Daemon] Error sending feedback:", error);
+    sendJson(res, 500, {
+      success: false,
+      error: `Failed to send feedback: ${(error instanceof Error ? error.message : String(error))}`,
+    });
+  }
+  return true;
+}
+
+async function handleGetSession(
+  res: http.ServerResponse,
+  sessionId: string,
+): Promise<boolean> {
+  try {
+    const executionService = getExecuteService();
+    const session = await executionService.getSession(sessionId);
+
+    if (!session) {
+      sendJson(res, 404, {
+        success: false,
+        error: "Session not found",
+      });
+      return true;
+    }
+
+    sendJson(res, 200, { success: true, session });
+  } catch (error: unknown) {
+    logger.error("[Daemon] Error getting session:", error);
+    sendJson(res, 500, {
+      success: false,
+      error: `Failed to get session: ${(error instanceof Error ? error.message : String(error))}`,
+    });
+  }
+  return true;
+}
+
+async function handleListSessions(res: http.ServerResponse): Promise<boolean> {
+  try {
+    const executionService = getExecuteService();
+    const result = await executionService.getActiveInteractiveSessions();
+
+    sendJson(res, 200, {
+      success: true,
+      sessions: result,
+      total: result.length,
+    });
+  } catch (error: unknown) {
+    logger.error("[Daemon] Error listing sessions:", error);
+    sendJson(res, 500, {
+      success: false,
+      error: `Failed to list sessions: ${(error instanceof Error ? error.message : String(error))}`,
+    });
+  }
+  return true;
+}
+
+async function handleSessionCancel(
+  res: http.ServerResponse,
+  sessionId: string,
+): Promise<boolean> {
+  try {
+    const executionService = getExecuteService();
+    const session = await executionService.sendFeedback(sessionId, {
+      type: "reject",
+      message: "Cancelled by user",
+    });
+
+    sendJson(res, 200, {
+      success: true,
+      session,
+    });
+  } catch (error: unknown) {
+    logger.error("[Daemon] Error cancelling session:", error);
+    sendJson(res, 500, {
+      success: false,
+      error: `Failed to cancel session: ${(error instanceof Error ? error.message : String(error))}`,
+    });
+  }
+  return true;
+}
+
+// ==================== Legacy Handler Implementations ====================
 
 async function handleNaturalLanguage(
-  res: any,
+  res: http.ServerResponse,
   body: string,
 ): Promise<boolean> {
   try {
@@ -102,22 +357,11 @@ async function handleNaturalLanguage(
       return true;
     }
 
-    console.log(
+    logger.info(
       `[Daemon] Executing natural language query: "${query.substring(0, 100)}..."`,
     );
 
     const executionService = getExecuteService();
-
-    if (!executionService) {
-      console.error("[Daemon] Execution service is not available");
-      sendJson(res, 503, {
-        success: false,
-        error:
-          "Execution service is not available. Please check service configuration.",
-      });
-      return true;
-    }
-
     const executionOptions: UnifiedExecutionOptions = options || {};
     const result = await executionService.executeNaturalLanguage(
       query,
@@ -125,22 +369,21 @@ async function handleNaturalLanguage(
     );
 
     sendJson(res, result.success ? 200 : 400, result);
-  } catch (error: any) {
-    console.error(
+  } catch (error: unknown) {
+    logger.error(
       "[Daemon] Error executing natural language query:",
       error,
     );
-    console.error("[Daemon] Error stack:", error.stack);
     sendJson(res, 500, {
       success: false,
-      error: `Failed to execute query: ${error.message}`,
+      error: `Failed to execute query: ${(error instanceof Error ? error.message : String(error))}`,
     });
   }
   return true;
 }
 
 async function handleParseIntent(
-  res: any,
+  res: http.ServerResponse,
   body: string,
 ): Promise<boolean> {
   try {
@@ -154,29 +397,12 @@ async function handleParseIntent(
       return true;
     }
 
-    console.log(
+    logger.info(
       `[Daemon] Parsing intent: "${intent.substring(0, 100)}..."`,
     );
 
     const executionService = getExecuteService();
-
-    if (!executionService) {
-      console.error("[Daemon] Execution service is not available");
-      sendJson(res, 503, {
-        success: false,
-        error:
-          "Execution service is not available. Please check service configuration.",
-      });
-      return true;
-    }
-
-    console.log(
-      "[Daemon] Execution service obtained, calling parseIntent...",
-    );
-
     const result = await executionService.parseIntent(intent, context);
-
-    console.log("[Daemon] Execution service parseIntent result:", result);
 
     sendJson(res, 200, {
       success: true,
@@ -187,23 +413,18 @@ async function handleParseIntent(
         explanation: result.explanation,
       },
     });
-  } catch (error: any) {
-    console.error("[Daemon] Error parsing intent:", error);
-    console.error("[Daemon] Error stack:", error.stack);
-    console.error(
-      "[Daemon] Error details:",
-      JSON.stringify(error, null, 2),
-    );
+  } catch (error: unknown) {
+    logger.error("[Daemon] Error parsing intent:", error);
     sendJson(res, 500, {
       success: false,
-      error: `Failed to parse intent: ${error.message}`,
+      error: `Failed to parse intent: ${(error instanceof Error ? error.message : String(error))}`,
     });
   }
   return true;
 }
 
 async function handleExecuteSteps(
-  res: any,
+  res: http.ServerResponse,
   body: string,
 ): Promise<boolean> {
   try {
@@ -217,20 +438,9 @@ async function handleExecuteSteps(
       return true;
     }
 
-    console.log(`[Daemon] Executing ${steps.length} pre-parsed steps`);
+    logger.info(`[Daemon] Executing ${steps.length} pre-parsed steps`);
 
     const executionService = getExecuteService();
-
-    if (!executionService) {
-      console.error("[Daemon] Execution service is not available");
-      sendJson(res, 503, {
-        success: false,
-        error:
-          "Execution service is not available. Please check service configuration.",
-      });
-      return true;
-    }
-
     const executionOptions: UnifiedExecutionOptions = options || {};
     const result = await executionService.executeSteps(
       steps,
@@ -238,23 +448,26 @@ async function handleExecuteSteps(
     );
 
     sendJson(res, result.success ? 200 : 400, result);
-  } catch (error: any) {
-    console.error("[Daemon] Error executing pre-parsed steps:", error);
-    console.error("[Daemon] Error stack:", error.stack);
+  } catch (error: unknown) {
+    logger.error("[Daemon] Error executing pre-parsed steps:", error);
     sendJson(res, 500, {
       success: false,
-      error: `Failed to execute steps: ${error.message}`,
+      error: `Failed to execute steps: ${(error instanceof Error ? error.message : String(error))}`,
     });
   }
   return true;
 }
 
+/**
+ * Legacy POST /api/execute/interactive/start
+ * Delegates to Session API: createSession(query, 'interactive')
+ */
 async function handleInteractiveStart(
-  res: any,
+  res: http.ServerResponse,
   body: string,
 ): Promise<boolean> {
   try {
-    const { query, userId } = JSON.parse(body);
+    const { query } = JSON.parse(body);
 
     if (!query || typeof query !== "string") {
       sendJson(res, 400, {
@@ -264,52 +477,37 @@ async function handleInteractiveStart(
       return true;
     }
 
-    console.log(
-      `[Daemon] Starting interactive session for query: "${query.substring(0, 100)}..."`,
+    logger.info(
+      `[Daemon] Legacy interactive start -> creating interactive session for: "${query.substring(0, 100)}..."`,
     );
 
     const executionService = getExecuteService();
-
-    if (!executionService) {
-      console.error("[Daemon] Execution service is not available");
-      sendJson(res, 503, {
-        success: false,
-        error:
-          "Execution service is not available. Please check service configuration.",
-      });
-      return true;
-    }
-
-    const result = await executionService.startInteractiveSession(
-      query,
-      userId,
-    );
-
-    console.log(
-      `[Daemon] Interactive session started: ${result.sessionId}`,
-    );
+    const session = await executionService.createSession(query, "interactive");
 
     sendJson(res, 200, {
       success: true,
-      sessionId: result.sessionId,
-      guidance: result.guidance,
-      session: result.session,
+      sessionId: session.id,
+      session,
     });
-  } catch (error: any) {
-    console.error(
-      "[Daemon] Error starting interactive session:",
+  } catch (error: unknown) {
+    logger.error(
+      "[Daemon] Error in legacy interactive start:",
       error,
     );
     sendJson(res, 500, {
       success: false,
-      error: `Failed to start interactive session: ${error.message}`,
+      error: `Failed to start interactive session: ${(error instanceof Error ? error.message : String(error))}`,
     });
   }
   return true;
 }
 
+/**
+ * Legacy POST /api/execute/interactive/respond
+ * Delegates to Session API: sendFeedback(sessionId, feedback)
+ */
 async function handleInteractiveRespond(
-  res: any,
+  res: http.ServerResponse,
   body: string,
 ): Promise<boolean> {
   try {
@@ -323,64 +521,45 @@ async function handleInteractiveRespond(
       return true;
     }
 
-    if (!response || typeof response !== "object") {
-      sendJson(res, 400, {
-        success: false,
-        error: "Response is required and must be an object",
-      });
-      return true;
-    }
-
-    console.log(
-      `[Daemon] Processing feedback for session: ${sessionId}`,
+    logger.info(
+      `[Daemon] Legacy interactive respond -> sending feedback for session: ${sessionId}`,
     );
 
     const executionService = getExecuteService();
 
-    if (!executionService) {
-      console.error("[Daemon] Execution service is not available");
-      sendJson(res, 503, {
-        success: false,
-        error:
-          "Execution service is not available. Please check service configuration.",
-      });
-      return true;
+    // Map legacy response format to Session API feedback format
+    let feedbackType: "confirm" | "modify" | "reject" | "regenerate" = "confirm";
+    if (response?.type === "parameter_value" || response?.type === "clarification") {
+      feedbackType = "modify";
+    } else if (response?.type === "cancellation") {
+      feedbackType = "reject";
     }
 
-    const result = await executionService.processInteractiveFeedback(
-      sessionId,
-      response,
-    );
-
-    if (!result.success) {
-      sendJson(res, 404, {
-        success: false,
-        error: "Session not found or invalid",
-      });
-      return true;
-    }
-
-    sendJson(res, 200, {
-      success: true,
-      guidance: result.guidance,
-      session: result.session,
-      readyForExecution: result.readyForExecution,
+    const session = await executionService.sendFeedback(sessionId, {
+      type: feedbackType,
+      message: response?.clarification || response?.parameters ? JSON.stringify(response.parameters) : undefined,
     });
-  } catch (error: any) {
-    console.error(
-      "[Daemon] Error processing interactive feedback:",
+
+    sendJson(res, 200, { success: true, session });
+  } catch (error: unknown) {
+    logger.error(
+      "[Daemon] Error in legacy interactive respond:",
       error,
     );
     sendJson(res, 500, {
       success: false,
-      error: `Failed to process interactive feedback: ${error.message}`,
+      error: `Failed to process interactive feedback: ${(error instanceof Error ? error.message : String(error))}`,
     });
   }
   return true;
 }
 
+/**
+ * Legacy POST /api/execute/interactive/execute
+ * Delegates to Session API: executeSession(sessionId, options)
+ */
 async function handleInteractiveExecute(
-  res: any,
+  res: http.ServerResponse,
   body: string,
 ): Promise<boolean> {
   try {
@@ -394,89 +573,56 @@ async function handleInteractiveExecute(
       return true;
     }
 
-    console.log(
-      `[Daemon] Executing interactive session: ${sessionId}`,
+    logger.info(
+      `[Daemon] Legacy interactive execute -> executing session: ${sessionId}`,
     );
 
     const executionService = getExecuteService();
-
-    if (!executionService) {
-      console.error("[Daemon] Execution service is not available");
-      sendJson(res, 503, {
-        success: false,
-        error:
-          "Execution service is not available. Please check service configuration.",
-      });
-      return true;
-    }
-
-    const result = await executionService.executeInteractiveSession(
-      sessionId,
-      options,
-    );
+    const result = await executionService.executeSession(sessionId, options);
 
     sendJson(res, result.success ? 200 : 400, result);
-  } catch (error: any) {
-    console.error(
-      "[Daemon] Error executing interactive session:",
+  } catch (error: unknown) {
+    logger.error(
+      "[Daemon] Error in legacy interactive execute:",
       error,
     );
     sendJson(res, 500, {
       success: false,
-      error: `Failed to execute interactive session: ${error.message}`,
+      error: `Failed to execute interactive session: ${(error instanceof Error ? error.message : String(error))}`,
     });
   }
   return true;
 }
 
+/**
+ * Legacy POST /api/execute/interactive/cleanup
+ * Now handled by SessionStore auto-cleanup, just return success.
+ */
 async function handleInteractiveCleanup(
-  res: any,
+  res: http.ServerResponse,
   body: string,
 ): Promise<boolean> {
-  try {
-    const { maxAgeMs } = JSON.parse(body);
-    const executionService = getExecuteService();
-
-    if (!executionService) {
-      sendJson(res, 503, {
-        success: false,
-        error:
-          "Execution service is not available. Please check service configuration.",
-      });
-      return true;
-    }
-
-    const cleaned =
-      executionService.cleanupInteractiveSessions(maxAgeMs || 3600000);
-    sendJson(res, 200, {
-      success: true,
-      cleanedSessions: cleaned,
-    });
-  } catch (error: any) {
-    sendJson(res, 500, {
-      success: false,
-      error: `Failed to cleanup sessions: ${error.message}`,
-    });
-  }
+  logger.info("[Daemon] Legacy interactive cleanup -> handled by SessionStore auto-cleanup");
+  sendJson(res, 200, {
+    success: true,
+    cleanedCount: 0,
+    message: "Auto-cleanup is managed by SessionStore",
+  });
   return true;
 }
 
+/**
+ * Legacy GET /api/execute/interactive/:sessionId
+ * Delegates to Session API: getSession(sessionId)
+ */
 async function handleGetInteractiveSession(
-  res: any,
+  res: http.ServerResponse,
   sessionId: string,
 ): Promise<boolean> {
+  logger.info(`[Daemon] Legacy interactive get session -> getting session: ${sessionId}`);
   const executionService = getExecuteService();
+  const session = await executionService.getSession(sessionId);
 
-  if (!executionService) {
-    sendJson(res, 503, {
-      success: false,
-      error:
-        "Execution service is not available. Please check service configuration.",
-    });
-    return true;
-  }
-
-  const session = executionService.getInteractiveSession(sessionId);
   if (!session) {
     sendJson(res, 404, {
       success: false,
@@ -490,7 +636,7 @@ async function handleGetInteractiveSession(
 }
 
 async function handleIntentParse(
-  res: any,
+  res: http.ServerResponse,
   body: string,
 ): Promise<boolean> {
   try {
@@ -505,16 +651,6 @@ async function handleIntentParse(
     }
 
     const executionService = getExecuteService();
-
-    if (!executionService) {
-      sendJson(res, 503, {
-        success: false,
-        error:
-          "Execution service is not available. Please check service configuration.",
-      });
-      return true;
-    }
-
     const result = await executionService.parseIntent(intent, context);
 
     sendJson(res, 200, {
@@ -526,11 +662,11 @@ async function handleIntentParse(
         explanation: result.explanation,
       },
     });
-  } catch (error: any) {
-    console.error("[Daemon] Error parsing intent:", error);
+  } catch (error: unknown) {
+    logger.error("[Daemon] Error parsing intent:", error);
     sendJson(res, 500, {
       success: false,
-      error: `Failed to parse intent: ${error.message}`,
+      error: `Failed to parse intent: ${(error instanceof Error ? error.message : String(error))}`,
     });
   }
   return true;

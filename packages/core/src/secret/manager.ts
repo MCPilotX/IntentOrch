@@ -4,6 +4,8 @@ import os from "os";
 import { getSecretsPath, ensureInTorchDir } from "../utils/paths.js";
 import { SecretStore } from "./types.js";
 
+import { FSLock } from "../utils/fs-lock.js";
+
 export class SecretManager {
   private secrets: Map<string, string> = new Map();
   private key: Buffer;
@@ -15,8 +17,14 @@ export class SecretManager {
     // Improved key derivation using user-specific information
     const userSeed = os.userInfo().username + os.homedir();
     const salt = crypto.createHash("sha256").update(userSeed).digest("hex");
+    
+    // Security Fix: Do not use hardcoded master password.
+    // Use environment variable INTORCH_MASTER_KEY if provided,
+    // otherwise fallback to a machine-unique seed (less secure than env var, but better than hardcoded).
+    const masterPassword = process.env.INTORCH_MASTER_KEY || "intorch-machine-locked-v1-" + userSeed;
+    
     this.key = crypto.pbkdf2Sync(
-      "intorch-master-v2",
+      masterPassword,
       salt,
       100000,
       32,
@@ -75,11 +83,14 @@ export class SecretManager {
 
   async save(): Promise<void> {
     const lockPath = this.secretsPath + ".lock";
+    const acquired = await FSLock.acquire(lockPath);
+    
+    if (!acquired) {
+      throw new Error("Secret storage is locked by another process.");
+    }
+
     try {
       ensureInTorchDir();
-
-      // Simple file locking
-      await fs.writeFile(lockPath, process.pid.toString(), { flag: "wx" });
 
       const obj: SecretStore = Object.fromEntries(this.secrets);
       const json = JSON.stringify(obj);
@@ -95,15 +106,10 @@ export class SecretManager {
 
       const result = Buffer.concat([iv, encrypted, authTag]);
       await fs.writeFile(this.secretsPath, result);
-    } catch (err: any) {
-      if (err.code === "EEXIST") {
-        throw new Error("Secret storage is locked by another process.");
-      }
+    } catch (err: unknown) {
       throw err;
     } finally {
-      try {
-        await fs.unlink(lockPath);
-      } catch (e) {}
+      await FSLock.release(lockPath);
     }
   }
 

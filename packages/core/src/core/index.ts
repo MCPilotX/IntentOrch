@@ -34,6 +34,7 @@ export {
 // Export error handling
 export {
   MCPilotError,
+  IntentOrchError,
   ErrorCode,
   ErrorSeverity,
   ErrorFactory,
@@ -43,6 +44,7 @@ export {
   createError,
   wrapError,
   isMCPilotError,
+  isIntentOrchError,
   shouldRetry,
 } from "./error-handler.js";
 

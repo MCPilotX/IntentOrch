@@ -21,7 +21,18 @@ export interface ParameterSchema {
   type: "string" | "number" | "boolean" | "object" | "array";
   description?: string;
   required?: boolean;
-  default?: any;
+  default?: unknown;
+}
+
+export interface DynamicToolShape {
+  name: string;
+  description?: string;
+  inputSchema?: {
+    type?: string;
+    properties?: Record<string, unknown>;
+    required?: string[];
+  };
+  [key: string]: unknown;
 }
 
 export interface ExtendedManifest {
@@ -109,7 +120,7 @@ export class ToolRegistry {
 
   async registerToolsFromManifest(
     serverName: string,
-    manifest: any,
+    manifest: Record<string, unknown>,
   ): Promise<void> {
     await this.ensureInitialized();
     // Normalize server name for uniqueness
@@ -118,11 +129,12 @@ export class ToolRegistry {
     // ...
 
     // Support both manifest.tools and manifest.capabilities.tools
-    let tools = manifest.tools || [];
+    let tools = (manifest.tools as Record<string, unknown>[]) || [];
 
     // Check for capabilities.tools (MCP standard format)
-    if (manifest.capabilities && manifest.capabilities.tools) {
-      tools = manifest.capabilities.tools;
+    const capabilities = manifest.capabilities as Record<string, unknown> | undefined;
+    if (capabilities?.tools) {
+      tools = capabilities.tools as Record<string, unknown>[];
     }
 
     if (!tools || tools.length === 0) {
@@ -156,7 +168,7 @@ export class ToolRegistry {
   /**
    * Register tools discovered dynamically from a running MCP server
    */
-  async registerDynamicTools(serverName: string, tools: any[]): Promise<void> {
+  async registerDynamicTools(serverName: string, tools: Record<string, unknown>[]): Promise<void> {
     await this.ensureInitialized();
     if (!tools || tools.length === 0) {
       logger.info(`No tools to register for ${serverName}`);
@@ -174,10 +186,11 @@ export class ToolRegistry {
     for (const tool of tools) {
       try {
         // Convert MCP tool format to ToolMetadata format
+        const dynamicTool = tool as DynamicToolShape;
         const toolMetadata: ToolMetadata = {
-          name: tool.name,
-          description: tool.description || `Tool: ${tool.name}`,
-          parameters: tool.inputSchema?.properties || {},
+          name: dynamicTool.name,
+          description: dynamicTool.description || `Tool: ${dynamicTool.name}`,
+          parameters: dynamicTool.inputSchema?.properties || {},
           serverName: normalizedServerName,
           actualServerName: displayName,
           keywords: ["dynamic", "discovered"],
@@ -188,9 +201,9 @@ export class ToolRegistry {
 
         // Check if this tool requires parameter preprocessing
         toolMetadata.requiresPreprocessing =
-          this.doesToolRequirePreprocessing(toolMetadata);
+          this.doesToolRequirePreprocessing(toolMetadata as unknown as Record<string, unknown>);
 
-        const key = this.getToolKey(normalizedServerName, tool.name);
+        const key = this.getToolKey(normalizedServerName, tool.name as string);
 
         // Check if tool already exists
         const existingTool = this.tools.get(key);
@@ -308,7 +321,7 @@ export class ToolRegistry {
    * Check if a tool requires parameter preprocessing
    * This is a generic method that can be extended for specific preprocessing needs
    */
-  private doesToolRequirePreprocessing(_tool: any): boolean {
+  private doesToolRequirePreprocessing(_tool: Record<string, unknown>): boolean {
     // By default, no preprocessing is required
     // This can be extended based on tool metadata or configuration
     return false;

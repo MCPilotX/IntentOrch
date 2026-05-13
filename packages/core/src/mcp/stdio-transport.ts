@@ -62,8 +62,8 @@ export class StdioTransport extends EventEmitter implements MCPTransport {
       this.emit("connected");
       
       logger.info(`[StdioTransport] Local process started: ${this.config.command}`);
-    } catch (error: any) {
-      logger.error(`[StdioTransport] Failed to start process: ${error.message}`);
+    } catch (error: unknown) {
+      logger.error(`[StdioTransport] Failed to start process: ${(error instanceof Error ? error.message : String(error))}`);
       throw error;
     }
   }
@@ -86,9 +86,9 @@ export class StdioTransport extends EventEmitter implements MCPTransport {
     }
 
     try {
-      await this.sdkTransport.send(message as any);
-    } catch (error: any) {
-      logger.error(`[StdioTransport] Send failed: ${error.message}`);
+      await this.sdkTransport.send(message as unknown as JSONRPCMessage);
+    } catch (error: unknown) {
+      logger.error(`[StdioTransport] Send failed: ${(error instanceof Error ? error.message : String(error))}`);
       this.emit("error", error);
       throw error;
     }

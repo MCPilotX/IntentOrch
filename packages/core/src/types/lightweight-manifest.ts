@@ -50,7 +50,7 @@ export interface LightweightManifest {
  * Check if a manifest is lightweight (doesn't contain tools)
  */
 export function isLightweightManifest(
-  manifest: any,
+  manifest: unknown,
 ): manifest is LightweightManifest {
   return (
     manifest &&
@@ -69,7 +69,7 @@ export function isLightweightManifest(
 /**
  * Convert full manifest to lightweight manifest
  */
-export function toLightweightManifest(fullManifest: any): LightweightManifest {
+export function toLightweightManifest(fullManifest: Record<string, unknown>): LightweightManifest {
   const manifest: LightweightManifest = {
     name: fullManifest.name,
     version: fullManifest.version,
@@ -89,7 +89,7 @@ export function toLightweightManifest(fullManifest: any): LightweightManifest {
 
   // Preserve transport configuration (important for SSE/HTTP services)
   if (fullManifest.transport) {
-    (manifest as any).transport = fullManifest.transport;
+    (manifest as LightweightManifest & { transport: unknown }).transport = fullManifest.transport;
   }
 
   return manifest;
@@ -98,7 +98,7 @@ export function toLightweightManifest(fullManifest: any): LightweightManifest {
 /**
  * Check if server supports dynamic tool discovery
  */
-export function supportsDynamicDiscovery(manifest: any): boolean {
+export function supportsDynamicDiscovery(manifest: Record<string, unknown>): boolean {
   return (
     manifest.compatibility?.supportsDynamicDiscovery !== false &&
     (!manifest.tools || manifest.tools.length === 0) &&

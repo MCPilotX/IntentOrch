@@ -43,7 +43,7 @@ export class MCPClient extends EventEmitter {
   private pendingRequests: Map<
     string | number,
     {
-      resolve: (value: any) => void;
+      resolve: (value: unknown) => void;
       reject: (error: Error) => void;
       timeout: NodeJS.Timeout;
     }
@@ -106,7 +106,8 @@ export class MCPClient extends EventEmitter {
           clientInfo: { name: "IntentOrch", version: "0.8.0" }
         });
 
-        logger.info(`[MCPClient] Server initialized: ${initResult.serverInfo?.name} ${initResult.serverInfo?.version}`);
+        const initResultAny = initResult as { serverInfo?: { name?: string; version?: string } };
+        logger.info(`[MCPClient] Server initialized: ${initResultAny?.serverInfo?.name} ${initResultAny?.serverInfo?.version}`);
 
         // 2. Send mandatory initialized notification (BARE-BONES - NO PARAMS)
         // Many Java/Spring servers require this specific notification to "unlock" the session
@@ -143,9 +144,10 @@ export class MCPClient extends EventEmitter {
   /**
    * Send a JSON-RPC notification (MUST NOT have an ID or empty PARAMS)
    */
-  private async sendNotification(method: string, params?: any): Promise<void> {
-    const request: any = {
+  private async sendNotification(method: string, params?: Record<string, unknown>): Promise<void> {
+    const request: JSONRPCRequest = {
       jsonrpc: "2.0",
+      id: null,
       method,
     };
     // CRITICAL: Only add params if they are non-empty. 
@@ -204,7 +206,7 @@ export class MCPClient extends EventEmitter {
 
   async callTool(
     toolName: string,
-    arguments_: Record<string, any>,
+    arguments_: Record<string, unknown>,
   ): Promise<ToolResult> {
     const tool = this.findTool(toolName);
     let mappedArguments = arguments_;
@@ -220,7 +222,7 @@ export class MCPClient extends EventEmitter {
       } catch (error) {
         logger.warn(
           `Parameter mapping failed for tool "${toolName}":`,
-          error instanceof Error ? error.message : String(error),
+          error instanceof Error ? (error instanceof Error ? error.message : String(error)) : String(error),
         );
       }
     }
@@ -295,8 +297,8 @@ export class MCPClient extends EventEmitter {
             }
 
             return toolResult;
-          } catch (error: any) {
-            lastError = error;
+          } catch (error) {
+            lastError = error as Error;
             if (attempt < maxRetries) {
               await this.delay(1000 * attempt);
             }
@@ -360,7 +362,7 @@ export class MCPClient extends EventEmitter {
     return result.result!;
   }
 
-  async readResource(uri: string): Promise<any> {
+  async readResource(uri: string): Promise<unknown> {
     const result = await globalErrorBoundary.execute(
       async () => {
         const response = await this.sendRequest(MCP_METHODS.RESOURCES_READ, {
@@ -415,8 +417,8 @@ export class MCPClient extends EventEmitter {
 
   async getPrompt(
     name: string,
-    arguments_?: Record<string, any>,
-  ): Promise<any> {
+    arguments_?: Record<string, unknown>,
+  ): Promise<unknown> {
     const result = await globalErrorBoundary.execute(
       async () => {
         const response = await this.sendRequest(MCP_METHODS.PROMPTS_GET, {
@@ -448,7 +450,7 @@ export class MCPClient extends EventEmitter {
 
   // ==================== Core Request Methods ====================
 
-  private async sendRequest(method: string, params: any = {}): Promise<any> {
+  private async sendRequest(method: string, params?: Record<string, unknown>): Promise<unknown> {
     if (!this.isConnected()) {
       throw new Error("Not connected to MCP server");
     }
@@ -503,7 +505,7 @@ export class MCPClient extends EventEmitter {
     });
   }
 
-  private handleTransportMessage(message: any): void {
+  private handleTransportMessage(message: unknown): void {
     try {
       const response = message as JSONRPCResponse;
 
@@ -526,8 +528,8 @@ export class MCPClient extends EventEmitter {
         if (response.error) {
           const errorMessage = response.error.message || "Unknown error";
           const error = new Error(errorMessage);
-          (error as any).code = response.error.code;
-          (error as any).data = response.error.data;
+          (error as { code?: number; data?: unknown }).code = response.error.code;
+          (error as { code?: number; data?: unknown }).data = response.error.data;
           reject(error);
         } else {
           resolve(response.result !== undefined ? response.result : null);
@@ -540,7 +542,7 @@ export class MCPClient extends EventEmitter {
     }
   }
 
-  private handleTransportError(error: any): void {
+  private handleTransportError(error: unknown): void {
     // Only log if it's a real error, avoid flooding with empty {} from SDK
     if (error && Object.keys(error).length > 0) {
       logger.error(`[MCPClient] Transport error for "${this.config.serverName}":`, error);
@@ -556,7 +558,7 @@ export class MCPClient extends EventEmitter {
 
   // ==================== Event Emission ====================
 
-  private emitEvent(type: MCPEventType, data?: any): void {
+  private emitEvent(type: MCPEventType, data?: unknown): void {
     const event: MCPEvent = {
       type,
       data,

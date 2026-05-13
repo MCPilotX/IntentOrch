@@ -83,7 +83,7 @@ export function printSuggestion(message: string): void {
 /**
  * Print debug message (only in debug mode)
  */
-export function printDebug(message: string, context?: any): void {
+export function printDebug(message: string, context?: unknown): void {
   if (process.env.DEBUG) {
     const debugMessage = `🐛 ${message}`;
     if (context) {

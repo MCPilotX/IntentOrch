@@ -51,8 +51,9 @@ export class HttpTransport extends EventEmitter implements MCPTransport {
       if (response.data) {
         this.emit("message", response.data);
       }
-    } catch (error: any) {
-      const errorMsg = error.response ? `HTTP ${error.response.status}` : error.message;
+    } catch (error: unknown) {
+      const axiosError = error as { response?: { status: number } };
+      const errorMsg = axiosError.response ? `HTTP ${axiosError.response.status}` : (error instanceof Error ? error.message : String(error));
       logger.error(`[HttpTransport] request failed: ${errorMsg}`);
       this.emit("error", error);
     }

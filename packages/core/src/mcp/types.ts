@@ -8,20 +8,20 @@
 export interface MCPError {
   code: number;
   message: string;
-  data?: any;
+  data?: unknown;
 }
 
 export interface JSONRPCRequest {
   jsonrpc: "2.0";
   id: string | number | null;
   method: string;
-  params?: any;
+  params?: Record<string, unknown>;
 }
 
 export interface JSONRPCResponse {
   jsonrpc: "2.0";
   id: string | number | null;
-  result?: any;
+  result?: unknown;
   error?: MCPError;
 }
 
@@ -35,9 +35,9 @@ export interface ToolExample {
   /** Natural language description of what this example does */
   description: string;
   /** Example input parameters */
-  input: Record<string, any>;
+  input: Record<string, unknown>;
   /** Example output (optional, for reference) */
-  output?: any;
+  output?: unknown;
 }
 
 /**
@@ -78,15 +78,17 @@ export interface ToolList {
 
 export interface ToolCall {
   name: string;
-  arguments: Record<string, any>;
+  arguments: Record<string, unknown>;
+}
+
+export interface ToolResultContent {
+  type: "text" | "image" | "resource";
+  text?: string;
+  data?: unknown;
 }
 
 export interface ToolResult {
-  content: Array<{
-    type: "text" | "image" | "resource";
-    text?: string;
-    data?: any;
-  }>;
+  content: ToolResultContent[];
   isError?: boolean;
 }
 
@@ -103,25 +105,29 @@ export interface ResourceList {
   resources: Resource[];
 }
 
+export interface ResourceContent {
+  uri: string;
+  mimeType: string;
+  text?: string;
+  blob?: string; // base64 encoded
+}
+
 export interface ResourceContents {
-  contents: Array<{
-    uri: string;
-    mimeType: string;
-    text?: string;
-    blob?: string; // base64 encoded
-  }>;
+  contents: ResourceContent[];
 }
 
 // ==================== Prompt Related Types ====================
 
+export interface PromptArgument {
+  name: string;
+  description?: string;
+  required?: boolean;
+}
+
 export interface Prompt {
   name: string;
   description?: string;
-  arguments?: Array<{
-    name: string;
-    description?: string;
-    required?: boolean;
-  }>;
+  arguments?: PromptArgument[];
 }
 
 export interface PromptList {
@@ -184,7 +190,7 @@ export type MCPEventType =
 
 export interface MCPEvent {
   type: MCPEventType;
-  data?: any;
+  data?: unknown;
   timestamp: number;
 }
 

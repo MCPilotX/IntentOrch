@@ -15,8 +15,45 @@ import { logger } from "./core/logger.js";
  */
 
 // ==================== Core Modules ====================
-export { ConfigService, getConfigService } from './core/index.js';
+export {
+  ConfigService,
+  getConfigService,
+  // Unified error types
+  IntentOrchError,
+  ErrorCode,
+  ErrorSeverity,
+  ErrorFactory,
+  ErrorHandler,
+  createError,
+  wrapError,
+  isIntentOrchError,
+  isMCPilotError,
+  shouldRetry,
+} from './core/index.js';
 export type { RuntimeType, ServiceConfig, Config, AIConfig, DetectionResult } from './core/index.js';
+
+// ==================== Execution Session Module ====================
+export {
+  SessionManager,
+  getSessionManager,
+  SessionStore,
+  getSessionStore,
+  SessionError,
+  SessionNotFoundError,
+  InvalidSessionStateError,
+} from './execution/index.js';
+export type {
+  ExecutionSession,
+  SessionType,
+  SessionState,
+  ConversationMessage,
+  StepResult,
+  UserFeedback,
+  SessionFilter,
+  SessionListResponse,
+  CreateSessionRequest,
+  FeedbackRequest,
+} from './execution/index.js';
 
 // ==================== AI Modules ====================
 export { CloudIntentEngine, LLMClient, getLLMClient } from './ai/index.js';
@@ -25,6 +62,7 @@ export type { CloudIntentEngineConfig } from './ai/index.js';
 
 // ==================== Execute Service ====================
 export { ExecuteService, getExecuteService, createExecuteService } from './ai/execute-service.js';
+export { ReActLoopEngine, PlanExecutor, SessionOrchestrator, WorkflowOrchestrator, DaemonDelegator } from './ai/execute-service.js';
 export type { UnifiedExecutionOptions, UnifiedExecutionResult, WorkflowExecutionResult } from './ai/execute-service.js';
 
 // ==================== MCP Modules ====================
@@ -110,7 +148,6 @@ export { getProcessManager } from './process-manager/manager.js';
 export { getRegistryClient } from './registry/client.js';
 export { getWorkflowManager } from './workflow/manager.js';
 export { getToolRegistry } from './tool-registry/registry.js';
-export { getIntentService } from './ai/intent-service.js';
 export { getAIConfig } from './utils/config.js';
 export { AutoStartManager } from './utils/auto-start-manager.js';
 export { printError } from './utils/cli-error.js';

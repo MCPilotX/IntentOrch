@@ -9,9 +9,11 @@
 
 import fs from "fs/promises";
 import { getProcessManager } from "../../process-manager/manager.js";
+import { ProcessInfo } from "../../process-manager/types.js";
 import { getRegistryClient } from "../../registry/client.js";
 import { getSecretManager } from "../../secret/manager.js";
 import { sendJson, type RouteContext } from "./index.js";
+import { logger } from "../../core/logger.js";
 
 export async function handleStatusRoutes(
   ctx: RouteContext,
@@ -44,7 +46,7 @@ export async function handleStatusRoutes(
       const processManager = getProcessManager();
       const allProcesses = await processManager.list();
       const runningProcesses = allProcesses.filter(
-        (p: any) => p.status === "running",
+        (p: ProcessInfo) => p.status === "running",
       );
       const registryClient = getRegistryClient();
       const cachedManifests = await registryClient.listCachedManifests();
@@ -59,11 +61,11 @@ export async function handleStatusRoutes(
           requestCount,
         },
       });
-    } catch (error: any) {
-      console.error("[Daemon] Error getting system stats:", error);
+    } catch (error: unknown) {
+      logger.error("[Daemon] Error getting system stats:", error);
       sendJson(res, 500, {
         error: "Failed to get system statistics",
-        message: error.message,
+        message: (error instanceof Error ? error.message : String(error)),
       });
     }
     return true;
@@ -81,8 +83,8 @@ export async function handleStatusRoutes(
         logFile: config.logFile,
         lastUpdated: new Date().toISOString(),
       });
-    } catch (error: any) {
-      if (error.code === "ENOENT") {
+    } catch (error: unknown) {
+      if ((error && typeof error === "object" && "code" in error ? (error as { code: string }).code : undefined) === "ENOENT") {
         sendJson(res, 404, {
           error: "Logs Not Found",
           message: `Log file not found: ${config.logFile}`,
@@ -90,7 +92,7 @@ export async function handleStatusRoutes(
       } else {
         sendJson(res, 500, {
           error: "Internal Server Error",
-          message: `Failed to read logs: ${error.message}`,
+          message: `Failed to read logs: ${(error instanceof Error ? error.message : String(error))}`,
         });
       }
     }

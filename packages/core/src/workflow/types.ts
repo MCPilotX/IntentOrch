@@ -19,7 +19,7 @@ export interface WorkflowInput {
   id: string;
   type: "string" | "number" | "boolean";
   description?: string;
-  default?: any;
+  default?: unknown;
   required?: boolean;
 }
 
@@ -29,7 +29,7 @@ export interface WorkflowStep {
   serverName?: string; // Made optional to support serverId
   serverId?: string; // Added to support older format
   toolName: string;
-  parameters: Record<string, any>;
+  parameters: Record<string, unknown>;
   if?: string; // Condition expression, e.g., "{{analysis.score > 5}}"
   retry?: {
     maxAttempts: number;
@@ -38,7 +38,7 @@ export interface WorkflowStep {
 }
 
 export interface WorkflowContext {
-  inputs: Record<string, any>;
-  state: Record<string, any>; // Stores step results: { stepId: { result: ... } }
+  inputs: Record<string, unknown>;
+  state: Record<string, unknown>; // Stores step results: { stepId: { result: ... } }
   secrets: Record<string, string>;
 }
