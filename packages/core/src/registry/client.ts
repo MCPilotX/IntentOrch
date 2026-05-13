@@ -10,6 +10,7 @@ import { createRegistrySource, parseClaudeDesktopConfig } from "./sources.js";
 import { ManifestCache } from "./cache.js";
 import { getConfigService } from "../core/config-service.js";
 import { toStorageFormat } from "../utils/owner-project-format.js";
+import { createSingleton } from "../utils/singleton.js";
 
 export class RegistryClient {
   private cache: ManifestCache;
@@ -383,12 +384,8 @@ export class RegistryClient {
   }
 }
 
-// Singleton instance
-let registryClient: RegistryClient | null = null;
-
-export function getRegistryClient(): RegistryClient {
-  if (!registryClient) {
-    registryClient = new RegistryClient();
-  }
-  return registryClient;
-}
+// Singleton instance — uses ESM-safe singleton factory
+export const getRegistryClient = createSingleton<RegistryClient>(
+  "core:registry-client",
+  () => new RegistryClient(),
+);

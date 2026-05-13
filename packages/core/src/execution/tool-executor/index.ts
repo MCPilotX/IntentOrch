@@ -17,7 +17,7 @@ import { AutoStartManager } from "../../utils/auto-start-manager.js";
 import { getConfigService } from "../../core/config-service.js";
 import { logger } from "../../core/logger.js";
 import { IntentOrchError, ErrorCode } from "../../core/error-handler.js";
-import { Timeouts, KnownServers } from "../../core/constants.js";
+import { Timeouts } from "../../core/constants.js";
 
 export interface ConnectedServer {
   name: string;
@@ -68,42 +68,7 @@ export class ToolExecutionEngine {
     const runningServers = await processManager.listRunning();
 
     if (runningServers.length === 0) {
-      logger.warn("[ToolExecutor] No running MCP servers found in process store");
-
-      // Fallback: try to find running servers via ps command
-      try {
-        const { execSync } = await import("child_process");
-        const psOutput = execSync(
-          'ps aux | grep -E "node.*mcp" | grep -v grep',
-          { encoding: "utf8", timeout: 5000 },
-        );
-        const lines = psOutput.trim().split("\n").filter((l) => l.trim());
-
-        if (lines.length > 0) {
-          logger.info(`[ToolExecutor] Found ${lines.length} potential MCP processes via ps`);
-
-          const registryClient = getRegistryClient();
-          for (const serverName of KnownServers) {
-            if (this.connectedServers.has(serverName)) continue;
-
-            try {
-              const manifest = await registryClient.getCachedManifest(serverName);
-              if (manifest) {
-                const transportUrl = manifest.transport?.url;
-                if (transportUrl && this.connectedUrls.has(transportUrl)) {
-                  continue;
-                }
-                await this.connectToServer(serverName, manifest);
-              }
-            } catch (err: unknown) {
-              logger.debug(`[ToolExecutor] Failed to connect to known server ${serverName}: ${(err instanceof Error ? err.message : String(err))}`);
-            }
-          }
-        }
-      } catch (psError: unknown) {
-        logger.debug(`[ToolExecutor] ps fallback failed: ${psError instanceof Error ? psError.message : String(psError)}`);
-      }
-
+      logger.info("[ToolExecutor] No running MCP servers found — nothing to connect to");
       return;
     }
 
@@ -157,8 +122,24 @@ export class ToolExecutionEngine {
           try {
             await processManager.stop(runningInfo.pid);
             await new Promise((resolve) => setTimeout(resolve, 1000));
+
+            // Verify the process actually stopped after kill attempt
+            const stillAlive = await processManager.isRunning(runningInfo.pid);
+            if (stillAlive) {
+              throw new Error(
+                `Process ${runningInfo.pid} for ${serverName} did not terminate after SIGTERM/SIGKILL. ` +
+                `Aborting connection to prevent port/state conflicts.`
+              );
+            }
           } catch (stopError: unknown) {
-            logger.warn(`[ToolExecutor] Failed to stop existing process for ${serverName}: ${stopError instanceof Error ? stopError.message : String(stopError)}`);
+            logger.error(`[ToolExecutor] Failed to stop existing process for ${serverName}: ${stopError instanceof Error ? stopError.message : String(stopError)}`);
+            // CRITICAL: Do NOT continue if we can't stop the existing process.
+            // Proceeding would allow starting a second instance of the same server
+            // on the same port, causing file descriptor leaks and unpredictable behavior.
+            throw new Error(
+              `Cannot connect to ${serverName}: previous process (PID ${runningInfo.pid}) is still running. ` +
+              `Please stop it manually with 'intorch server stop ${runningInfo.pid}' and try again.`
+            );
           }
         }
       }

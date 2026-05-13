@@ -163,8 +163,15 @@ export class MCPClient extends EventEmitter {
     try {
       await this.transport.disconnect();
     } catch (error) {
+      logger.warn(`[MCPClient] Transport disconnect error for "${this.config.serverName}" (non-fatal):`, error);
       this.emitEvent("error", error);
-      throw error;
+      // IMPORTANT: Do NOT re-throw. Transport disconnect can fail with EPIPE
+      // when the remote side has already closed the connection. The caller
+      // (disconnectServer / cleanupConnections) must still be able to clean up
+      // its internal state (connectedServers Map). Re-throwing here would
+      // prevent the finally block from running — but even with finally,
+      // the error would propagate to the caller and potentially leave the
+      // cleanup incomplete.
     } finally {
       this.connected = false;
       this.pendingRequests.forEach(({ reject, timeout }) => {

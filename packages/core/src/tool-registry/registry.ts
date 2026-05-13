@@ -3,6 +3,8 @@ import fs from "fs/promises";
 import path from "path";
 import { getInTorchDir } from "../utils/paths.js";
 import { normalizeServerName, getDisplayName } from "../utils/server-name.js";
+import { createSingleton } from "../utils/singleton.js";
+import type { Manifest } from "../registry/types.js";
 
 export interface ToolMetadata {
   name: string;
@@ -120,7 +122,7 @@ export class ToolRegistry {
 
   async registerToolsFromManifest(
     serverName: string,
-    manifest: Record<string, unknown>,
+    manifest: Manifest,
   ): Promise<void> {
     await this.ensureInitialized();
     // Normalize server name for uniqueness
@@ -328,16 +330,16 @@ export class ToolRegistry {
   }
 }
 
-// Singleton instance
-let toolRegistry: ToolRegistry | null = null;
-
-export function getToolRegistry(): ToolRegistry {
-  if (!toolRegistry) {
-    toolRegistry = new ToolRegistry();
-    // Async load, but don't wait
-    toolRegistry.load().catch((err) => {
+// Singleton instance — uses ESM-safe singleton factory
+// Note: load() is called fire-and-forget in the factory to preserve the
+// original non-blocking initialization behavior.
+export const getToolRegistry = createSingleton<ToolRegistry>(
+  "core:tool-registry",
+  () => {
+    const instance = new ToolRegistry();
+    instance.load().catch((err) => {
       logger.warn("Failed to load tool registry:", err.message);
     });
-  }
-  return toolRegistry;
-}
+    return instance;
+  },
+);

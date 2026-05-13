@@ -70,8 +70,16 @@ export class StdioTransport extends EventEmitter implements MCPTransport {
 
   async disconnect(): Promise<void> {
     if (this.sdkTransport) {
-      await this.sdkTransport.close();
-      this.sdkTransport = null;
+      try {
+        await this.sdkTransport.close();
+      } catch (error: unknown) {
+        logger.warn(`[StdioTransport] Error during SDK close (non-fatal): ${(error instanceof Error ? error.message : String(error))}`);
+        // EPIPE / connection reset during close is expected when the remote side
+        // has already torn down the connection. We still need to release the
+        // transport reference to avoid FD leaks.
+      } finally {
+        this.sdkTransport = null;
+      }
     }
     this._connected = false;
   }

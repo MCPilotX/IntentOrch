@@ -3,6 +3,7 @@ import crypto from "crypto";
 import os from "os";
 import { getSecretsPath, ensureInTorchDir } from "../utils/paths.js";
 import { SecretStore } from "./types.js";
+import { createSingleton } from "../utils/singleton.js";
 
 import { FSLock } from "../utils/fs-lock.js";
 
@@ -146,12 +147,8 @@ export class SecretManager {
   }
 }
 
-// Singleton instance
-let secretManager: SecretManager | null = null;
-
-export function getSecretManager(): SecretManager {
-  if (!secretManager) {
-    secretManager = new SecretManager();
-  }
-  return secretManager;
-}
+// Singleton instance — uses ESM-safe singleton factory
+export const getSecretManager = createSingleton<SecretManager>(
+  "core:secret-manager",
+  () => new SecretManager(),
+);

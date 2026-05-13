@@ -135,7 +135,22 @@ export class DaemonServer {
       bodyParserMiddleware,
     ];
 
-    const mwResult = await runMiddlewareChain(ctx, middlewares);
+    // SECURITY FIX: Wrap middleware chain execution in try-catch to prevent
+    // unhandled rejections from leaking connections. If middleware throws
+    // (e.g. body parse timeout, auth service failure), we send a 500 response
+    // and return immediately. Without this, the request would hang forever
+    // or cause "writeHead already called" errors.
+    let mwResult: boolean;
+    try {
+      mwResult = await runMiddlewareChain(ctx, middlewares);
+    } catch (err) {
+      logger.error("[Daemon] Middleware chain error:", err);
+      sendJson(res, 500, {
+        error: "Internal Error",
+        message: (err as Error).message || "Middleware chain failed",
+      });
+      return;
+    }
     if (!mwResult) return; // Middleware short-circuited (e.g., OPTIONS, auth failure)
 
     // Increment request count
@@ -145,6 +160,9 @@ export class DaemonServer {
     }
 
     // ==================== Route Dispatch ====================
+    // Router.dispatch() already has internal try-catch, so errors in route
+    // handlers will be caught there and a 500 response sent. The await ensures
+    // we don't have fire-and-forget behavior.
     const handled = await this.router.dispatch(ctx);
     if (handled) return;
 
@@ -182,6 +200,14 @@ export class DaemonServer {
         this.initHealthCheckScheduler().catch((error) => {
           logger.error(
             "[Daemon] Error initializing health check scheduler:",
+            error,
+          );
+        });
+
+        // Adopt orphan processes from previous daemon instance
+        getProcessManager().adoptOrphanProcesses().catch((error) => {
+          logger.error(
+            "[Daemon] Error adopting orphan processes:",
             error,
           );
         });
@@ -394,7 +420,7 @@ export class DaemonServer {
           } else {
             await toolRegistry.registerToolsFromManifest(
               serverName,
-              manifest as unknown as Record<string, unknown>,
+              manifest,
             );
             logger.info(
               `[Daemon] Tools registered from manifest for server: ${serverName}`,

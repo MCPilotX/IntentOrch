@@ -114,7 +114,7 @@ export async function handleServerRoutes(
       // Register tools
       await getToolRegistry().registerToolsFromManifest(
         serverNameOrUrl,
-        manifest as unknown as Record<string, unknown>,
+        manifest,
       );
 
       // Check if the server is already running before starting
@@ -273,7 +273,7 @@ export async function handleServerRoutes(
 
       await getToolRegistry().registerToolsFromManifest(
         serverNameOrUrl,
-        manifest as unknown as Record<string, unknown>,
+        manifest,
       );
 
       sendJson(res, 200, {

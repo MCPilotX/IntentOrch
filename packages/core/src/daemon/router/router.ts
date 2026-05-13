@@ -1,20 +1,8 @@
 import http from "http";
 import { logger } from "../../core/logger.js";
-import { sendJson } from "../routes/index.js";
+import { sendJson, type RouteContext } from "../routes/index.js";
 
 export type RouteHandler = (ctx: RouteContext) => Promise<boolean>;
-
-export interface RouteContext {
-  req: http.IncomingMessage;
-  res: http.ServerResponse;
-  path: string;
-  method: string;
-  body: string;
-  parsedUrl: URL;
-  config: Record<string, unknown>;
-  startTime: number;
-  requestCount: number;
-}
 
 export class Router {
   private routes: Array<{

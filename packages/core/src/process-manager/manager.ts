@@ -10,6 +10,7 @@ import { isProcessRunningWithRetry } from "../utils/system.js";
 import { PROGRAM_NAME } from "../utils/constants.js";
 import { MCPClient } from "../mcp/client.js";
 import { getToolRegistry } from "../tool-registry/registry.js";
+import { createSingleton } from "../utils/singleton.js";
 
 export class ProcessManager {
   private store: ProcessStoreManager;
@@ -508,14 +509,59 @@ export class ProcessManager {
       }
     }
   }
-}
 
-// Singleton instance
-let processManager: ProcessManager | null = null;
+  /**
+   * Adopt orphan processes discovered from the process store.
+   *
+   * When the daemon restarts, previously spawned MCP server processes are still
+   * running (orphans) but this ProcessManager has no in-memory reference to them.
+   * This method reads all "running" processes from the store, verifies they are
+   * actually alive via OS-level PID check, and re-associates them with an
+   * empty ChildProcess handle — allowing them to be managed (stopped, monitored)
+   * without needing to restart them.
+   *
+   * For processes spawned externally (HTTP/SSE), they are tracked by URL/transport
+   * rather than PID and need no special adoption.
+   */
+  async adoptOrphanProcesses(): Promise<void> {
+    const runningProcesses = await this.store.listRunningProcesses();
 
-export function getProcessManager(): ProcessManager {
-  if (!processManager) {
-    processManager = new ProcessManager();
+    for (const info of runningProcesses) {
+      // Skip external services — they are managed by URL, not PID
+      if (info.external) {
+        logger.info(`[ProcessManager] Adopted external service: ${info.name} (${info.url})`);
+        continue;
+      }
+
+      // Check if we already have an in-memory handle for this PID
+      if (this.processes.has(info.pid)) {
+        continue;
+      }
+
+      // Verify the process is actually still alive
+      const isAlive = await isProcessRunningWithRetry(info.pid, 2, 300);
+      if (!isAlive) {
+        logger.warn(`[ProcessManager] Orphan PID ${info.pid} (${info.name}) is no longer alive — marking as stopped`);
+        await this.store.updateProcess(info.pid, { status: "stopped" as const });
+        continue;
+      }
+
+      // Associate an empty handle — we can't recover the original ChildProcess
+      // object after restart, but we can track the PID so stop() can still
+      // send kill signals via system commands.
+      // @ts-expect-error: minimal stub for PID tracking, not a real ChildProcess
+      this.processes.set(info.pid, { pid: info.pid, exitCode: null, signalCode: null, kill: () => {}, connected: false });
+
+      logger.info(
+        `[ProcessManager] Adopted orphan process: ${info.name} (PID: ${info.pid}) — ` +
+        `can now be managed without restart`,
+      );
+    }
   }
-  return processManager;
 }
+
+// Singleton instance — uses ESM-safe singleton factory
+export const getProcessManager = createSingleton<ProcessManager>(
+  "core:process-manager",
+  () => new ProcessManager(),
+);

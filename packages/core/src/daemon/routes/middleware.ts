@@ -4,7 +4,7 @@
  * Standard middleware for the daemon HTTP server:
  * - CORS handling
  * - Authentication
- * - Body parsing
+ * - Body parsing (with timeout protection)
  * - Request logging
  * - Error handling
  */
@@ -13,6 +13,11 @@ import http from "http";
 import { getSecretManager } from "../../secret/manager.js";
 import { sendJson, type RouteContext } from "./index.js";
 import { logger } from "../../core/logger.js";
+
+// ==================== Constants ====================
+
+/** Maximum time (ms) to wait for request body before timing out */
+const BODY_PARSE_TIMEOUT_MS = 30_000;
 
 // ==================== CORS Middleware ====================
 
@@ -55,7 +60,18 @@ export async function authMiddleware(ctx: RouteContext): Promise<boolean> {
   }
 
   const auth = req.headers.authorization;
-  const token = await getSecretManager().get("daemon_auth_token");
+
+  // SECURITY FIX: wrap secret retrieval in try-catch to prevent
+  // silent authentication bypass when SecretManager fails (e.g. file I/O errors,
+  // decryption failures, or missing secrets file).
+  let token: string | undefined;
+  try {
+    token = await getSecretManager().get("daemon_auth_token");
+  } catch (err) {
+    logger.error("[AuthMiddleware] Failed to retrieve daemon_auth_token:", err);
+    sendJson(res, 500, { error: "Authentication service unavailable" });
+    return false;
+  }
 
   if (!auth || auth.substring(7) !== token) {
     sendJson(res, 401, { error: "Unauthorized" });
@@ -71,9 +87,35 @@ export async function bodyParserMiddleware(ctx: RouteContext): Promise<boolean> 
   if (ctx.method === "POST" || ctx.method === "PUT") {
     ctx.body = await new Promise<string>((resolve, reject) => {
       let b = "";
-      ctx.req.on("data", (c: string) => (b += c));
-      ctx.req.on("end", () => resolve(b));
-      ctx.req.on("error", reject);
+      let settled = false;
+
+      const timeout = setTimeout(() => {
+        if (!settled) {
+          settled = true;
+          ctx.req.destroy(new Error("Request body parse timeout"));
+          reject(new Error("Request body parse timeout after " + BODY_PARSE_TIMEOUT_MS + "ms"));
+        }
+      }, BODY_PARSE_TIMEOUT_MS);
+
+      ctx.req.on("data", (c: string) => {
+        if (!settled) b += c;
+      });
+
+      ctx.req.on("end", () => {
+        if (!settled) {
+          settled = true;
+          clearTimeout(timeout);
+          resolve(b);
+        }
+      });
+
+      ctx.req.on("error", (err) => {
+        if (!settled) {
+          settled = true;
+          clearTimeout(timeout);
+          reject(err);
+        }
+      });
     });
   }
   return true;

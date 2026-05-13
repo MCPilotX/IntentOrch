@@ -65,7 +65,13 @@ export class SseTransport extends EventEmitter implements MCPTransport {
   }
 
   async disconnect(): Promise<void> {
-    await this.sdkTransport.close();
+    try {
+      await this.sdkTransport.close();
+    } catch (error: unknown) {
+      logger.warn(`[SseTransport] Error during SDK close (non-fatal): ${(error instanceof Error ? error.message : String(error))}`);
+      // EPIPE / connection reset during close is expected. We still need to
+      // update state to avoid FD leaks.
+    }
     this._connected = false;
   }
 

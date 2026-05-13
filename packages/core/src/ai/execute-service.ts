@@ -469,7 +469,10 @@ export class ExecuteService {
         await this.sessionManager.failSession(sessionId);
       }
 
-      if (!options.keepAlive) {
+      // Daemon mode: keep MCP connections alive across requests for better performance
+      // Local mode: clean up unless explicitly requested to keep alive
+      const isDaemonProcess = process.env.INTORCH_DAEMON === "true";
+      if (!options.keepAlive && !isDaemonProcess) {
         await this.toolExecutor.cleanupConnections();
       }
 
