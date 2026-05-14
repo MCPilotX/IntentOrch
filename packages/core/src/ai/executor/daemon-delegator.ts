@@ -25,8 +25,33 @@ export class DaemonDelegator {
     const isDaemonProcess = process.env.INTORCH_DAEMON === "true";
     const skipDelegation = options.simulate || options.skipDaemonDelegation;
 
+    // Prevent delegation loop: if we are inside the daemon process or
+    // the caller explicitly asked to skip delegation, run locally.
     if (isDaemonProcess || skipDelegation) {
       return null;
+    }
+
+    // Self-delegation guard — if a daemon is listening on the default port AND we
+    // are also listening on the same port (e.g. started via node -e without the
+    // INTORCH_DAEMON env var), skip delegation to avoid infinite HTTP recursion.
+    try {
+      const port = process.env.DAEMON_PORT || "9658";
+      const http = await import("http");
+      // Try to bind to the daemon port — if it succeeds there's no other daemon,
+      // if it fails another daemon is running and we can delegate safely.
+      const server = http.createServer();
+      await new Promise<void>((resolve, reject) => {
+        server.on("error", () => resolve()); // port in use → another daemon exists
+        server.listen(parseInt(port), "localhost", () => {
+          server.close(() => resolve()); // no daemon → close and run locally
+        });
+      });
+      if (server.listening) {
+        server.close();
+        return null;  // no other daemon found
+      }
+    } catch {
+      // Best-effort
     }
 
     try {

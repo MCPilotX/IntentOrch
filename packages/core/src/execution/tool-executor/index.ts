@@ -13,6 +13,8 @@
 import { MCPClient } from "../../mcp/client.js";
 import { getProcessManager } from "../../process-manager/manager.js";
 import { getRegistryClient } from "../../registry/client.js";
+import type { Manifest } from "../../registry/types.js";
+import type { TransportConfig } from "../../mcp/types.js";
 import { AutoStartManager } from "../../utils/auto-start-manager.js";
 import { getConfigService } from "../../core/config-service.js";
 import { logger } from "../../core/logger.js";
@@ -46,15 +48,11 @@ export class ToolExecutionEngine {
   /** Cache TTL: 5 minutes */
   private readonly CACHE_TTL_MS = 5 * 60 * 1000;
 
-  /**
-   * Maximum execution time for a ReAct loop (2 minutes).
-   */
-  readonly MAX_REACT_EXECUTION_TIME_MS = 120_000;
-
-  /**
-   * Maximum number of messages in conversation history before summarization.
-   */
-  readonly MAX_CONVERSATION_HISTORY_LENGTH = 20;
+  // NOTE: ReAct loop constants (MAX_REACT_EXECUTION_TIME_MS, MAX_CONVERSATION_HISTORY_LENGTH)
+  // were previously duplicated here from ReActLoopEngine. After the refactor that delegated
+  // the ReAct loop to ReActLoopEngine.execute(), ExecuteService no longer references these
+  // constants on ToolExecutionEngine. They have been removed. All callers should use
+  // ReActLoopEngine's own constants instead.
 
   // ==================== Connection Management ====================
 
@@ -93,7 +91,23 @@ export class ToolExecutionEngine {
           if (transportUrl && this.connectedUrls.has(transportUrl)) {
             continue;
           }
-          await this.connectToServer(server.serverName, manifest);
+          try {
+            await this.connectToServer(server.serverName, manifest as Manifest);
+          } catch (connectError: unknown) {
+            // If connection fails (e.g. EBADF from a zombie process), mark the server
+            // as stopped so we don't retry it on every subsequent request.
+            logger.warn(`[ToolExecutor] Failed to connect to ${server.serverName}: ${connectError instanceof Error ? connectError.message : String(connectError)}`);
+            try {
+              const pm = getProcessManager();
+              const info = await pm.getByServerName(server.serverName);
+              if (info) {
+                await pm.stop(info.pid);
+              }
+            } catch {
+              // best-effort cleanup
+            }
+            continue;  // Skip this server, try others
+          }
         }
       } catch (error: unknown) {
         logger.warn(`[ToolExecutor] Failed to connect to ${server.serverName}: ${(error instanceof Error ? error.message : String(error))}`);
@@ -104,7 +118,7 @@ export class ToolExecutionEngine {
   /**
    * Connect to a specific MCP server.
    */
-  async connectToServer(serverName: string, manifest: Record<string, unknown>): Promise<void> {
+  async connectToServer(serverName: string, manifest: Manifest): Promise<void> {
     if (this.connectedServers.has(serverName)) return;
 
     try {
@@ -115,9 +129,12 @@ export class ToolExecutionEngine {
       let existingProcess: import("child_process").ChildProcess | null = null;
 
       if (!isExternal) {
-        existingProcess = await processManager.getProcessHandleByServerName(serverName);
+        existingProcess = (await processManager.getProcessHandleByServerName(serverName)) ?? null;
         const runningInfo = await processManager.getByServerName(serverName);
 
+        // runningInfo may be undefined if no process is registered for this server.
+        // This is valid — it means the server has never been started, so we skip
+        // the stop-and-restart logic and proceed directly to connecting.
         if (!existingProcess && runningInfo && runningInfo.status === "running") {
           try {
             await processManager.stop(runningInfo.pid);
@@ -136,9 +153,13 @@ export class ToolExecutionEngine {
             // CRITICAL: Do NOT continue if we can't stop the existing process.
             // Proceeding would allow starting a second instance of the same server
             // on the same port, causing file descriptor leaks and unpredictable behavior.
+            // runningInfo is guaranteed non-null here because the outer if-check
+            // (runningInfo && runningInfo.status === "running") ensures we only
+            // reach this catch block when runningInfo is defined.
+            const pid = runningInfo!.pid;
             throw new Error(
-              `Cannot connect to ${serverName}: previous process (PID ${runningInfo.pid}) is still running. ` +
-              `Please stop it manually with 'intorch server stop ${runningInfo.pid}' and try again.`
+              `Cannot connect to ${serverName}: previous process (PID ${pid}) is still running. ` +
+              `Please stop it manually with 'intorch server stop ${pid}' and try again.`
             );
           }
         }
@@ -163,26 +184,26 @@ export class ToolExecutionEngine {
         }
       }
 
-      let transportConfig: Record<string, unknown>;
+      let transportConfig: TransportConfig;
       if (transportType === "sse") {
         transportConfig = {
-          type: "sse" as const,
-          url: manifest.transport?.url || `http://localhost:${manifest.runtime?.port || 3000}/sse`,
+          type: "sse",
+          url: manifest.transport?.url || `http://localhost:3000/sse`,
           headers: manifest.transport?.headers,
         };
       } else if (transportType === "http") {
         transportConfig = {
-          type: "http" as const,
-          url: manifest.transport?.url || `http://localhost:${manifest.runtime?.port || 3000}`,
+          type: "http",
+          url: manifest.transport?.url || `http://localhost:3000`,
           headers: manifest.transport?.headers,
         };
       } else {
         transportConfig = {
-          type: "stdio" as const,
+          type: "stdio",
           command: manifest.runtime.command,
           args: manifest.runtime.args || [],
           env: envVars,
-          existingProcess: existingProcess,
+          existingProcess: existingProcess ?? undefined,
         };
       }
 
@@ -225,14 +246,36 @@ export class ToolExecutionEngine {
           ),
         ]);
 
-        const toolsWithServer = serverTools.map((tool: Record<string, unknown>) => ({
+        const toolsWithServer = serverTools.map((tool) => ({
           ...tool,
           serverName: name,
         }));
 
-        tools.push(...toolsWithServer);
+        tools.push(...toolsWithServer as ToolInfo[]);
       } catch (error: unknown) {
         logger.warn(`[ToolExecutor] Failed to list tools for server ${name}: ${(error instanceof Error ? error.message : String(error))}`);
+      }
+    }
+
+    // Fallback: if no tools from connected servers, try ToolRegistry (cached manifests)
+    if (tools.length === 0) {
+      try {
+        const { getToolRegistry } = await import("../../tool-registry/registry.js");
+        const registry = getToolRegistry();
+        const allTools = await registry.getAllTools();
+        for (const t of allTools) {
+          tools.push({
+            name: t.name,
+            serverName: t.serverName,
+            description: t.description,
+            inputSchema: t.parameters as Record<string, unknown> | undefined,
+          });
+        }
+        if (tools.length > 0) {
+          logger.info(`[ToolExecutor] Using ${tools.length} tools from ToolRegistry fallback`);
+        }
+      } catch {
+        // best-effort
       }
     }
 
@@ -311,8 +354,9 @@ export class ToolExecutionEngine {
     const requiredServers = new Set<string>();
 
     for (const step of workflow.steps || []) {
-      if (step.serverId || step.serverName) {
-        requiredServers.add(step.serverId || step.serverName);
+      const serverRef = step.serverId || step.serverName;
+      if (serverRef) {
+        requiredServers.add(serverRef);
       }
     }
 

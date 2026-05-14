@@ -9,12 +9,11 @@ import type {
   RuntimeType,
   ExecutionSession as CoreExecutionSession,
   SessionType,
-  SessionState as CoreSessionState,
-  ToolExecutionPlan,
-  PlanStep
 } from '@intentorch/core';
 
 // Re-export core types for convenience
+// IMPORTANT: SessionState is imported directly from @intentorch/core to ensure
+// consistency between frontend and backend state machine definitions.
 export type { 
   CoreProcessInfo, 
   CoreWorkflow, 
@@ -24,10 +23,12 @@ export type {
   CoreDaemonResponse,
   CoreExecutionSession as ExecutionSession,
   SessionType,
-  CoreSessionState as SessionState,
-  ToolExecutionPlan,
-  PlanStep
 };
+
+// Re-export SessionState from core — using `import type` + re-export alias
+// ensures frontend and backend always agree on the state machine.
+import type { SessionState as CoreSessionState } from '@intentorch/core';
+export type SessionState = CoreSessionState;
 
 // MCP Server related types
 export interface MCPServer {
@@ -51,7 +52,7 @@ export interface MCPServer {
     parameters?: Record<string, unknown>;
     inputSchema?: Record<string, unknown>;
   }>;
-  status: 'not_pulled' | 'pulled' | 'running' | 'stopped' | 'error';
+  status: 'not_pulled' | 'pulled' | 'running' | 'stopped' | 'error' | 'starting';
   pulledAt?: string;
   lastStartedAt?: string;
   // External service fields (for HTTP/SSE transport types)
@@ -72,17 +73,6 @@ export interface Secret {
   lastUpdated: string;
   description?: string;
 }
-
-// Interactive session types
-export type SessionState = 
-  | 'initializing'
-  | 'parsing'
-  | 'validating'
-  | 'awaiting_feedback'
-  | 'executing'
-  | 'completed'
-  | 'failed'
-  | 'cancelled';
 
 export interface MissingParameter {
   toolName: string;
@@ -117,6 +107,15 @@ export interface UserGuidanceMessage {
   timestamp: Date;
 }
 
+/**
+ * InteractiveSession — legacy type that predates the unified ExecutionSession.
+ * 
+ * DEPRECATED: New code should use ExecutionSession from @intentorch/core directly.
+ * This type is retained only for backward compatibility with the legacy interactive
+ * test scripts (test-interactive.js, test-interactive-simple.js).
+ * 
+ * @deprecated Use ExecutionSession (@intentorch/core) instead.
+ */
 export interface InteractiveSession {
   sessionId: string;
   userId?: string;
@@ -162,7 +161,7 @@ export interface SystemStats {
 export interface SessionCreateResponse {
   success: boolean;
   sessionId: string;
-  session: ExecutionSession;
+  session: CoreExecutionSession;
 }
 
 export interface SessionExecuteResponse {
@@ -173,12 +172,12 @@ export interface SessionExecuteResponse {
   status?: string;
   confidence?: number;
   error?: string;
-  session?: ExecutionSession;
+  session?: CoreExecutionSession;
 }
 
 export interface SessionListResponse {
   success: boolean;
-  sessions: ExecutionSession[];
+  sessions: CoreExecutionSession[];
   total: number;
 }
 

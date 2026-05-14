@@ -39,22 +39,22 @@ function claudeDesktopEntryToManifest(
 ): Manifest {
   const isNetworkService = !!entry.url;
   const transportEntry = entry.transport as Record<string, unknown> | undefined;
-  const transportType = (transportEntry?.type as string) || (isNetworkService ? "sse" : "stdio");
+  const transportType: string = (transportEntry?.type as string) || (isNetworkService ? "sse" : "stdio");
 
   const manifest: Manifest = {
     name: serverName,
     version: "1.0.0",
     description: `Imported from MCP config: ${serverName}`,
     runtime: {
-      type: isNetworkService ? "remote" : inferRuntimeType(entry.command || ""),
-      command: entry.command || "",
-      args: entry.args || [],
-      env: entry.env ? Object.keys(entry.env) : [],
+      type: isNetworkService ? "remote" : inferRuntimeType((entry.command as string) || ""),
+      command: (entry.command as string) || "",
+      args: (entry.args as string[]) || [],
+      env: entry.env ? Object.keys(entry.env as Record<string, string>) : [],
     },
     transport: {
-      type: transportType,
-      url: (entry.url as string) || ((entry.transport as Record<string, unknown> | undefined)?.url as string),
-      headers: ((entry.headers as Record<string, string>) || (entry.transport as Record<string, unknown> | undefined)?.headers) as Record<string, string> | undefined,
+      type: transportType as "sse" | "http" | "stdio" | "websocket" | "tcp",
+      url: (entry.url as string) || ((entry.transport as Record<string, unknown> | undefined)?.url as string) || undefined,
+      headers: ((entry.headers as Record<string, string>) || (entry.transport as Record<string, unknown> | undefined)?.headers as Record<string, string>) || undefined,
     },
   };
   return manifest;
@@ -272,41 +272,42 @@ export class GitHubRegistrySource implements RegistrySource {
           },
         });
 
-        const contents = response.data;
+        const contents = response.data as Array<Record<string, unknown>>;
 
         // Filter directories (each directory is a potential service)
-        const serviceDirs = contents.filter((item: any) => item.type === "dir");
+        const serviceDirs = contents.filter((item) => item.type === "dir");
 
         allServices = await Promise.all(
-          serviceDirs.map(async (dir: any) => {
+          serviceDirs.map(async (dir) => {
             try {
               // Try to get mcp.json from the directory
               const manifestUrl = `https://raw.githubusercontent.com/${hubOwner}/${hubRepo}/${hubBranch}/${dir.name}/mcp.json`;
               const manifestResponse = await axios.get(manifestUrl, {
                 timeout: 5000,
               });
-              const manifest = manifestResponse.data;
+              const manifest = manifestResponse.data as Record<string, unknown>;
 
+              const dirName = dir.name as string;
               return {
-                name: dir.name,
+                name: dirName,
                 description:
-                  manifest.description || `GitHub MCP service: ${dir.name}`,
-                version: manifest.version || "1.0.0",
-                source: "github",
-                tags: manifest.tags || ["github", "mcp"],
+                  (manifest.description as string) || `GitHub MCP service: ${dirName}`,
+                version: (manifest.version as string) || "1.0.0",
+                source: "github" as const,
+                tags: (manifest.tags as string[]) || ["github", "mcp"],
                 lastUpdated:
-                  dir.git_timestamp || new Date().toISOString().split("T")[0],
-              };
+                  (dir.git_timestamp as string) || new Date().toISOString().split("T")[0],
+              } as ServiceInfo;
             } catch (error) {
               // If mcp.json not found, return basic info
               return {
-                name: dir.name,
-                description: `GitHub MCP service: ${dir.name}`,
+                name: dir.name as string,
+                description: `GitHub MCP service: ${dir.name as string}`,
                 version: "1.0.0",
-                source: "github",
+                source: "github" as const,
                 tags: ["github", "mcp"],
                 lastUpdated: new Date().toISOString().split("T")[0],
-              };
+              } as ServiceInfo;
             }
           }),
         );

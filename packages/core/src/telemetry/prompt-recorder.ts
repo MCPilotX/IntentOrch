@@ -44,6 +44,7 @@ export class PromptRecorder {
       if (oldest) this.records.delete(oldest);
     }
 
+    await this.ensureSchema();
     // Persist to SQLite
     try {
       const db = DatabaseManager.getInstance();

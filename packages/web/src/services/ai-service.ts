@@ -103,6 +103,95 @@ export async function executeSteps(steps: Record<string, unknown>[], options?: U
   return await apiService.executeSteps({ steps, options });
 }
 
+/**
+ * Step stream event from SSE
+ */
+export interface StepStreamEvent {
+  type: 'step_result' | 'complete' | 'error';
+  toolName?: string;
+  success?: boolean;
+  result?: unknown;
+  error?: string;
+  duration?: number;
+  stepIndex?: number;
+  totalSteps?: number;
+}
+
+/**
+ * Execute natural language query with SSE streaming.
+ * Calls onStep for each step result, and onComplete when done.
+ */
+export function executeNaturalLanguageStream(
+  query: string,
+  onStep: (event: StepStreamEvent) => void,
+  options?: UnifiedExecutionOptions,
+): Promise<{ success: boolean; result?: unknown; error?: string }> {
+  const API_BASE_URL = (typeof window !== 'undefined' && window.location?.hostname)
+    ? `${window.location.protocol}//${window.location.hostname}:9658`
+    : 'http://localhost:9658';
+  const url = `${API_BASE_URL}/api/execute/natural-language-stream`;
+
+  return new Promise((resolve, reject) => {
+    fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query, options }),
+    }).then(async (response) => {
+      if (!response.ok) {
+        const text = await response.text();
+        reject(new Error(text));
+        return;
+      }
+
+      const reader = response.body?.getReader();
+      if (!reader) {
+        reject(new Error('No response body'));
+        return;
+      }
+
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          const data = line.slice(6).trim();
+          if (data === '[DONE]') continue;
+
+          try {
+            const event = JSON.parse(data) as StepStreamEvent;
+            onStep(event);
+
+            if (event.type === 'complete') {
+              resolve({
+                success: event.success || false,
+                result: event.result,
+                error: event.error,
+              });
+              return;
+            }
+            if (event.type === 'error') {
+              resolve({ success: false, error: event.error });
+              return;
+            }
+          } catch {
+            // Ignore parse errors
+          }
+        }
+      }
+
+      resolve({ success: true });
+    }).catch(reject);
+  });
+}
+
 // Export as a single object for convenience
 export const aiService = {
   // Session-based API

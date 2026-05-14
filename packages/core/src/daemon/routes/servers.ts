@@ -38,8 +38,27 @@ export async function handleServerRoutes(
       const serverMap = new Map<string, any>();
 
       // 1. Add all active/stored processes
+      // For duplicate server names, prefer the running process over stopped ones.
+      // If multiple running processes exist, prefer the most recent one.
       for (const proc of processes) {
         const name = proc.serverName || proc.name;
+        const existing = serverMap.get(name);
+        
+        // Keep the existing entry if:
+        // - Existing is running and current is not running, OR
+        // - Both are running but existing is more recent
+        if (existing) {
+          const existingRunning = existing.status === "running";
+          const currentRunning = proc.status === "running";
+          
+          if (existingRunning && !currentRunning) {
+            continue; // Keep the running entry
+          }
+          if (existingRunning && currentRunning && existing.startTime >= proc.startTime) {
+            continue; // Keep the more recent running entry
+          }
+        }
+        
         serverMap.set(name, {
           ...proc,
           status: proc.status || "stopped",
@@ -74,8 +93,8 @@ export async function handleServerRoutes(
       // Enrich all with tools
       const enrichedServers = await Promise.all(
         servers.map(async (server: Record<string, unknown>) => {
-          const serverKey = server.serverName || server.name;
-          const tools = await toolRegistry.findToolsByServer(serverKey);
+          const serverKey = (server.serverName || server.name) as string | undefined;
+          const tools = serverKey ? await toolRegistry.findToolsByServer(serverKey) : [];
           return {
             ...server,
             tools: tools,
@@ -97,12 +116,13 @@ export async function handleServerRoutes(
   // ==================== POST /api/servers ====================
   if (path === "/api/servers" && method === "POST") {
     try {
-      const { serverNameOrUrl } = JSON.parse(body);
+      const data = JSON.parse(body);
+      const serverNameOrUrl = data.serverNameOrUrl || data.serverId || data.serverName;
 
       if (!serverNameOrUrl || typeof serverNameOrUrl !== "string") {
         sendJson(res, 400, {
           error: "Bad Request",
-          message: "serverNameOrUrl is required and must be a string",
+          message: "serverNameOrUrl (or serverId/serverName) is required and must be a string",
         });
         return true;
       }
@@ -120,9 +140,9 @@ export async function handleServerRoutes(
       // Check if the server is already running before starting
       const existingProcesses = await getProcessManager().list();
       const runningServer = existingProcesses.find(
-        (p: Record<string, unknown>) =>
+        (p) =>
           p.manifest &&
-          (p.manifest as Record<string, unknown>).name === manifest.name &&
+          p.manifest.name === manifest.name &&
           p.status === "running",
       );
 
@@ -254,12 +274,13 @@ export async function handleServerRoutes(
   // ==================== POST /api/servers/pull ====================
   if (path === "/api/servers/pull" && method === "POST") {
     try {
-      const { serverNameOrUrl } = JSON.parse(body);
+      const data = JSON.parse(body);
+      const serverNameOrUrl = data.serverNameOrUrl || data.serverName || data.serverId;
 
       if (!serverNameOrUrl || typeof serverNameOrUrl !== "string") {
         sendJson(res, 400, {
           error: "Bad Request",
-          message: "serverNameOrUrl is required and must be a string",
+          message: "serverNameOrUrl (or serverName/serverId) is required and must be a string",
         });
         return true;
       }

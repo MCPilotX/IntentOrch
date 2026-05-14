@@ -22,8 +22,8 @@ const ToolCallModal: React.FC<ToolCallModalProps> = ({ isOpen, onClose, serverNa
   if (!isOpen) return null;
 
   const handleParamChange = (name: string, value: string | boolean, type: string) => {
-    let normalizedValue = value;
-    if (type === 'number') normalizedValue = parseFloat(value);
+    let normalizedValue: string | number | boolean = value;
+    if (type === 'number') normalizedValue = parseFloat(value as string);
     if (type === 'boolean') normalizedValue = value === 'true' || value === true;
     
     setParams(prev => ({
@@ -77,15 +77,20 @@ const ToolCallModal: React.FC<ToolCallModalProps> = ({ isOpen, onClose, serverNa
 
           <form id="tool-call-form" onSubmit={handleSubmit} className="space-y-4">
             {tool.parameters && Object.keys(tool.parameters).length > 0 ? (
-              Object.entries(tool.parameters).map(([name, schema]: [string, Record<string, unknown>]) => (
+              Object.entries(tool.parameters || {}).map(([name, rawSchema]) => {
+                const schema = rawSchema as Record<string, unknown>;
+                const schemaType = (schema as Record<string, unknown>).type as string;
+                const schemaRequired = (schema as Record<string, unknown>).required as boolean | undefined;
+                const schemaDesc = (schema as Record<string, unknown>).description as string | undefined;
+                return (
                 <div key={name} className="space-y-1.5">
                   <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300">
                     {name}
-                    {schema.required && <span className="text-red-500 ml-1">*</span>}
-                    <span className="ml-2 text-[10px] font-normal text-gray-400 uppercase tracking-tighter">({schema.type})</span>
+                    {schemaRequired && <span className="text-red-500 ml-1">*</span>}
+                    <span className="ml-2 text-[10px] font-normal text-gray-400 uppercase tracking-tighter">({schemaType})</span>
                   </label>
                   
-                  {schema.type === 'boolean' ? (
+                  {schemaType === 'boolean' ? (
                     <select
                       onChange={(e) => handleParamChange(name, e.target.value, 'boolean')}
                       className="w-full px-3 py-2 bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded-lg text-sm focus:ring-2 focus:ring-primary-500"
@@ -93,26 +98,27 @@ const ToolCallModal: React.FC<ToolCallModalProps> = ({ isOpen, onClose, serverNa
                       <option value="false">False</option>
                       <option value="true">True</option>
                     </select>
-                  ) : schema.type === 'number' || schema.type === 'integer' ? (
+                  ) : schemaType === 'number' || schemaType === 'integer' ? (
                     <input
                       type="number"
-                      placeholder={schema.description}
+                      placeholder={schemaDesc}
                       onChange={(e) => handleParamChange(name, e.target.value, 'number')}
                       className="w-full px-3 py-2 bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded-lg text-sm focus:ring-2 focus:ring-primary-500"
-                      required={schema.required}
+                      required={schemaRequired}
                     />
                   ) : (
                     <textarea
                       rows={2}
-                      placeholder={schema.description}
+                      placeholder={schemaDesc}
                       onChange={(e) => handleParamChange(name, e.target.value, 'string')}
                       className="w-full px-3 py-2 bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded-lg text-sm focus:ring-2 focus:ring-primary-500"
-                      required={schema.required}
+                      required={schemaRequired}
                     />
                   )}
-                  {schema.description && <p className="text-[11px] text-gray-500 dark:text-gray-400 leading-tight">{schema.description}</p>}
+                  {schemaDesc && <p className="text-[11px] text-gray-500 dark:text-gray-400 leading-tight">{schemaDesc}</p>}
                 </div>
-              ))
+              );
+              })
             ) : (
               <div className="text-center py-4 text-gray-500 text-sm italic">
                 This tool accepts no parameters.

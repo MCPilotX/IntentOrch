@@ -44,10 +44,7 @@ export class ParameterNormalizer {
         typeof processed === "string" &&
         this.isDateParameter(key, propSchema)
       ) {
-        const normalized = this.normalizeDateString(processed);
-        if (normalized !== null) {
-          processed = normalized;
-        }
+        processed = this.normalizeDateString(processed);
       }
 
       // 3. Enum fuzzy matching
@@ -138,29 +135,54 @@ export class ParameterNormalizer {
 
   /**
    * Check if a parameter is a date/time parameter.
+   *
+   * Uses a two-tier approach:
+   * 1. If the JSON Schema `format` field is explicitly set to a date/time format, return true.
+   * 2. If the parameter name matches date-related keywords AND schema format is NOT set to
+   *    something non-date (e.g. "number", "email"), return true.
+   * 3. Otherwise return false — this prevents false positives like `timeout: 30000` being
+   *    treated as a date and getting overwritten with `null`.
    */
   private isDateParameter(key: string, schema: Record<string, unknown>): boolean {
     const keyLower = key.toLowerCase();
-    const isDateParam =
-      keyLower.includes("date") ||
-      keyLower.includes("time") ||
-      keyLower.includes("day") ||
-      keyLower.includes("schedule") ||
-      keyLower.includes("deadline");
 
-    if (!isDateParam) return false;
-
-    if (typeof schema.format === "string" && ["date", "date-time", "time"].includes(schema.format)) {
+    // Tier 1: Schema format explicitly confirms date/time type.
+    const format = typeof schema.format === "string" ? schema.format.toLowerCase() : "";
+    if (["date", "date-time", "time"].includes(format)) {
       return true;
     }
 
-    return true;
+    // If schema explicitly says it's NOT a date, trust the schema.
+    if (format && !["date", "date-time", "time"].includes(format)) {
+      return false;
+    }
+
+    // Tier 2: Schema didn't specify format; use keyword matching with stricter rules.
+    // Only match when the ENTIRE parameter name is a known date keyword,
+    // NOT when the keyword is just a substring (avoids "timeout", "dayCount" etc.).
+    const dateKeywords = ["date", "dates", "depart_date", "arrive_date",
+      "departure_date", "arrival_date", "travel_date",
+      "deadline", "due_date", "schedule", "scheduled_at",
+      "departure_time", "arrival_time", "depart_time", "arrive_time"];
+
+    // Also match common patterns like "from_date", "to_date", "date_from", "date_to" etc.
+    if (dateKeywords.some((kw) => keyLower === kw)) {
+      return true;
+    }
+
+    // Match patterns: *_date, *_time, *_day (but not *timeout, *dayCount etc.)
+    if (/_(date|time|day)$/i.test(keyLower) || /^(date|time|day)_/i.test(keyLower)) {
+      return true;
+    }
+
+    return false;
   }
 
   /**
    * Normalize a date string to YYYY-MM-DD format.
+   * Returns the original value unchanged if it can't be parsed as a relative date.
    */
-  normalizeDateString(value: string): string | null {
+  normalizeDateString(value: string): string {
     const trimmed = value.trim().toLowerCase();
     const now = new Date();
 
@@ -247,7 +269,8 @@ export class ParameterNormalizer {
       return `${ymdMatch[1]}-${String(ymdMatch[2]).padStart(2, "0")}-${String(ymdMatch[3]).padStart(2, "0")}`;
     }
 
-    return null;
+    // Not a recognizable date expression — return original value unchanged.
+    return value;
   }
 
   /**

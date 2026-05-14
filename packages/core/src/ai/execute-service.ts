@@ -38,8 +38,6 @@ import type { ToolExecutionPlan } from "./cloud-intent-engine.js";
 import type {
   ExecutionSession,
   SessionType,
-  ConversationMessage,
-  StepResult,
   CreateSessionRequest,
   FeedbackRequest,
 } from "../execution/types.js";
@@ -52,6 +50,7 @@ import {
   WorkflowOrchestrator,
   DaemonDelegator,
 } from "./executor/index.js";
+import type { StepStreamEvent, StreamCallback } from "./executor/react-loop-engine.js";
 
 // ==================== Re-usable result types ====================
 
@@ -124,6 +123,7 @@ export interface WorkflowExecutionResult {
 
 // Re-export sub-component types for convenience
 export { ReActLoopEngine, PlanExecutor, SessionOrchestrator, WorkflowOrchestrator, DaemonDelegator };
+export type { StepStreamEvent, StreamCallback } from "./executor/react-loop-engine.js";
 
 /**
  * Execute Service — orchestrator for all execution flows.
@@ -143,6 +143,9 @@ export class ExecuteService {
   private sessionOrchestrator = new SessionOrchestrator();
   private workflowOrchestrator = new WorkflowOrchestrator();
   private daemonDelegator = new DaemonDelegator();
+
+  /** Optional callback for streaming step results */
+  public onStreamEvent: StreamCallback | null = null;
 
   constructor() {
     logger.debug("[ExecuteService] Creating service instance");
@@ -259,7 +262,7 @@ export class ExecuteService {
       }
 
       this.cloudIntentEngine.setAvailableTools(tools);
-      const toolExecutor = this.toolExecutor.createToolExecutor(tools);
+      const toolExecutorFn = this.toolExecutor.createToolExecutor(tools);
 
       // ==================== Phase 1: Plan ====================
       let plan = session.plan;
@@ -295,209 +298,51 @@ export class ExecuteService {
         }
       }
 
-      // ==================== Phase 2: Multi-turn ReAct Execution ====================
-      const stepResults: StepResult[] = [];
-      let allSuccess = true;
-      let finalResult: unknown = undefined;
-      let conversationHistory: Array<{ role: string; content: string }> = [];
-
-      const systemPrompt = this.cloudIntentEngine["buildSystemPrompt"]();
-      conversationHistory.push({ role: "system", content: systemPrompt });
-      conversationHistory.push({ role: "user", content: session.query });
-
-      if (plan && plan.steps.length > 0) {
-        const planSummary = plan.summary || `I've analyzed the query and created a plan with ${plan.steps.length} steps.`;
-        conversationHistory.push({ role: "assistant", content: `${planSummary}\n\nLet me start executing the plan.` });
-      }
-
-      // Execute initial plan steps
-      if (plan && plan.steps.length > 0) {
-        for (const step of plan.steps) {
-          const stepStartTime = Date.now();
-          try {
-            const result = await toolExecutor(step.toolName, step.arguments);
-            const duration = Date.now() - stepStartTime;
-
-            const stepResult: StepResult = {
-              stepId: step.id,
-              toolName: step.toolName,
-              success: true,
-              result,
-              duration,
-              timestamp: new Date().toISOString(),
-            };
-
-            await this.sessionManager.recordStepResult(sessionId, stepResult);
-            stepResults.push(stepResult);
-            finalResult = result;
-
-            logger.info(`[ExecuteService] Plan step ${step.id} (${step.toolName}) completed in ${duration}ms`);
-
-            const resultStr = typeof result === 'object' ? JSON.stringify(result) : String(result);
-            conversationHistory.push({
-              role: "user",
-              content: `Result of ${step.toolName}: ${resultStr}\n\nBased on this result, what should I do next? If the task is complete, respond with a summary. Otherwise, call the next tool.`,
-            });
-          } catch (error: unknown) {
-            const duration = Date.now() - stepStartTime;
-            allSuccess = false;
-
-            const stepResult: StepResult = {
-              stepId: step.id,
-              toolName: step.toolName,
-              success: false,
-              error: (error instanceof Error ? error.message : String(error)),
-              duration,
-              timestamp: new Date().toISOString(),
-            };
-
-            await this.sessionManager.recordStepResult(sessionId, stepResult);
-            stepResults.push(stepResult);
-
-            logger.error(`[ExecuteService] Plan step ${step.id} (${step.toolName}) failed: ${(error instanceof Error ? error.message : String(error))}`);
-
-            conversationHistory.push({
-              role: "user",
-              content: `Error calling ${step.toolName}: ${(error instanceof Error ? error.message : String(error))}\n\nPlease try a different approach or inform the user.`,
-            });
-            break;
-          }
-        }
-      }
-
-      // Continue with multi-turn ReAct
-      if (allSuccess) {
-        const maxTurns = options.maxReActTurns !== undefined ? options.maxReActTurns : 10;
-        let turnCount = 0;
-        const reactStartTime = Date.now();
-
-        while (turnCount < maxTurns) {
-          turnCount++;
-
-          if (Date.now() - reactStartTime > this.toolExecutor.MAX_REACT_EXECUTION_TIME_MS) {
-            logger.warn(`[ExecuteService] ReAct loop exceeded max execution time (${this.toolExecutor.MAX_REACT_EXECUTION_TIME_MS}ms), terminating`);
-            conversationHistory.push({
-              role: "user",
-              content: "The execution is taking too long. Please summarize what you've done so far and stop.",
-            });
-            break;
-          }
-
-          if (conversationHistory.length > this.toolExecutor.MAX_CONVERSATION_HISTORY_LENGTH) {
-            const trimmedCount = conversationHistory.length - this.toolExecutor.MAX_CONVERSATION_HISTORY_LENGTH;
-            logger.debug(`[ExecuteService] Trimming conversation history: ${conversationHistory.length} -> ${this.toolExecutor.MAX_CONVERSATION_HISTORY_LENGTH} messages`);
-            const systemMsg = conversationHistory[0];
-            const queryMsg = conversationHistory[1];
-            const recentMessages = conversationHistory.slice(-(this.toolExecutor.MAX_CONVERSATION_HISTORY_LENGTH - 2));
-            conversationHistory = [systemMsg, queryMsg, ...recentMessages];
-            logger.debug(`[ExecuteService] Trimmed ${trimmedCount} messages from conversation history`);
-          }
-
-          const functionResult = await this.cloudIntentEngine.processQueryWithHistory(
-            conversationHistory,
-            { toolChoice: "auto" },
-          );
-
-          if (!functionResult.hasToolCall || functionResult.toolCalls.length === 0) {
-            if (functionResult.text) {
-              conversationHistory.push({ role: "assistant", content: functionResult.text });
-            }
-            break;
-          }
-
-          for (const toolCall of functionResult.toolCalls) {
-            const stepStartTime = Date.now();
-
-            try {
-              const result = await toolExecutor(toolCall.toolName, toolCall.arguments);
-              const duration = Date.now() - stepStartTime;
-
-              const stepResult: StepResult = {
-                stepId: `turn_${turnCount}_${toolCall.toolName}`,
-                toolName: toolCall.toolName,
-                success: true,
-                result,
-                duration,
-                timestamp: new Date().toISOString(),
-              };
-
-              await this.sessionManager.recordStepResult(sessionId, stepResult);
-              stepResults.push(stepResult);
-              finalResult = result;
-
-              logger.info(`[ExecuteService] ReAct turn ${turnCount}: ${toolCall.toolName} completed in ${duration}ms`);
-
-              const resultStr = typeof result === 'object' ? JSON.stringify(result) : String(result);
-              conversationHistory.push({
-                role: "user",
-                content: `Result of ${toolCall.toolName}: ${resultStr}\n\nBased on this result, what should I do next? If the task is complete, respond with a summary. Otherwise, call the next tool.`,
-              });
-            } catch (error: unknown) {
-              const duration = Date.now() - stepStartTime;
-              allSuccess = false;
-
-              const stepResult: StepResult = {
-                stepId: `turn_${turnCount}_${toolCall.toolName}`,
-                toolName: toolCall.toolName,
-                success: false,
-                error: (error instanceof Error ? error.message : String(error)),
-                duration,
-                timestamp: new Date().toISOString(),
-              };
-
-              await this.sessionManager.recordStepResult(sessionId, stepResult);
-              stepResults.push(stepResult);
-
-              logger.error(`[ExecuteService] ReAct turn ${turnCount}: ${toolCall.toolName} failed: ${(error instanceof Error ? error.message : String(error))}`);
-
-              conversationHistory.push({
-                role: "user",
-                content: `Error calling ${toolCall.toolName}: ${(error instanceof Error ? error.message : String(error))}\n\nPlease try a different approach or inform the user.`,
-              });
-              break;
-            }
-          }
-
-          if (!allSuccess) break;
-        }
+      // ==================== Phase 2: Delegate to ReActLoopEngine ====================
+      // The plan + ReAct loop logic (previously ~200 lines duplicated inline) is now
+      // consolidated in ReActLoopEngine.execute(). This single call handles: plan-step
+      // execution, multi-turn LLM function calling, conversation history trimming,
+      // execution timeout protection, and step result recording.
+      // Use streaming execution if a callback is registered
+      let reactResult: UnifiedExecutionResult;
+      if (this.onStreamEvent) {
+        reactResult = await this.reactLoopEngine.executeStream(
+          sessionId,
+          session.query,
+          plan || { steps: [], summary: '' },
+          this.sessionManager,
+          this.cloudIntentEngine,
+          toolExecutorFn,
+          this.onStreamEvent,
+          options,
+        );
+      } else {
+        reactResult = await this.reactLoopEngine.execute(
+          sessionId,
+          session.query,
+          plan || { steps: [], summary: '' },
+          this.sessionManager,
+          this.cloudIntentEngine,
+          toolExecutorFn,
+          options,
+        );
       }
 
       // Finalize session
-      if (allSuccess) {
+      if (reactResult.success) {
         await this.sessionManager.completeSession(sessionId);
       } else {
         await this.sessionManager.failSession(sessionId);
       }
 
-      // Daemon mode: keep MCP connections alive across requests for better performance
-      // Local mode: clean up unless explicitly requested to keep alive
+      // Daemon mode: keep MCP connections alive across requests.
+      // Local mode: clean up unless explicitly requested to keep alive.
       const isDaemonProcess = process.env.INTORCH_DAEMON === "true";
       if (!options.keepAlive && !isDaemonProcess) {
         await this.toolExecutor.cleanupConnections();
       }
 
-      const totalDuration = stepResults.reduce((sum, sr) => sum + (sr.duration || 0), 0);
-
-      return {
-        success: allSuccess,
-        result: finalResult,
-        executionSteps: stepResults.map((sr) => ({
-          name: sr.toolName,
-          toolName: sr.toolName,
-          success: sr.success,
-          result: sr.result,
-          error: sr.error,
-          duration: sr.duration,
-        })),
-        statistics: {
-          totalSteps: stepResults.length,
-          successfulSteps: stepResults.filter((sr) => sr.success).length,
-          failedSteps: stepResults.filter((sr) => !sr.success).length,
-          totalDuration,
-          averageStepDuration: totalDuration / Math.max(stepResults.length, 1),
-        },
-        error: allSuccess ? undefined : stepResults.find((sr) => !sr.success)?.error || "Execution failed",
-      };
+      return reactResult;
     } catch (error: unknown) {
       logger.error(`[ExecuteService] Failed to execute session: ${(error instanceof Error ? error.message : String(error))}`);
       return { success: false, error: (error instanceof Error ? error.message : String(error)) };
@@ -540,6 +385,31 @@ export class ExecuteService {
 
     logger.error(`[ExecuteService] Failed to execute natural language query after ${MAX_RETRIES + 1} attempts: ${lastError?.message}`);
     return { success: false, error: lastError?.message || "Execution failed after retries" };
+  }
+
+  async executeNaturalLanguageStream(
+    query: string,
+    onStep: StreamCallback,
+    options: UnifiedExecutionOptions = {},
+  ): Promise<UnifiedExecutionResult> {
+    logger.info(`[ExecuteService] Executing natural language query (streaming): \"${query.substring(0, 100)}...\"`);
+
+    // Try daemon delegation first
+    const daemonResult = await this.daemonDelegator.tryDelegate(query, options);
+    if (daemonResult) {
+      return daemonResult;
+    }
+
+    // Register the stream callback before execution
+    this.onStreamEvent = onStep;
+
+    try {
+      const session = await this.createSession(query, "direct");
+      return await this.executeSession(session.id, options);
+    } finally {
+      // Clean up the stream callback after execution
+      this.onStreamEvent = null;
+    }
   }
 
   // ==================== Interactive Session Methods ====================

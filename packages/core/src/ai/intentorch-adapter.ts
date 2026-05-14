@@ -12,7 +12,9 @@ import {
 } from "./cloud-intent-engine.js";
 import type { AIConfig } from "../core/types.js";
 import { MCPClient } from "../mcp/client.js";
+import type { ToolInfo } from "../execution/tool-executor/index.js";
 import { logger } from "../core/logger.js";
+import { ValidationLevel } from "../mcp/parameter-mapper.js";
 
 // Server connection info
 interface ConnectedServer {
@@ -79,7 +81,7 @@ export class IntentorchAdapter {
         defaultTools: {},
       },
       parameterMapping: {
-        validationLevel: "warning" as const,
+        validationLevel: "warning" as ValidationLevel,
         enableCompatibilityMappings: true,
         logWarnings: true,
         enforceRequired: false,
@@ -148,13 +150,12 @@ export class IntentorchAdapter {
    * Get all tools from connected servers
    * Uses timeout to prevent one slow server from blocking all others
    */
-  private async getAvailableTools(): Promise<Record<string, unknown>[]> {
-    const tools: Record<string, unknown>[] = [];
-    const TOOL_LIST_TIMEOUT = 60000; // 60 seconds timeout per server
+  private async getAvailableTools(): Promise<ToolInfo[]> {
+    const tools: ToolInfo[] = [];
+    const TOOL_LIST_TIMEOUT = 60000;
 
     for (const [name, server] of this.connectedServers) {
       try {
-        // Add timeout to prevent one slow server from blocking all others
         const serverTools = await Promise.race([
           server.client.listTools(),
           new Promise<never>((_, reject) =>
@@ -164,17 +165,18 @@ export class IntentorchAdapter {
             ),
           ),
         ]);
-        tools.push(
-          ...serverTools.map((tool: Record<string, unknown>) => ({
-            ...tool,
+        for (const tool of serverTools) {
+          tools.push({
+            name: tool.name,
             serverName: name,
-          })),
-        );
+            description: tool.description || "",
+            inputSchema: tool.inputSchema as Record<string, unknown> | undefined,
+          });
+        }
       } catch (error: unknown) {
         logger.warn(
           `[IntentorchAdapter] Failed to list tools for server ${name}: ${(error instanceof Error ? error.message : String(error))}`,
         );
-        // Continue with other servers - don't let one slow server block everything
       }
     }
     return tools;

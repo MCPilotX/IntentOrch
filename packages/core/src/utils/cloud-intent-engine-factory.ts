@@ -4,7 +4,8 @@ import { logger } from "../core/logger.js";
  * Creates properly configured CloudIntentEngine instances using OrchApp configuration system
  */
 
-import { CloudIntentEngine } from "../ai/cloud-intent-engine.js";
+import { CloudIntentEngine, type CloudIntentEngineConfig } from "../ai/cloud-intent-engine.js";
+import { ValidationLevel } from "../mcp/parameter-mapper.js";
 import { getAIConfig, AIConfig } from "./config.js";
 
 export interface CloudIntentEngineOptions {
@@ -67,7 +68,7 @@ export async function createCloudIntentEngine(
 
       // Fallback to environment variables
       aiConfig = {
-        provider: (process.env.LLM_PROVIDER as string) || "deepseek",
+        provider: (process.env.LLM_PROVIDER || "deepseek") as any,
         apiKey: process.env.LLM_API_KEY || process.env.DEEPSEEK_API_KEY,
         model: process.env.LLM_MODEL || "deepseek-chat",
         apiEndpoint: process.env.LLM_API_ENDPOINT || "",
@@ -94,9 +95,9 @@ export async function createCloudIntentEngine(
   }
 
   // Build the CloudIntentEngine configuration
-  const config = {
+  const config: CloudIntentEngineConfig = {
     llm: {
-      provider: aiConfig.provider as string, // Type assertion to avoid import issues
+      provider: aiConfig.provider as any,
       apiKey: aiConfig.apiKey,
       model: aiConfig.model || "gpt-3.5-turbo",
       endpoint: aiConfig.apiEndpoint || "",
@@ -115,16 +116,16 @@ export async function createCloudIntentEngine(
     fallback: {
       enableKeywordMatching: true,
       askUserOnFailure: false,
-      defaultTools: {},
-      ...options.fallback,
+      defaultTools: {} as Record<string, string>,
+      ...(options.fallback ? { ...options.fallback, defaultTools: (options.fallback.defaultTools ?? {}) as Record<string, string> } : {}),
     },
     parameterMapping: {
-      validationLevel: "warning" as const, // Type assertion for compatibility
+      validationLevel: "warning" as ValidationLevel | undefined,
       enableCompatibilityMappings: true,
       logWarnings: true,
       enforceRequired: false,
       ...options.parameterMapping,
-    },
+    } as CloudIntentEngineConfig["parameterMapping"],
   };
 
   // Create the engine

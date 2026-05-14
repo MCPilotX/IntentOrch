@@ -117,11 +117,20 @@ export function psCommand(): Command {
           const client = new DaemonClient();
           const isDaemonRunning = await client.isDaemonRunning();
           if (!isDaemonRunning) {
-            console.error("Daemon is not running.");
-            console.error("\nTo start the daemon:");
-            console.error(`   ${PROGRAM_NAME} daemon start`);
-            console.error("\nOr use local mode:");
-            console.error(`   ${PROGRAM_NAME} ps --no-daemon`);
+            // Daemon not running — fall back to local mode
+            const processManager = getProcessManager();
+            const processes = options.running
+              ? await processManager.listRunning()
+              : await processManager.list();
+            if (processes.length === 0) {
+              console.log("No processes found");
+              return;
+            }
+            renderProcessTable(
+              processes as ProcessInfo[],
+              "MCP SERVER PROCESSES (LOCAL MODE)",
+              "Note: Daemon not running — showing local processes",
+            );
             return;
           }
 

@@ -1,20 +1,13 @@
-/**
- * SecretManager Unit Tests
- *
- * Tests for secret management operations:
- * - set/get/delete/list
- * - Persistence and loading
- * - Error handling
- *
- * Note: SecretManager uses AES-256-GCM encryption for persistence.
- * These tests mock the filesystem layer to test the in-memory operations.
- */
-
+import * as fsSyncReal from "fs";
+import * as path from "path";
 import { SecretManager } from "../secret/manager.js";
+import { DatabaseManager, closeSqliteDb } from "../utils/sqlite.js";
 
-// In-memory file store for testing
+// In-memory file store for testing (legacy)
 const fileStore: Record<string, Buffer> = {};
 let fileStats: Record<string, { mtimeMs: number }> = {};
+const TEST_DB_DIR = "/tmp/intorch-test-secrets";
+const TEST_DB_PATH = path.join(TEST_DB_DIR, "intorch.db");
 
 // Mock filesystem
 jest.mock("fs/promises", () => ({
@@ -26,7 +19,6 @@ jest.mock("fs/promises", () => ({
   }),
   writeFile: jest.fn(async (path: string, data: Buffer) => {
     fileStore[path] = data;
-    // Update stats so subsequent stat calls find the file
     fileStats[path] = { mtimeMs: Date.now() };
   }),
   stat: jest.fn(async (path: string) => {
@@ -39,22 +31,57 @@ jest.mock("fs/promises", () => ({
     delete fileStore[path];
     delete fileStats[path];
   }),
+  mkdir: jest.fn(async () => {}),
+  rename: jest.fn(async (oldPath, newPath) => {
+    fileStore[newPath] = fileStore[oldPath];
+    fileStats[newPath] = fileStats[oldPath];
+    delete fileStore[oldPath];
+    delete fileStats[oldPath];
+  }),
 }));
 
+// Use real fs for the SQLite database since createClient needs a real file or :memory:
+// But we'll mock the paths to point to a test directory
 jest.mock("../utils/paths.js", () => ({
-  getSecretsPath: jest.fn(() => "/tmp/.intorch/secrets.json"),
+  getInTorchDir: jest.fn(() => "/tmp/intorch-test-secrets"),
+  getSecretsPath: jest.fn(() => "/tmp/intorch-test-secrets/secrets.json.enc"),
+  getProcessesPath: jest.fn(() => "/tmp/intorch-test-secrets/processes.json"),
+  getConfigPath: jest.fn(() => "/tmp/intorch-test-secrets/config.json"),
   ensureInTorchDir: jest.fn(),
 }));
 
 describe("SecretManager", () => {
   let secretManager: SecretManager;
 
-  beforeEach(() => {
+  beforeAll(() => {
+    if (!fsSyncReal.existsSync(TEST_DB_DIR)) {
+      fsSyncReal.mkdirSync(TEST_DB_DIR, { recursive: true });
+    }
+  });
+
+  beforeEach(async () => {
     jest.clearAllMocks();
     // Clear the in-memory file store
     Object.keys(fileStore).forEach((k) => delete fileStore[k]);
     Object.keys(fileStats).forEach((k) => delete fileStats[k]);
+    
+    // Clear the SQLite database file
+    if (fsSyncReal.existsSync(TEST_DB_PATH)) {
+      fsSyncReal.unlinkSync(TEST_DB_PATH);
+    }
+    // Also clear WAL files
+    if (fsSyncReal.existsSync(TEST_DB_PATH + "-wal")) fsSyncReal.unlinkSync(TEST_DB_PATH + "-wal");
+    if (fsSyncReal.existsSync(TEST_DB_PATH + "-shm")) fsSyncReal.unlinkSync(TEST_DB_PATH + "-shm");
+
+    closeSqliteDb();
     secretManager = new SecretManager();
+  });
+
+  afterAll(() => {
+    closeSqliteDb();
+    if (fsSyncReal.existsSync(TEST_DB_PATH)) {
+      fsSyncReal.unlinkSync(TEST_DB_PATH);
+    }
   });
 
   describe("set() and get()", () => {

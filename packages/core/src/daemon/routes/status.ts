@@ -99,13 +99,5 @@ export async function handleStatusRoutes(
     return true;
   }
 
-  // GET /api/auth/token
-  if (path === "/api/auth/token" && method === "GET") {
-    sendJson(res, 200, {
-      token: await getSecretManager().get("daemon_auth_token"),
-    });
-    return true;
-  }
-
   return false;
 }

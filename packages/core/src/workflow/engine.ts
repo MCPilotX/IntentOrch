@@ -4,6 +4,7 @@ import { ExpressionEvaluator } from "./evaluator.js";
 import { getProcessManager } from "../process-manager/manager.js";
 import { getSecretManager } from "../secret/manager.js";
 import { MCPClient } from "../mcp/client.js";
+import type { TransportConfig } from "../mcp/types.js";
 import { getInTorchDir } from "../utils/paths.js";
 import { getExecutionRecorder } from "./execution-recorder.js";
 import { v4 as uuidv4 } from "uuid";
@@ -153,7 +154,7 @@ export class WorkflowEngine {
 
     while (attempt < maxAttempts) {
       try {
-        const response = await client.callTool(toolName, resolvedArgs);
+        const response = await client.callTool(toolName, resolvedArgs as Record<string, unknown>);
         return response;
       } catch (error: unknown) {
         attempt++;
@@ -252,7 +253,7 @@ export class WorkflowEngine {
 
       // Determine transport type from manifest
       const transportType = manifest.transport?.type || "stdio";
-      let transportConfig: Record<string, unknown>;
+      let transportConfig: TransportConfig;
 
       if (transportType === "sse" || transportType === "http") {
         const runtime = manifest.runtime as Record<string, unknown> | undefined;

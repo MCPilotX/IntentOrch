@@ -56,15 +56,35 @@ export class AnthropicProvider extends BaseLLMProvider {
   async chat(options: LLMRequestOptions): Promise<LLMResponse> {
     const model = this.getModel();
 
+    // Build request body per Anthropic Messages API spec.
+    const requestBody: Record<string, unknown> = {
+      model,
+      max_tokens: options.maxTokens ?? 1024,
+      messages: options.messages,
+      temperature: options.temperature ?? 0.1,
+    };
+
+    // Anthropic Messages API tool format (different from OpenAI):
+    // tools: [{ name, description, input_schema }] — no outer { type: "function" } wrapper.
+    if (options.tools && options.tools.length > 0) {
+      requestBody.tools = options.tools.map((tool) => ({
+        name: tool.function.name,
+        description: tool.function.description,
+        input_schema: tool.function.parameters,
+      }));
+      if (options.toolChoice) {
+        requestBody.tool_choice = options.toolChoice === "none"
+          ? { type: "none" }
+          : options.toolChoice === "required"
+            ? { type: "any" }
+            : { type: "auto" };
+      }
+    }
+
     const response = await fetch(`${this.getBaseUrl()}/messages`, {
       method: "POST",
       headers: this.getHeaders(),
-      body: JSON.stringify({
-        model,
-        max_tokens: options.maxTokens ?? 1024,
-        messages: options.messages,
-        temperature: options.temperature ?? 0.1,
-      }),
+      body: JSON.stringify(requestBody),
     });
 
     if (!response.ok) {
@@ -72,11 +92,35 @@ export class AnthropicProvider extends BaseLLMProvider {
     }
 
     const raw = await response.json();
+
+    // Parse response content blocks.
+    // Anthropic responses may contain a mix of "text" and "tool_use" blocks.
+    let text = "";
+    const toolCalls: LLMResponse["toolCalls"] = [];
+
+    if (Array.isArray(raw.content)) {
+      for (const block of raw.content) {
+        if (block.type === "text") {
+          text = block.text || "";
+        } else if (block.type === "tool_use") {
+          toolCalls.push({
+            id: block.id || `toolu_${Date.now()}`,
+            type: "function",
+            function: {
+              name: block.name || "",
+              arguments: typeof block.input === "object" ? JSON.stringify(block.input) : String(block.input || ""),
+            },
+          });
+        }
+      }
+    }
+
     return {
-      text: raw.content?.[0]?.text || "",
+      text,
       raw,
       provider: "anthropic",
       model,
+      toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
     };
   }
 }

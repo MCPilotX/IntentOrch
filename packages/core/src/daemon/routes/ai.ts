@@ -16,13 +16,13 @@ export async function handleAIRoutes(
   // POST /api/ai/test
   if (path === "/api/ai/test" && method === "POST") {
     try {
-      const { provider, model, apiKey, baseUrl } = JSON.parse(body);
+      const { provider, model, apiKey, apiEndpoint, baseUrl } = JSON.parse(body);
 
       const config = await getAIConfig();
       const testProvider = provider || config.provider;
       const testModel = model || config.model;
       const testApiKey = apiKey || config.apiKey;
-      const testApiEndpoint = baseUrl || config.apiEndpoint;
+      const testApiEndpoint = apiEndpoint || baseUrl || config.apiEndpoint;
 
       if (!testApiKey) {
         sendJson(res, 400, {

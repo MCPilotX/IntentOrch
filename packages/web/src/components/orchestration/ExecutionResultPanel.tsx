@@ -10,6 +10,13 @@ import {
   Download,
 } from 'lucide-react';
 import { useLanguage } from '../../contexts/LanguageContext';
+import { outputFormattingService } from '../../services/output-formatting';
+import MessageContentRenderer from '../common/MessageContentRenderer';
+import JsonRenderer from '../common/JsonRenderer';
+import ErrorCard from '../common/ErrorCard';
+import TableDataCard from '../common/TableDataCard';
+import TicketDataCard from '../common/TicketDataCard';
+import { DataType, RenderingType } from '../../services/output-formatting/types';
 
 interface StepResult {
   name?: string;
@@ -18,8 +25,8 @@ interface StepResult {
   success: boolean;
   error?: string;
   duration?: number;
-  output?: string;
-  result?: unknown;
+  output?: any;
+  result?: any;
 }
 
 interface ExecutionResultPanelProps {
@@ -37,7 +44,7 @@ const ExecutionResultPanel: React.FC<ExecutionResultPanelProps> = ({
 }) => {
   const { t } = useLanguage();
   const [expandedSteps, setExpandedSteps] = React.useState<Set<number>>(new Set());
-  const [showRawOutput, setShowRawOutput] = React.useState(false);
+  const [showRawOutput, setShowRawOutput] = React.useState<Record<number, boolean>>({});
 
   const successfulSteps = results.filter(r => r.success).length;
   const failedSteps = results.filter(r => !r.success).length;
@@ -53,6 +60,13 @@ const ExecutionResultPanel: React.FC<ExecutionResultPanelProps> = ({
       }
       return next;
     });
+  };
+
+  const toggleRawOutput = (index: number) => {
+    setShowRawOutput(prev => ({
+      ...prev,
+      [index]: !prev[index]
+    }));
   };
 
   const copyResults = () => {
@@ -71,6 +85,63 @@ const ExecutionResultPanel: React.FC<ExecutionResultPanelProps> = ({
     a.download = `execution-result-${Date.now()}.json`;
     a.click();
     URL.revokeObjectURL(url);
+  };
+
+  const renderFormattedData = (data: any, toolName?: string, serverName?: string) => {
+    if (!data) return null;
+
+    // outputFormattingService.format() handles MCP content unwrapping automatically
+    // via unwrapData(), supporting both { content: [...] } and [{ content: [...] }, ...] formats
+    const formattingResult = outputFormattingService.format(data, {
+      toolName,
+      serverName,
+    });
+
+    // Render based on data type and visual rendering metadata
+    if (formattingResult.visualRendering?.renderingType === RenderingType.JSON_VISUAL) {
+      return (
+        <div className="w-full">
+          <JsonRenderer
+            data={formattingResult.visualRendering.rawData}
+            maxHeight="400px"
+            showControls={true}
+            theme="auto"
+          />
+        </div>
+      );
+    }
+
+    if (formattingResult.dataType === DataType.ERROR) {
+      return (
+        <div className="w-full">
+          <ErrorCard data={formattingResult.originalData} />
+        </div>
+      );
+    }
+
+    if (formattingResult.dataType === DataType.TICKET_DATA) {
+      // TicketDataFormatter produces Markdown text - render it through MessageContentRenderer
+      return (
+        <div className="w-full">
+          <MessageContentRenderer content={formattingResult.output} role="assistant" />
+        </div>
+      );
+    }
+
+    if (formattingResult.visualRendering?.renderingType === RenderingType.TABLE_VISUAL) {
+      return (
+        <div className="w-full">
+          <TableDataCard data={formattingResult.visualRendering.rawData} />
+        </div>
+      );
+    }
+
+    // Default: render as markdown
+    return (
+      <div className="w-full">
+        <MessageContentRenderer content={formattingResult.output} role="assistant" />
+      </div>
+    );
   };
 
   return (
@@ -179,29 +250,27 @@ const ExecutionResultPanel: React.FC<ExecutionResultPanelProps> = ({
                   </div>
                 )}
 
-                {result.output && (
+                {(result.output || result.result) && (
                   <div>
                     <div className="flex items-center justify-between mb-1">
-                      <span className="text-xs font-medium text-gray-500">Output</span>
+                      <span className="text-xs font-medium text-gray-500">Result</span>
                       <button
-                        onClick={() => setShowRawOutput(!showRawOutput)}
-                        className="text-xs text-primary-500 hover:text-primary-600"
+                        onClick={() => toggleRawOutput(index)}
+                        className="text-xs text-primary-500 hover:text-primary-600 font-medium"
                       >
-                        {showRawOutput ? 'Formatted' : 'Raw'}
+                        {showRawOutput[index] ? 'Show Formatted' : 'Show Raw'}
                       </button>
                     </div>
-                    <pre className="text-xs bg-gray-50 dark:bg-gray-900/50 p-3 rounded-lg overflow-x-auto border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 max-h-48 overflow-y-auto whitespace-pre-wrap break-all">
-                      {showRawOutput ? JSON.stringify(result.output, null, 2) : result.output}
-                    </pre>
-                  </div>
-                )}
-
-                {result.result && (
-                  <div>
-                    <span className="text-xs font-medium text-gray-500 mb-1 block">Result</span>
-                    <pre className="text-xs bg-gray-50 dark:bg-gray-900/50 p-3 rounded-lg overflow-x-auto border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 max-h-48 overflow-y-auto whitespace-pre-wrap break-all">
-                      {JSON.stringify(result.result, null, 2)}
-                    </pre>
+                    
+                    {showRawOutput[index] ? (
+                      <pre className="text-xs bg-gray-50 dark:bg-gray-900/50 p-3 rounded-lg overflow-x-auto border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 max-h-96 overflow-y-auto whitespace-pre-wrap break-all font-mono">
+                        {JSON.stringify(result.result || result.output, null, 2)}
+                      </pre>
+                    ) : (
+                      <div className="bg-gray-50 dark:bg-gray-900/50 p-4 rounded-lg border border-gray-200 dark:border-gray-700">
+                        {renderFormattedData(result.result || result.output, result.toolName, result.serverName)}
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -232,7 +301,7 @@ const ExecutionResultPanel: React.FC<ExecutionResultPanelProps> = ({
           {onRetry && failedSteps > 0 && (
             <button
               onClick={onRetry}
-              className="px-4 py-2 text-sm bg-primary-500 text-white rounded-lg hover:bg-primary-600 transition-colors"
+              className="px-4 py-2 text-sm bg-primary-500 text-white rounded-lg hover:bg-primary-600 transition-colors shadow-sm"
             >
               {t('orchestration.retry')}
             </button>

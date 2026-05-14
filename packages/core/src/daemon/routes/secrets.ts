@@ -32,12 +32,14 @@ export async function handleSecretsRoutes(
   // POST /api/secrets
   if (path === "/api/secrets" && method === "POST") {
     try {
-      const { key, value } = JSON.parse(body);
+      const data = JSON.parse(body);
+      const key = data.key || data.name;
+      const value = data.value;
 
       if (!key || typeof key !== "string") {
         sendJson(res, 400, {
           error: "Bad Request",
-          message: "key is required and must be a string",
+          message: "key or name is required and must be a string",
         });
         return true;
       }

@@ -32,7 +32,7 @@ export default function ConfigPage() {
   const [saving, setSaving] = useState(false);
   const [formData, setFormData] = useState<UpdateConfigRequest>({
     config: {
-      ai: { provider: 'none', apiKey: '', model: 'none' },
+      ai: { provider: 'none', apiKey: '', model: 'none', apiEndpoint: '' },
       registry: { preferred: 'gitee' }
     }
   });
@@ -55,18 +55,23 @@ export default function ConfigPage() {
   const loadConfig = async () => {
     try {
       setLoading(true);
-      const data = await apiService.getConfig();
-      setConfig(data);
+      const rawData = await apiService.getConfig();
+      // Backend returns: { config: { ai: {...}, registry: {...}, ... } }
+      const appConfig = (rawData as { config?: Record<string, unknown> }).config || rawData;
+      const ai = (appConfig as Record<string, unknown>).ai as Record<string, unknown> | undefined;
+      const registry = (appConfig as Record<string, unknown>).registry as Record<string, unknown> | undefined;
+      setConfig(appConfig as Config);
       
       setFormData({
         config: {
           ai: { 
-            provider: data.ai?.provider || 'none',
-            model: data.ai?.model || 'none',
-            apiKey: data.ai?.apiKey || ''
+            provider: ((ai?.provider as string) || 'none') as any,
+            model: (ai?.model as string) || 'none',
+            apiKey: (ai?.apiKey as string) || '',
+            apiEndpoint: (ai?.apiEndpoint as string) || ''
           },
           registry: { 
-            preferred: data.registry?.preferred || 'gitee'
+            preferred: (registry?.preferred as string) || (registry?.default as string) || 'gitee'
           }
         }
       });
@@ -86,8 +91,10 @@ export default function ConfigPage() {
     e.preventDefault();
     try {
       setSaving(true);
-      const updatedConfig = await apiService.updateConfig(formData);
-      setConfig(updatedConfig);
+      const response = await apiService.updateConfig(formData);
+      // Backend returns: { success: true, message: "...", config: { ... } }
+      const appConfig = (response as { config?: Config }).config || (response as Config);
+      setConfig(appConfig);
       setError(null);
       showToast(t('config.saveConfiguration') + ' ' + t('common.save') + '!', 'success');
     } catch (err: any) {

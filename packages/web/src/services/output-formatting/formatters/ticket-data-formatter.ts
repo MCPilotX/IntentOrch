@@ -171,15 +171,28 @@ export class TicketDataFormatter extends BaseFormatter {
       return false;
     }
     
-    const ticketKeywords = [
+    // English ticket keywords
+    const englishKeywords = [
       'train', 'ticket', 'station', 'departure', 'arrival', 'duration',
-      'seat', 'price', 'yuan', '¥', '￥', 'G', 'D', 'Z', 'T', 'K', // Train types
-      'business', 'first', 'second', 'hard', 'soft', 'sleeper', // Seat types
-      'Train', 'departure', 'arrival', 'Duration', 'available', 'Business Class', 'First Class', 'Second Class', 'HardSeat', 'SoftSeat', 'HardSleeper', 'SoftSleeper'
+      'seat', 'price', 'yuan', '¥', '￥', 'G', 'D', 'Z', 'T', 'K',
+      'business', 'first', 'second', 'hard', 'soft', 'sleeper',
+      'Train', 'Duration', 'available', 'Business Class', 'First Class',
+      'Second Class', 'HardSeat', 'SoftSeat', 'HardSleeper', 'SoftSleeper'
+    ];
+    
+    // Chinese ticket keywords (for中文票务查询结果)
+    const chineseKeywords = [
+      '车次', '出发站', '到达站', '出发时间', '到达时间', '历时',
+      '商务座', '一等座', '二等座', '优选一等座', '特等座',
+      '硬座', '软座', '硬卧', '软卧', '动卧', '无座',
+      '有票', '无票', '剩余', '张票', '元', 'CNY', '元'
     ];
     
     const lowerText = text.toLowerCase();
-    return ticketKeywords.some(keyword => lowerText.includes(keyword.toLowerCase()));
+    const matchesEnglish = englishKeywords.some(keyword => lowerText.includes(keyword.toLowerCase()));
+    const matchesChinese = chineseKeywords.some(keyword => text.includes(keyword));
+    
+    return matchesEnglish || matchesChinese;
   }
 
   /**

@@ -68,6 +68,53 @@ export abstract class OpenAICompatibleProvider extends BaseLLMProvider {
       }
     }
 
+    // Ensure all tools are compatible with OpenAI/DeepSeek requirements
+    if (requestBody.tools && Array.isArray(requestBody.tools)) {
+      requestBody.tools = (requestBody.tools as any[]).map(t => {
+        if (t.type === 'function') {
+          const fn = t.function;
+          
+          // 1. Sanitize Name: [a-zA-Z0-9_-], max 64 chars
+          let name = fn.name.replace(/[^a-zA-Z0-9_-]/g, '_').substring(0, 64);
+          
+          // 2. Sanitize Description: non-empty, max 1024 chars
+          let description = fn.description || `Execute ${name}`;
+          if (description.trim() === '') {
+            description = `Execute ${name}`;
+          }
+          if (description.length > 1024) {
+            description = description.substring(0, 1021) + "...";
+          }
+          
+          // 3. Sanitize Parameters: Ensure it's a valid object schema (required by OpenAI/DeepSeek)
+          let parameters = fn.parameters;
+          if (!parameters || typeof parameters !== 'object' || Array.isArray(parameters)) {
+            parameters = { type: 'object', properties: {} };
+          } else {
+            // Clone to avoid mutating original and force correct structure
+            parameters = { ...parameters };
+            if (!parameters.type || parameters.type !== 'object') {
+              parameters.type = 'object';
+            }
+            if (!parameters.properties || typeof parameters.properties !== 'object') {
+              parameters.properties = {};
+            }
+          }
+
+          return {
+            ...t,
+            function: {
+              ...fn,
+              name,
+              description,
+              parameters
+            }
+          };
+        }
+        return t;
+      });
+    }
+
     const response = await fetch(`${baseUrl}/chat/completions`, {
       method: "POST",
       headers: this.getHeaders(),
@@ -75,7 +122,14 @@ export abstract class OpenAICompatibleProvider extends BaseLLMProvider {
     });
 
     if (!response.ok) {
-      throw new Error(`${this.name} API error: ${response.status}`);
+      let errorDetail = "";
+      try {
+        const errorJson = await response.json();
+        errorDetail = JSON.stringify(errorJson);
+      } catch (e) {
+        errorDetail = await response.text();
+      }
+      throw new Error(`${this.name} API error: ${response.status} - ${errorDetail}`);
     }
 
     const raw = await response.json();

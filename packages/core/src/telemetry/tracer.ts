@@ -80,13 +80,13 @@ export class Tracer {
         const oldest = this.traceOrder.shift();
         if (oldest) {
           const oldTrace = this.traces.get(oldest);
-          if (oldTrace) { for (const s of oldTrace.spans) this.spans.delete(s); }
+          if (oldTrace) { for (const s of oldTrace.spans) this.spans.delete(s.spanId); }
           this.traces.delete(oldest);
         }
       }
     }
 
-    this.traces.get(traceId)!.spans.push(spanId);
+    this.traces.get(traceId)!.spans.push(span);
     this.activeSpanIds.push(spanId);
 
     for (const hook of this.hooks) hook("span_start", { spanId, traceId, name, parentSpanId });
@@ -132,7 +132,7 @@ export class Tracer {
     if (!trace) return null;
     return {
       ...trace,
-      spans: trace.spans.map((sid) => this.spans.get(sid)).filter((s): s is Span => s !== undefined),
+      spans: trace.spans,
     };
   }
 

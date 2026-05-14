@@ -29,7 +29,7 @@ export function startCommand(): Command {
           const processManager = getProcessManager();
           const pid = await processManager.start(server);
           console.log(`✓ Started ${displayName} in local mode (PID: ${pid})`);
-          console.log(`⚠️  Note: Process is not managed by daemon`);
+          console.log(`⚠️  Note: Use "${PROGRAM_NAME} ps --no-daemon" to view this process`);
           return;
         }
 
@@ -37,7 +37,14 @@ export function startCommand(): Command {
         const client = new DaemonClient();
         const isDaemonRunning = await client.isDaemonRunning();
         if (!isDaemonRunning) {
-          handleDaemonError(new Error("Daemon is not running"));
+          // Daemon not running — fall back to local mode instead of erroring out
+          const processManager = getProcessManager();
+          const pid = await processManager.start(server);
+          console.log(`✓ Started ${displayName} v${await getDisplayName(server)} (PID: ${pid})`);
+          console.log(`  Status: running`);
+          console.log(`⚠️  Daemon not running — started in local mode.`);
+          console.log(`   Use "${PROGRAM_NAME} ps --no-daemon" to view this process.`);
+          return;
         }
 
         const response = await client.startServer(server);

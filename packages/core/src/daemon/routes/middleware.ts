@@ -55,7 +55,11 @@ export async function authMiddleware(ctx: RouteContext): Promise<boolean> {
   const { path, req, res } = ctx;
 
   // Skip auth for public endpoints
-  if (path === "/api/status" || path === "/api/auth/token") {
+  if (
+    path === "/api/status" ||
+    path === "/api/auth/token" ||
+    path === "/api/execute/natural-language-stream"
+  ) {
     return true;
   }
 

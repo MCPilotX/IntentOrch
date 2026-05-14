@@ -1,4 +1,5 @@
 import { useCallback } from 'react';
+import { API_BASE_URL } from '../services/config';
 
 /**
  * Hook for managing authentication headers
@@ -16,7 +17,7 @@ export function useAuthHeaders() {
     // If no token, try to get one from daemon
     if (!token) {
       try {
-        const response = await fetch('http://localhost:9658/api/auth/token');
+        const response = await fetch(`${API_BASE_URL}/api/auth/token`);
         if (response.ok) {
           const data = await response.json();
           token = data.token;

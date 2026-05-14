@@ -9,7 +9,7 @@
 import http from "http";
 import fs from "fs/promises";
 import { getProcessManager } from "../process-manager/manager.js";
-import { ProcessInfo } from "../process-manager/types.js";
+import type { ProcessInfo } from "../process-manager/types.js";
 import { getRegistryClient } from "../registry/client.js";
 import { getToolRegistry } from "../tool-registry/registry.js";
 import {
@@ -172,6 +172,41 @@ export class DaemonServer {
 
   async start() {
     ensureInTorchDir();
+
+    // ==================== Global error handlers ====================
+    // Catch any unhandled errors to prevent silent daemon exit.
+    // Log the error and keep the process alive when possible.
+    process.on("uncaughtException", (error) => {
+      logger.error("[Daemon] UNCAUGHT EXCEPTION:", error);
+      logger.error("[Daemon] Stack:", (error as Error).stack);
+    });
+    process.on("unhandledRejection", (reason) => {
+      logger.error("[Daemon] UNHANDLED REJECTION:", reason);
+    });
+
+    // ==================== Initialize shared infrastructure ====================
+    // Initialize the database and config service at daemon startup so that
+    // all subsequent operations (process management, secrets, tool registry, etc.)
+    // share a single SQLite connection and configuration context.
+    // This prevents the "each component initializes on its own" problem that
+    // causes data inconsistency between daemon and CLI sessions.
+    const { DatabaseManager } = await import("../utils/sqlite.js");
+    await DatabaseManager.getInstance().initialize();
+    const { getConfigService } = await import("../core/config-service.js");
+    await getConfigService().initialize();
+    logger.info("[Daemon] Database and configuration service initialized");
+
+    // Ensure a daemon auth token exists so the Web UI login can work.
+    // The default token "intorch" is used when no explicit token has been configured.
+    // Users can change it later with: intorch secret set daemon_auth_token <new-token>
+    const { getSecretManager } = await import("../secret/manager.js");
+    const sm = getSecretManager();
+    const existingToken = await sm.get("daemon_auth_token").catch(() => undefined);
+    if (!existingToken) {
+      await sm.set("daemon_auth_token", "intorch");
+      logger.info("[Daemon] Generated default auth token (daemon_auth_token=intorch)");
+      logger.info("[Daemon] Change it via: intorch secret set daemon_auth_token <your-token>");
+    }
 
     // Use FSLock to prevent multiple instances and handle stale PID files
     const acquired = await FSLock.acquire(this.config.pidFile, 60000); // 1 min TTL
@@ -416,7 +451,9 @@ export class DaemonServer {
             logger.info(
               `[Daemon] Manifest for ${serverName} has no tools field, trying dynamic discovery`,
             );
-            await this.discoverToolsDynamically(serverInfo);
+            // serverInfo.manifest is guaranteed non-null here because we checked
+            // `s.manifest && s.manifest.name` above (line 387-390) before reaching this branch.
+            await this.discoverToolsDynamically(serverInfo as ProcessInfo & { manifest: NonNullable<ProcessInfo['manifest']> });
           } else {
             await toolRegistry.registerToolsFromManifest(
               serverName,
@@ -443,7 +480,15 @@ export class DaemonServer {
     }
   }
 
-  private async discoverToolsDynamically(serverInfo: { name: string; serverName?: string; transport?: { type: string; url?: string }; runtime?: { command: string; args?: string[]; env?: Record<string, string> } }): Promise<void> {
+  /**
+   * Dynamically discover tools from a running MCP server.
+   * Called when a manifest lacks static tool definitions.
+   * 
+   * @param serverInfo - ProcessInfo from the process store, which includes
+   *                     the `manifest` field with runtime/transport config.
+   *                     This method requires access to `manifest.runtime`.
+   */
+  private async discoverToolsDynamically(serverInfo: ProcessInfo & { manifest: NonNullable<ProcessInfo['manifest']> }): Promise<void> {
     try {
       logger.info(
         `[Daemon] Attempting dynamic tool discovery for server: ${serverInfo.name}`,
@@ -455,11 +500,22 @@ export class DaemonServer {
         "../tool-registry/registry.js"
       );
 
+      const runtime = serverInfo.manifest.runtime;
+      const command = typeof runtime === 'object' && runtime !== null ? (runtime as Record<string, unknown>).command as string : undefined;
+      const args = typeof runtime === 'object' && runtime !== null ? (runtime as Record<string, unknown>).args as string[] : [];
+
+      if (!command) {
+        logger.warn(
+          `[Daemon] Cannot discover tools for ${serverInfo.name}: manifest.runtime.command is missing`,
+        );
+        return;
+      }
+
       const client = new MCPClientImport({
         transport: {
           type: "stdio",
-          command: serverInfo.manifest.runtime.command,
-          args: serverInfo.manifest.runtime.args || [],
+          command,
+          args,
           env: { ...process.env } as Record<string, string>,
         },
       });

@@ -99,8 +99,8 @@ export default function Servers() {
         sources.map(src => apiService.searchServices(searchQuery, src, 15, 0))
       );
       
-      const combined = allResults.flatMap(res => res.services);
-      setSearchResults(combined.sort((a, b) => a.name.localeCompare(b.name)));
+      const combined = allResults.flatMap(res => (res as { services?: Array<Record<string, unknown>> }).services || []);
+      setSearchResults(combined.sort((a, b) => ((a as Record<string, unknown>).name as string || '').localeCompare((b as Record<string, unknown>).name as string || '')) as any);
     } catch (error: any) {
       setSearchError(error.message);
     } finally {
@@ -183,14 +183,7 @@ export default function Servers() {
 
   const startServerMutation = useMutation({
     mutationFn: (serverId: string) => apiService.startServer({ serverId }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['servers'] });
-      queryClient.invalidateQueries({ queryKey: ['processes'] });
-      toast.success(t('servers.startSuccess') || 'Server started successfully');
-    },
-    onError: (error: any) => {
-      toast.error(error.message || t('servers.error.startFailed'));
-    }
+    // onSuccess/onError are handled in handleStartServer for better polling control
   });
 
   const stopProcessMutation = useMutation({
@@ -206,14 +199,58 @@ export default function Servers() {
   });
 
   const handleStartServer = (serverId: string) => {
+    // Immediately mark as starting in UI for instant feedback
     setStartingServers(prev => new Set(prev).add(serverId));
+    
+    // Optimistically update the server status to 'starting' so the UI dot turns yellow
+    queryClient.setQueriesData({ queryKey: ['servers'] }, (old: MCPServer[] | undefined) => {
+      if (!old) return old;
+      return old.map(s => s.name === serverId ? { ...s, status: 'starting' as const } : s);
+    });
+    
     startServerMutation.mutate(serverId, {
-      onSettled: () => {
+      onSuccess: () => {
+        // Poll to confirm the server is truly running (backend may return before process is ready)
+        let pollCount = 0;
+        const maxPolls = 15;
+        const pollInterval = setInterval(async () => {
+          pollCount++;
+          if (pollCount > maxPolls) {
+            clearInterval(pollInterval);
+            setStartingServers(prev => {
+              const next = new Set(prev);
+              next.delete(serverId);
+              return next;
+            });
+            return;
+          }
+          try {
+            const servers = await apiService.getServers();
+            const server = servers.find(s => s.name === serverId);
+            if (server?.status === 'running') {
+              clearInterval(pollInterval);
+              queryClient.setQueryData(['servers'], servers);
+              setStartingServers(prev => {
+                const next = new Set(prev);
+                next.delete(serverId);
+                return next;
+              });
+              toast.success(t('servers.startSuccess') || 'Server started successfully');
+            }
+          } catch {
+            // Network error, continue polling
+          }
+        }, 1500);
+      },
+      onError: (error: any) => {
+        // Revert the optimistic update
+        queryClient.invalidateQueries({ queryKey: ['servers'] });
         setStartingServers(prev => {
           const next = new Set(prev);
           next.delete(serverId);
           return next;
         });
+        toast.error(error.message || t('servers.error.startFailed'));
       }
     });
   };
@@ -311,7 +348,12 @@ export default function Servers() {
                       <li key={server.id} className="flex flex-col hover:bg-gray-50/80 dark:hover:bg-gray-900/30 transition-colors">
                         <div className="px-6 py-5 flex items-center justify-between">
                           <div className="flex items-center space-x-4">
-                            <div className={`h-3 w-3 rounded-full shadow-sm ${server.status === 'running' ? 'bg-green-500 animate-pulse' : 'bg-gray-300'}`}></div>
+                            <div className={`h-3 w-3 rounded-full shadow-sm ${
+                              startingServers.has(server.name) ? 'bg-yellow-500 animate-pulse' :
+                              server.status === 'running' ? 'bg-green-500 animate-pulse' :
+                              server.status === 'starting' ? 'bg-yellow-500 animate-pulse' :
+                              'bg-gray-300'
+                            }`}></div>
                       <div className="flex items-center space-x-2">
                         <p className="text-sm font-bold text-gray-900 dark:text-white">
                           {formatMCPServerName(server.displayName || server.name)}

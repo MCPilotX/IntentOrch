@@ -5,6 +5,7 @@ import { getInTorchDir } from "../utils/paths.js";
 import { normalizeServerName, getDisplayName } from "../utils/server-name.js";
 import { createSingleton } from "../utils/singleton.js";
 import type { Manifest } from "../registry/types.js";
+import type { Tool } from "../mcp/types.js";
 
 export interface ToolMetadata {
   name: string;
@@ -156,8 +157,9 @@ export class ToolRegistry {
         requiresPreprocessing,
       };
 
-      const key = this.getToolKey(normalizedServerName, tool.name);
-      this.tools.set(key, toolWithServer);
+      const toolName = (tool as Record<string, unknown>).name as string;
+      const key = this.getToolKey(normalizedServerName, toolName);
+      this.tools.set(key, toolWithServer as ToolMetadata);
 
       logger.info(
         `Registered tool: ${tool.name} from ${displayName} (${normalizedServerName})${requiresPreprocessing ? " [requires preprocessing]" : ""}`,
@@ -192,7 +194,7 @@ export class ToolRegistry {
         const toolMetadata: ToolMetadata = {
           name: dynamicTool.name,
           description: dynamicTool.description || `Tool: ${dynamicTool.name}`,
-          parameters: dynamicTool.inputSchema?.properties || {},
+          parameters: (dynamicTool.inputSchema?.properties || {}) as Record<string, ParameterSchema>,
           serverName: normalizedServerName,
           actualServerName: displayName,
           keywords: ["dynamic", "discovered"],

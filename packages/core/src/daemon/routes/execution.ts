@@ -24,6 +24,7 @@
 import http from "http";
 import { getExecuteService } from "../../ai/execute-service.js";
 import type { UnifiedExecutionOptions } from "../../ai/execute-service.js";
+import type { StepStreamEvent, StreamCallback } from "../../ai/executor/react-loop-engine.js";
 import { sendJson, type RouteContext } from "./index.js";
 import { logger } from "../../core/logger.js";
 
@@ -82,13 +83,21 @@ export async function handleExecutionRoutes(
   // Will be removed in a future major version.
   // New clients should use the Session API endpoints above.
 
+  // POST /api/execute/natural-language-stream (SSE streaming)
+  if (
+    path === "/api/execute/natural-language-stream" &&
+    method === "POST"
+  ) {
+    return handleNaturalLanguageStream(res, body);
+  }
+
   // POST /api/execute/natural-language
   if (
     (path === "/api/execute/natural-language" ||
       path === "/api/execute/naturalLanguage") &&
     method === "POST"
   ) {
-    logger.warn(`[Daemon] DEPRECATED endpoint called: ${path}. Use POST /api/execute/session/create instead.`);
+    logger.debug(`[Daemon] DEPRECATED endpoint called: ${path}. Use POST /api/execute/session/create instead.`);
     return handleNaturalLanguage(res, body);
   }
 
@@ -98,7 +107,7 @@ export async function handleExecutionRoutes(
       path === "/api/execute/parseIntent") &&
     method === "POST"
   ) {
-    logger.warn(`[Daemon] DEPRECATED endpoint called: ${path}. Use POST /api/execute/session/create instead.`);
+    logger.debug(`[Daemon] DEPRECATED endpoint called: ${path}. Use POST /api/execute/session/create instead.`);
     return handleParseIntent(res, body);
   }
 
@@ -109,31 +118,31 @@ export async function handleExecutionRoutes(
       path === "/api/execute/executeSteps") &&
     method === "POST"
   ) {
-    logger.warn(`[Daemon] DEPRECATED endpoint called: ${path}. Use POST /api/execute/session/create instead.`);
+    logger.debug(`[Daemon] DEPRECATED endpoint called: ${path}. Use POST /api/execute/session/create instead.`);
     return handleExecuteSteps(res, body);
   }
 
   // POST /api/execute/interactive/start
   if (path === "/api/execute/interactive/start" && method === "POST") {
-    logger.warn(`[Daemon] DEPRECATED endpoint called: ${path}. Use POST /api/execute/session/create instead.`);
+    logger.debug(`[Daemon] DEPRECATED endpoint called: ${path}. Use POST /api/execute/session/create instead.`);
     return handleInteractiveStart(res, body);
   }
 
   // POST /api/execute/interactive/respond
   if (path === "/api/execute/interactive/respond" && method === "POST") {
-    logger.warn(`[Daemon] DEPRECATED endpoint called: ${path}. Use POST /api/execute/session/:id/feedback instead.`);
+    logger.debug(`[Daemon] DEPRECATED endpoint called: ${path}. Use POST /api/execute/session/:id/feedback instead.`);
     return handleInteractiveRespond(res, body);
   }
 
   // POST /api/execute/interactive/execute
   if (path === "/api/execute/interactive/execute" && method === "POST") {
-    logger.warn(`[Daemon] DEPRECATED endpoint called: ${path}. Use POST /api/execute/session/:id/execute instead.`);
+    logger.debug(`[Daemon] DEPRECATED endpoint called: ${path}. Use POST /api/execute/session/:id/execute instead.`);
     return handleInteractiveExecute(res, body);
   }
 
   // POST /api/execute/interactive/cleanup
   if (path === "/api/execute/interactive/cleanup" && method === "POST") {
-    logger.warn(`[Daemon] DEPRECATED endpoint called: ${path}. Cleanup is now automatic via SessionStore.`);
+    logger.debug(`[Daemon] DEPRECATED endpoint called: ${path}. Cleanup is now automatic via SessionStore.`);
     return handleInteractiveCleanup(res, body);
   }
 
@@ -142,13 +151,13 @@ export async function handleExecutionRoutes(
     /^\/api\/execute\/interactive\/([^\/]+)$/,
   );
   if (sessionMatch && method === "GET") {
-    logger.warn(`[Daemon] DEPRECATED endpoint called: ${path}. Use GET /api/execute/session/:id instead.`);
+    logger.debug(`[Daemon] DEPRECATED endpoint called: ${path}. Use GET /api/execute/session/:id instead.`);
     return handleGetInteractiveSession(res, sessionMatch[1]);
   }
 
   // POST /api/intent/parse
   if (path === "/api/intent/parse" && method === "POST") {
-    logger.warn(`[Daemon] DEPRECATED endpoint called: ${path}. Use POST /api/execute/session/create instead.`);
+    logger.debug(`[Daemon] DEPRECATED endpoint called: ${path}. Use POST /api/execute/session/create instead.`);
     return handleIntentParse(res, body);
   }
 
@@ -362,7 +371,10 @@ async function handleNaturalLanguage(
     );
 
     const executionService = getExecuteService();
-    const executionOptions: UnifiedExecutionOptions = options || {};
+    const executionOptions: UnifiedExecutionOptions = {
+      ...(options || {}),
+      skipDaemonDelegation: true, // Running inside daemon — don't delegate back to self
+    };
     const result = await executionService.executeNaturalLanguage(
       query,
       executionOptions,
@@ -378,6 +390,85 @@ async function handleNaturalLanguage(
       success: false,
       error: `Failed to execute query: ${(error instanceof Error ? error.message : String(error))}`,
     });
+  }
+  return true;
+}
+
+async function handleNaturalLanguageStream(
+  res: http.ServerResponse,
+  body: string,
+): Promise<boolean> {
+  try {
+    const { query, options } = JSON.parse(body);
+
+    if (!query || typeof query !== "string") {
+      sendJson(res, 400, {
+        success: false,
+        error: "Query is required and must be a string",
+      });
+      return true;
+    }
+
+    logger.info(
+      `[Daemon] Executing natural language query (SSE): \"${query.substring(0, 100)}...\"`,
+    );
+
+    // Set SSE headers
+    res.writeHead(200, {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      Connection: "keep-alive",
+      "X-Accel-Buffering": "no",
+    });
+
+    const executionService = getExecuteService();
+    const executionOptions: UnifiedExecutionOptions = {
+      ...(options || {}),
+      skipDaemonDelegation: true,
+    };
+
+    // Create stream callback that writes SSE events
+    const onStep: StreamCallback = async (event: StepStreamEvent) => {
+      const sseData = JSON.stringify(event);
+      res.write(`data: ${sseData}\n\n`);
+    };
+
+    // Execute with streaming
+    const result = await executionService.executeNaturalLanguageStream(
+      query,
+      onStep,
+      executionOptions,
+    );
+
+    // Send completion event
+    const completeEvent = JSON.stringify({
+      type: "complete",
+      success: result.success,
+      result: result.result,
+      executionSteps: result.executionSteps,
+      statistics: result.statistics,
+      error: result.error,
+    });
+    res.write(`data: ${completeEvent}\n\n`);
+    res.write(`data: [DONE]\n\n`);
+    res.end();
+  } catch (error: unknown) {
+    logger.error("[Daemon] Error executing SSE query:", error);
+    // Try to send error as SSE if headers already sent
+    try {
+      const errorEvent = JSON.stringify({
+        type: "error",
+        error: error instanceof Error ? error.message : String(error),
+      });
+      res.write(`data: ${errorEvent}\n\n`);
+      res.write(`data: [DONE]\n\n`);
+      res.end();
+    } catch {
+      sendJson(res, 500, {
+        success: false,
+        error: `Failed to execute query: ${(error instanceof Error ? error.message : String(error))}`,
+      });
+    }
   }
   return true;
 }

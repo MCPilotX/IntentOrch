@@ -5,6 +5,7 @@ import { ProcessInfo } from "./types.js";
 import { ProcessStoreManager } from "./store.js";
 import { getSecretManager } from "../secret/manager.js";
 import { getRegistryClient } from "../registry/client.js";
+import type { Manifest } from "../registry/types.js";
 import { getLogPath, ensureInTorchDir } from "../utils/paths.js";
 import { isProcessRunningWithRetry } from "../utils/system.js";
 import { PROGRAM_NAME } from "../utils/constants.js";
@@ -193,11 +194,11 @@ export class ProcessManager {
    * The service must already be running externally.
    */
   private async startExternalService(
-    manifest: Record<string, unknown>,
+    manifest: Manifest,
     serverNameOrUrl: string,
   ): Promise<number> {
-    const transportType = manifest.transport?.type || manifest.runtime?.type || "sse";
-    const url = manifest.transport?.url || manifest.runtime?.url;
+    const transportType = (manifest as Manifest).transport?.type || "sse";
+    const url = (manifest as Manifest).transport?.url;
 
     if (!url) {
       throw new Error(
@@ -209,7 +210,7 @@ export class ProcessManager {
     // Resolve headers with secrets if any
     const secretManager = getSecretManager();
     const headers: Record<string, string> = {};
-    const manifestHeaders = manifest.transport?.headers || manifest.runtime?.headers || {};
+    const manifestHeaders = manifest.transport?.headers || {};
 
     for (const [key, value] of Object.entries(manifestHeaders)) {
       if (typeof value === "string") {
@@ -333,7 +334,7 @@ export class ProcessManager {
    */
   private async discoverToolsIfSupported(
     serverName: string,
-    manifest: Record<string, unknown>,
+    manifest: Manifest,
     childProcess: ChildProcess,
   ): Promise<void> {
     try {

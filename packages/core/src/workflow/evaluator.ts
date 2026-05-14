@@ -47,7 +47,7 @@ export class ExpressionEvaluator {
           resolvedValue = lodash.get(context.state, path);
         }
 
-        return resolvedValue ?? "";
+        return String(resolvedValue ?? "");
       });
     }
 

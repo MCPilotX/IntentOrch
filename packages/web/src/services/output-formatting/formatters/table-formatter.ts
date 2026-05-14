@@ -139,18 +139,9 @@ export class TableFormatter extends BaseFormatter {
   private formatPipeTable(lines: string[]): string {
     let formatted = `**Table Data** (${lines.length} rows)\n\n`;
     
-    // Add the table as-is (it's already formatted)
-    formatted += '```\n';
+    // Add the table as-is
     formatted += lines.join('\n');
-    formatted += '\n```\n';
-    
-    // Add summary
-    if (lines.length > 1) {
-      const header = lines[0];
-      const columnCount = (header.match(/\|/g) || []).length - 1;
-      formatted += `\n• **Columns:** ${columnCount}\n`;
-      formatted += `• **Rows:** ${lines.length - 1}\n`;
-    }
+    formatted += '\n';
     
     return formatted;
   }
@@ -168,20 +159,17 @@ export class TableFormatter extends BaseFormatter {
     const columnCount = rows[0].length;
     let formatted = `**CSV Data** (${rows.length} rows × ${columnCount} columns)\n\n`;
     
-    // Show first few rows
-    const displayRows = Math.min(rows.length, 6);
-    formatted += '```\n';
-    for (let i = 0; i < displayRows; i++) {
-      formatted += rows[i].join(', ') + '\n';
-    }
-    if (rows.length > displayRows) {
-      formatted += `... ${rows.length - displayRows} more rows\n`;
-    }
-    formatted += '```\n';
+    // Convert to Markdown table
+    formatted += '| ' + rows[0].join(' | ') + ' |\n';
+    formatted += '| ' + rows[0].map(() => '---').join(' | ') + ' |\n';
     
-    // Add column names if available
-    if (rows.length > 0) {
-      formatted += `\n**Columns:** ${rows[0].join(', ')}\n`;
+    const displayRows = Math.min(rows.length, 20);
+    for (let i = 1; i < displayRows; i++) {
+      formatted += '| ' + rows[i].join(' | ') + ' |\n';
+    }
+    
+    if (rows.length > displayRows) {
+      formatted += `\n*... and ${rows.length - displayRows} more rows*\n`;
     }
     
     return formatted;
@@ -200,17 +188,17 @@ export class TableFormatter extends BaseFormatter {
     const columnCount = rows[0].length;
     let formatted = `**TSV Data** (${rows.length} rows × ${columnCount} columns)\n\n`;
     
-    // Convert to pipe table for better readability
+    // Convert to Markdown table
     formatted += '| ' + rows[0].join(' | ') + ' |\n';
     formatted += '| ' + rows[0].map(() => '---').join(' | ') + ' |\n';
     
-    const displayRows = Math.min(rows.length, 6);
+    const displayRows = Math.min(rows.length, 20);
     for (let i = 1; i < displayRows; i++) {
       formatted += '| ' + rows[i].join(' | ') + ' |\n';
     }
     
     if (rows.length > displayRows) {
-      formatted += `| ... ${rows.length - displayRows} more rows |\n`;
+      formatted += `\n*... and ${rows.length - displayRows} more rows*\n`;
     }
     
     return formatted;
@@ -222,9 +210,10 @@ export class TableFormatter extends BaseFormatter {
   private formatFixedWidthTable(lines: string[]): string {
     let formatted = `**Table Data** (${lines.length} rows)\n\n`;
     
-    // Show first few lines
-    const displayLines = Math.min(lines.length, 8);
-    formatted += '```\n';
+    // Fixed-width is hard to convert to MD table without knowing column widths
+    // So we keep it as a code block but ensure it's marked as text
+    const displayLines = Math.min(lines.length, 10);
+    formatted += '```text\n';
     for (let i = 0; i < displayLines; i++) {
       formatted += lines[i] + '\n';
     }

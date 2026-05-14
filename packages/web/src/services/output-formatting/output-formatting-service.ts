@@ -126,6 +126,31 @@ export class OutputFormattingService {
       return data;
     }
 
+    // 0. MCP content array: [{ content: [{ type: 'text', text: '...' }] }, ...]
+    // This is the multi-step MCP response format where each step returns
+    // an array of MCP content items. Extract all text and join them.
+    if (Array.isArray(data)) {
+      const texts = data
+        .map((item: any) => {
+          if (item?.content && Array.isArray(item.content)) {
+            return item.content
+              .filter((c: any) => c.type === 'text')
+              .map((c: any) => c.text)
+              .filter(Boolean)
+              .join('\n');
+          }
+          // If item itself has content array (nested), or is a direct string
+          if (typeof item === 'string') return item;
+          return '';
+        })
+        .filter(Boolean);
+      
+      if (texts.length > 0) {
+        return texts.join('\n');
+      }
+      return data;
+    }
+
     // 1. MCP content wrapper: { content: [{ type: 'text', text: '...' }] }
     if (Array.isArray(data.content)) {
       // Find the first text content
@@ -190,6 +215,26 @@ export class OutputFormattingService {
         // Multiple results - use the whole array or find the most "interesting" one
         // For now, use the whole results array as data
         data = executionResult.results;
+      }
+    }
+    
+    // Handle executionSteps (used by UnifiedExecutionResult from executeNaturalLanguage)
+    if (!data && executionResult.executionSteps && Array.isArray(executionResult.executionSteps)) {
+      if (executionResult.executionSteps.length === 1) {
+        const firstStep = executionResult.executionSteps[0];
+        // Use the step's result data which contains the structured tool output
+        data = firstStep.result || firstStep.output || firstStep;
+        context.toolName = firstStep.toolName || context.toolName;
+        context.serverName = firstStep.serverName || context.serverName;
+      } else if (executionResult.executionSteps.length > 0) {
+        // Multiple steps: extract all results into an array
+        data = executionResult.executionSteps
+          .filter((s: any) => s.success)
+          .map((s: any) => s.result || s.output)
+          .filter(Boolean);
+        if (data.length === 0) {
+          data = executionResult.executionSteps;
+        }
       }
     }
     

@@ -34,32 +34,42 @@ export async function handleConfigRoutes(
       const data = JSON.parse(body);
       const configService = getConfigService();
 
+      // Support both {ai: ...} and {config: {ai: ...}} structures
+      const appConfig = data.config || data;
+
       // Update AI config fields if provided
-      if (data.ai) {
-        if (data.ai.provider) {
-          await configService.setAIProvider(data.ai.provider);
+      if (appConfig.ai) {
+        if (appConfig.ai.provider) {
+          await configService.setAIProvider(appConfig.ai.provider);
         }
-        if (data.ai.apiKey) {
-          await configService.setAIAPIKey(data.ai.apiKey);
+        if (appConfig.ai.apiKey !== undefined) {
+          await configService.setAIAPIKey(appConfig.ai.apiKey);
         }
-        if (data.ai.model) {
-          await configService.setAIModel(data.ai.model);
+        if (appConfig.ai.model) {
+          await configService.setAIModel(appConfig.ai.model);
+        }
+        if (appConfig.ai.apiEndpoint !== undefined) {
+          await configService.setAIEndpoint(appConfig.ai.apiEndpoint);
         }
       }
 
       // Update registry config fields if provided
-      if (data.registry) {
-        if (data.registry.default) {
-          await configService.setRegistryDefault(data.registry.default);
+      if (appConfig.registry) {
+        if (appConfig.registry.default) {
+          await configService.setRegistryDefault(appConfig.registry.default);
         }
-        if (data.registry.fallback) {
-          await configService.setRegistryFallback(data.registry.fallback);
+        if (appConfig.registry.fallback) {
+          await configService.setRegistryFallback(appConfig.registry.fallback);
+        }
+        if (appConfig.registry.preferred) {
+          await configService.setRegistryDefault(appConfig.registry.preferred);
         }
       }
 
       sendJson(res, 200, {
         success: true,
         message: "Configuration updated successfully",
+        config: await configService.getAppConfig(),
       });
     } catch (error: unknown) {
       if (error instanceof SyntaxError) {

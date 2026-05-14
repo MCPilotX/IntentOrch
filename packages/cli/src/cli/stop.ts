@@ -130,7 +130,7 @@ export function stopCommand(): Command {
         // Check if process is already stopped before attempting to stop via daemon
         try {
           const serverStatus = await client.getServerStatus(pid);
-          if (serverStatus && serverStatus.status === "stopped") {
+          if (serverStatus && (serverStatus as Record<string, unknown>).status === "stopped") {
             console.log(
               `Process ${pid} ${serverName ? `(${serverName}) ` : ""}is already stopped.`,
             );
