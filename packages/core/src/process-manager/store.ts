@@ -313,9 +313,18 @@ export class ProcessStoreManager {
 
   private processInfoToRow(p: ProcessInfo): Record<string, unknown> {
     return {
-      ...p,
-      external: p.external ? 1 : 0,
+      pid: p.pid,
+      server_name: p.serverName,
+      name: p.name,
+      version: p.version,
       manifest: JSON.stringify(p.manifest),
+      start_time: p.startTime,
+      status: p.status,
+      port: p.port ?? null,
+      log_path: p.logPath ?? null,
+      external: p.external ? 1 : 0,
+      transport_type: p.transportType ?? null,
+      url: p.url ?? null,
       tools: p.tools ? JSON.stringify(p.tools) : null,
     };
   }

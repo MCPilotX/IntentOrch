@@ -23,10 +23,13 @@ export interface RegisteredTool {
 }
 
 /**
- * MCP Tool Registry
- * Focuses on managing tools discovered from MCP servers
+ * MCP Server Tool Registry
+ * Focuses on managing tools discovered from and registered with MCP servers.
+ * Each tool has an associated executor function for direct invocation.
+ * This is distinct from the persistent ToolRegistry in tool-registry/registry.ts
+ * which manages tool metadata with SQLite persistence.
  */
-export class ToolRegistry {
+export class MCPServerToolRegistry {
   private tools: Map<string, RegisteredTool> = new Map();
   private serverTools: Map<string, Set<string>> = new Map(); // Server ID -> Tool name set
 

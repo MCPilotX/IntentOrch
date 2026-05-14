@@ -66,14 +66,14 @@ export { ReActLoopEngine, PlanExecutor, SessionOrchestrator, WorkflowOrchestrato
 export type { UnifiedExecutionOptions, UnifiedExecutionResult, WorkflowExecutionResult } from './ai/execute-service.js';
 
 // ==================== MCP Modules ====================
-export { MCPClient, ToolRegistry } from './mcp/index.js';
-export type { Tool, ToolCall, ToolMetadata } from './mcp/index.js';
+export { MCPClient, MCPServerToolRegistry } from './mcp/index.js';
+export type { Tool, ToolCall, ToolMetadata, RegisteredTool, ToolExecutor } from './mcp/index.js';
 
 // ==================== Runtime Modules ====================
 export { RuntimeDetector, RuntimeAdapter } from './runtime/index.js';
 
-// ==================== Tool Registry ====================
-export { ToolRegistry as ToolRegistryModule } from './tool-registry/index.js';
+// ==================== Persistent Tool Registry ====================
+export { ToolRegistry } from './tool-registry/index.js';
 
 // ==================== Process Management ====================
 export { ProcessManager, ProcessStore } from './process-manager/index.js';

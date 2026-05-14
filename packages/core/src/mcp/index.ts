@@ -12,8 +12,9 @@ export * from "./types.js";
 // Export client
 export * from "./client.js";
 
-// Export tool registry
-export * from "./tool-registry.js";
+// Export MCP server tool registry
+export { MCPServerToolRegistry } from "./tool-registry.js";
+export type { RegisteredTool, ToolExecutor } from "./tool-registry.js";
 
 // Export tool metadata standardization
 export * from "./tool-metadata.js";
