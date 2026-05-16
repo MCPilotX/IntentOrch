@@ -1,7 +1,7 @@
 import * as fsSyncReal from "fs";
 import * as path from "path";
-import { SecretManager } from "../secret/manager.js";
-import { DatabaseManager, closeSqliteDb } from "../utils/sqlite.js";
+import { SecretManager } from "../../packages/core/src/secret/manager.js";
+import { DatabaseManager, closeSqliteDb } from "../../packages/core/src/utils/sqlite.js";
 
 // In-memory file store for testing (legacy)
 const fileStore: Record<string, Buffer> = {};
@@ -42,7 +42,7 @@ jest.mock("fs/promises", () => ({
 
 // Use real fs for the SQLite database since createClient needs a real file or :memory:
 // But we'll mock the paths to point to a test directory
-jest.mock("../utils/paths.js", () => ({
+jest.mock("../../packages/core/src/utils/paths.js", () => ({
   getInTorchDir: jest.fn(() => "/tmp/intorch-test-secrets"),
   getSecretsPath: jest.fn(() => "/tmp/intorch-test-secrets/secrets.json.enc"),
   getProcessesPath: jest.fn(() => "/tmp/intorch-test-secrets/processes.json"),

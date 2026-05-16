@@ -793,3 +793,11 @@ export class ConfigService {
 export function getConfigService(): ConfigService {
   return ConfigService.getInstance();
 }
+
+/**
+ * Convenience function to get AI configuration directly.
+ * This replaces the deprecated getAIConfig from utils/config.js.
+ */
+export async function getAIConfig(): Promise<AIConfig> {
+  return getConfigService().getAIConfig();
+}

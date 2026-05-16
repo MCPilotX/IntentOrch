@@ -4,7 +4,7 @@
  * - POST /api/ai/test — Test AI configuration
  */
 
-import { getAIConfig } from "../../utils/config.js";
+import { getAIConfig } from "../../core/config-service.js";
 import { getLLMClient } from "../../ai/llm-client.js";
 import { sendJson, type RouteContext } from "./index.js";
 

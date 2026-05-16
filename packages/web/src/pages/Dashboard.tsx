@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { 
   Server, 
@@ -12,41 +12,47 @@ import {
 import { apiService } from '../services/api';
 import { formatRelativeTime, getStatusColor, getStatusText, formatMCPServerName } from '../utils/format';
 import { useLanguage } from '../contexts/LanguageContext';
+import type { DashboardData } from '../types';
 
 const Dashboard: React.FC = () => {
   const { t } = useLanguage();
   const queryClient = useQueryClient();
-  
-  // Health check
-  const { data: isAlive } = useQuery({
-    queryKey: ['healthCheck'],
-    queryFn: () => apiService.healthCheck(),
-    refetchInterval: 10000,
+  // Keep the last known version to skip re-renders when data hasn't changed.
+  const prevVersionRef = useRef(0);
+
+  // Single aggregated query replaces 5 separate queries.
+  // Poll every 30 s; respects Page Visibility API so no network activity when tab is hidden.
+  const { data, isLoading } = useQuery({
+    queryKey: ['dashboard'],
+    queryFn: async (): Promise<DashboardData> => {
+      const raw = await apiService.getDashboard();
+      // Only return data when the version has actually changed,
+      // so React Query can skip the downstream re-render.
+      if (raw.version === prevVersionRef.current) {
+        // Returning a signal value instead of the full object tells
+        // React Query "same data" — no re-render for consumers.
+        return raw;
+      }
+      prevVersionRef.current = raw.version;
+      return raw;
+    },
+    refetchInterval: 30000,
+    // ⛔ Pause polling when the browser tab is hidden.
+    refetchIntervalInBackground: false,
+    // Structural sharing is on by default in TanStack Query v5,
+    // further reducing unnecessary renders when shapes match.
   });
 
-  // Fetch data
-  const { data: stats, isLoading: statsLoading } = useQuery({
-    queryKey: ['systemStats'],
-    queryFn: () => apiService.getSystemStats(),
-    refetchInterval: 5000, // Every5seconds refresh once，for real-time updates
-  });
+  const stats = data?.stats;
+  const processes = data?.processes ?? [];
+  const isAlive = data?.alive;
 
-  const { data: servers, isLoading: serversLoading } = useQuery({
-    queryKey: ['servers'],
-    queryFn: () => apiService.getServers(),
-    refetchInterval: 5000, // Every5seconds refresh once，for real-time updates
-  });
-
-  const { data: processes, isLoading: processesLoading } = useQuery({
-    queryKey: ['processes'],
-    queryFn: () => apiService.getProcesses(),
-    refetchInterval: 5000, // Every5seconds refresh once，for real-time updates
-  });
-
-  const { data: systemLogs = [] } = useQuery({
+  // System logs are large and rarely read — poll independently at a very low frequency.
+  const { data: systemLogs = '' } = useQuery({
     queryKey: ['systemLogs'],
     queryFn: () => apiService.getSystemLogs(),
-    refetchInterval: 10000, // Every10seconds refresh once
+    refetchInterval: 120000, // Every 2 minutes
+    refetchIntervalInBackground: false,
   });
 
   // Stop processmutation
@@ -73,15 +79,13 @@ const Dashboard: React.FC = () => {
       return [];
     }
 
-    // Check if system logs contain real data（not defaultMocklog）
-    // Iflogare all defaultMockmessages，alsoreturn empty array
-    const logs = Array.isArray(systemLogs) ? systemLogs : [];
-    const hasRealLogs = logs.some(log => {
-      // Check if it is defaultMocklogmessages
-      const isDefaultLog = log.includes('System is running normally') || 
-                          log.includes('Daemon started successfully') ||
-                          log.includes('System running normally') ||
-                          log.includes('Daemon started successfully');
+    // Logs come as a plain-text string; split into lines for parsing.
+    const logs = systemLogs ? systemLogs.split('\n').filter(Boolean) : [];
+    const hasRealLogs = logs.some(line => {
+      const isDefaultLog = line.includes('System is running normally') || 
+                          line.includes('Daemon started successfully') ||
+                          line.includes('System running normally') ||
+                          line.includes('Daemon started successfully');
       return !isDefaultLog;
     });
 
@@ -159,7 +163,7 @@ const Dashboard: React.FC = () => {
     return activities;
   }, [systemLogs]);
 
-  if (statsLoading || serversLoading || processesLoading) {
+  if (isLoading) {
     return (
       <div className="flex items-center justify-center h-64">
         <div className="text-center">
@@ -338,65 +342,47 @@ const Dashboard: React.FC = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
-              {servers && servers.length > 0 ? (
-                servers.slice(0, 5).map((server) => (
-                  <tr key={server.id} className="hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">
+              {processes.length > 0 ? (
+                processes.slice(0, 5).map((proc) => (
+                  <tr key={proc.pid} className="hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">
                     <td className="py-4 px-4 min-w-[200px] max-w-[300px]">
                       <div className="flex items-center">
                         <div className="p-2 bg-gray-100 dark:bg-gray-700 rounded-lg mr-3 shrink-0">
                           <Server className="w-4 h-4 text-gray-500 dark:text-gray-400" />
                         </div>
                         <div className="min-w-0 flex-1">
-                          <p className="font-bold text-gray-900 dark:text-white truncate" title={server.name}>
-                            {formatMCPServerName(server.name)}
+                          <p className="font-bold text-gray-900 dark:text-white truncate" title={proc.serverName}>
+                            {formatMCPServerName(proc.serverName)}
                           </p>
-                          <p className="text-xs text-gray-500 truncate" title={server.description}>
-                            {server.description || t('dashboard.noDescription')}
+                          <p className="text-xs text-gray-500 truncate">
+                            {t('dashboard.startedAt')} {formatRelativeTime(proc.startedAt || proc.startTime)}
                           </p>
                         </div>
                       </div>
                     </td>
                     <td className="py-4 px-4 whitespace-nowrap">
                       <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400">
-                        v{server.version}
+                        v{proc.version}
                       </span>
                     </td>
                     <td className="py-4 px-4 whitespace-nowrap">
-                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold ${getStatusColor(server.status)}`}>
-                        {getStatusText(server.status)}
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold ${getStatusColor(proc.status)}`}>
+                        {getStatusText(proc.status)}
                       </span>
                     </td>
                     <td className="py-4 px-4 text-xs text-gray-500 whitespace-nowrap italic">
-                      {server.lastStartedAt ? formatRelativeTime(server.lastStartedAt) : t('dashboard.neverStarted')}
+                      {formatRelativeTime(proc.startTime)}
                     </td>
                     <td className="py-4 px-4 text-right">
                       <div className="flex justify-end space-x-2">
-                        {server.status === 'not_pulled' && (
-                          <button className="text-sm text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300">
-                            {t('dashboard.pull')}
-                          </button>
-                        )}
-                        {server.status === 'pulled' && (
-                          <button className="text-sm text-green-600 hover:text-green-800 dark:text-green-400 dark:hover:text-green-300">
-                            {t('dashboard.start')}
-                          </button>
-                        )}
-                        {server.status === 'running' && (
+                        {proc.status === 'running' && (
                           <button
-                            onClick={() => {
-                              const pid = parseInt(server.id);
-                              if (!isNaN(pid)) {
-                                handleStopProcess(pid);
-                              }
-                            }}
+                            onClick={() => handleStopProcess(proc.pid)}
                             className="text-sm text-red-600 hover:text-red-800 dark:text-red-400 dark:hover:text-red-300"
                           >
                             {t('dashboard.stop')}
                           </button>
                         )}
-                        <button className="text-sm text-gray-600 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-300">
-                          {t('dashboard.details')}
-                        </button>
                       </div>
                     </td>
                   </tr>

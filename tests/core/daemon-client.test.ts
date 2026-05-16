@@ -8,7 +8,7 @@
  * - isDaemonRunning
  */
 
-import { DaemonClient } from "../daemon/client.js";
+import { DaemonClient } from "../../packages/core/src/daemon/client.js";
 
 // Mock http module
 const mockRequestStream = {
@@ -37,13 +37,13 @@ jest.mock("http", () => ({
   ),
 }));
 
-jest.mock("../secret/manager.js", () => ({
+jest.mock("../../packages/core/src/secret/manager.js", () => ({
   getSecretManager: jest.fn(() => ({
     get: jest.fn().mockResolvedValue("test-auth-token"),
   })),
 }));
 
-jest.mock("../utils/paths.js", () => ({
+jest.mock("../../packages/core/src/utils/paths.js", () => ({
   getDaemonPidPath: jest.fn(() => "/tmp/.intorch/daemon.pid"),
 }));
 

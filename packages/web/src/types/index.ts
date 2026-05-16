@@ -158,6 +158,22 @@ export interface SystemStats {
   diskUsage: number;
 }
 
+/** Aggregated payload returned by GET /api/dashboard — one request, all data. */
+export interface DashboardData {
+  alive: boolean;
+  stats: {
+    totalServers: number;
+    runningServers: number;
+    totalProcesses: number;
+    uptime: number;
+    requestCount: number;
+  };
+  processes: ProcessInfo[];
+  logs: string;
+  /** Monotonic timestamp to detect changes without deep-equality checks. */
+  version: number;
+}
+
 export interface SessionCreateResponse {
   success: boolean;
   sessionId: string;

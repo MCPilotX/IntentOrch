@@ -210,8 +210,10 @@ export class ProcessStoreManager {
       if (p.status === "running") {
         const isAlive = await this.isProcessAlive(p);
         if (!isAlive) {
+          // Process died — mark as stopped and remove from active list immediately
           p.status = "stopped";
           await repo.upsert(this.processInfoToRow(p));
+          // Still push so the frontend sees the updated status, but cap lifetime
           validProcesses.push(p);
         } else {
           validProcesses.push(p);
@@ -220,12 +222,15 @@ export class ProcessStoreManager {
         // Clean up obviously invalid PIDs (only for non-external services)
         if (!p.external && p.pid <= 0) {
           await repo.delete(p.pid);
-          continue; // Remove invalid PID
+          continue;
         }
 
-        // Clean up old stopped processes (older than 1 hour)
+        // Shorten the stopped-process retention from 1 hour to 30 seconds.
+        // A stopped process lingering for an hour causes the frontend to show
+        // stale "stopped" entries.  30 s is enough for the UI to read the
+        // final status before cleanup.
         const age = Date.now() - p.startTime;
-        if (age > 3600000) {
+        if (age > 30000) {
           await repo.delete(p.pid);
           continue;
         }

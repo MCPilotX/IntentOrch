@@ -14,7 +14,8 @@ import {
   getManifestCacheRepository,
   getWorkflowRepository,
   getWorkflowExecutionRepository,
-} from "../utils/sqlite.js";
+  getLockRepository,
+} from "../../packages/core/src/utils/sqlite.js";
 import path from "path";
 import fs from "fs";
 import os from "os";
@@ -24,8 +25,8 @@ const TEST_DIR = path.join(os.tmpdir(), "intorch-test-" + Date.now());
 const TEST_DB_PATH = path.join(TEST_DIR, "intorch.db");
 
 // Mock paths module to use test directory
-jest.mock("../utils/paths.js", () => {
-  const actual = jest.requireActual("../utils/paths.js");
+jest.mock("../../packages/core/src/utils/paths.js", () => {
+  const actual = jest.requireActual("../../packages/core/src/utils/paths.js");
   return {
     ...actual,
     getInTorchDir: () => TEST_DIR,
@@ -619,5 +620,110 @@ describe("DatabaseManager - Edge Cases", () => {
     const db = DatabaseManager.getInstance();
     await db.initialize(); // Should be no-op
     expect(db.initialized).toBe(true);
+  });
+});
+
+
+describe("LockRepository", () => {
+  beforeAll(async () => {
+    // Ensure DB is initialized (previous suite may have closed it)
+    if (!DatabaseManager.getInstance().initialized) {
+      await DatabaseManager.getInstance().initialize();
+    }
+  });
+
+  beforeEach(async () => {
+    // Ensure DB is initialized before each test (in case of cross-suite close)
+    if (!DatabaseManager.getInstance().initialized) {
+      await DatabaseManager.getInstance().initialize();
+    }
+  });
+
+  afterAll(() => {
+    DatabaseManager.getInstance().close();
+  });
+
+  test("should acquire and release a lock", async () => {
+    const repo = getLockRepository();
+    const acquired = await repo.acquire("test:lock-1", 12345, 10000);
+    expect(acquired).toBe(true);
+
+    const holder = await repo.getLockHolder("test:lock-1");
+    expect(holder).not.toBeNull();
+    expect(holder!.pid).toBe(12345);
+
+    await repo.release("test:lock-1", 12345);
+    const afterRelease = await repo.getLockHolder("test:lock-1");
+    expect(afterRelease).toBeNull();
+  });
+
+  test("should reject duplicate lock from different PID", async () => {
+    const repo = getLockRepository();
+    const realPid = process.pid;
+    // Acquire with current process PID → simulates a live lock holder
+    await repo.acquire("test:lock-2", realPid, 10000);
+    // Different PID should NOT be able to acquire (lock is still alive)
+    const reacquired = await repo.acquire("test:lock-2", 99999, 10000);
+    expect(reacquired).toBe(false);
+    await repo.release("test:lock-2", realPid);
+  });
+
+  test("should allow same PID to re-acquire (renew)", async () => {
+    const repo = getLockRepository();
+    await repo.acquire("test:lock-3", 33333, 10000);
+    // Same PID can re-acquire (acts as lock renewal)
+    const again = await repo.acquire("test:lock-3", 33333, 30000);
+    expect(again).toBe(true);
+    await repo.release("test:lock-3", 33333);
+  });
+
+  test("should handle expired lock (TTL)", async () => {
+    const repo = getLockRepository();
+    // Acquire with 1ms TTL (will expire immediately)
+    await repo.acquire("test:lock-expire", 44444, 1);
+    // Wait for expiration
+    await new Promise((r) => setTimeout(r, 50));
+    // Now another PID should be able to acquire
+    const reacquired = await repo.acquire("test:lock-expire", 55555, 10000);
+    expect(reacquired).toBe(true);
+    await repo.release("test:lock-expire", 55555);
+  });
+
+  test("should refresh lock via touch", async () => {
+    const repo = getLockRepository();
+    await repo.acquire("test:lock-touch", 66666, 5000);
+
+    // Get initial expiry
+    const before = await repo.getLockHolder("test:lock-touch");
+    expect(before).not.toBeNull();
+
+    // Touch to extend
+    await repo.touch("test:lock-touch", 66666, 30000);
+    const after = await repo.getLockHolder("test:lock-touch");
+    expect(after!.expiresAt > before!.expiresAt).toBe(true);
+
+    await repo.release("test:lock-touch", 66666);
+  });
+
+  test("should return null for nonexistent lock", async () => {
+    const repo = getLockRepository();
+    const holder = await repo.getLockHolder("test:nonexistent");
+    expect(holder).toBeNull();
+  });
+
+  test("should release only by matching PID", async () => {
+    const repo = getLockRepository();
+    await repo.acquire("test:lock-pid", 77777, 10000);
+
+    // Try releasing with wrong PID
+    await repo.release("test:lock-pid", 88888);
+    const holder = await repo.getLockHolder("test:lock-pid");
+    expect(holder).not.toBeNull();
+    expect(holder!.pid).toBe(77777);
+
+    // Release with correct PID
+    await repo.release("test:lock-pid", 77777);
+    const after = await repo.getLockHolder("test:lock-pid");
+    expect(after).toBeNull();
   });
 });

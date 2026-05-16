@@ -6,7 +6,8 @@ import { logger } from "../core/logger.js";
 
 import { CloudIntentEngine, type CloudIntentEngineConfig } from "../ai/cloud-intent-engine.js";
 import { ValidationLevel } from "../mcp/parameter-mapper.js";
-import { getAIConfig, AIConfig } from "./config.js";
+import { getAIConfig } from "../core/config-service.js";
+import type { AIConfig } from "../core/types.js";
 
 export interface CloudIntentEngineOptions {
   /**

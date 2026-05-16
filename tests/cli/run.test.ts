@@ -1,7 +1,7 @@
 import { Command } from 'commander';
 import fs from 'fs/promises';
 import { runCommand } from '../../src/cli/run';
-import { getAIConfig } from '../../src/utils/config';
+import { getAIConfig } from '../../packages/core/src/core/config-service';
 import { getRegistryClient } from '../../src/registry/client';
 import { getProcessManager } from '../../src/process-manager/manager';
 import { getWorkflowManager } from '../../src/workflow/manager';
@@ -10,7 +10,12 @@ import { getToolRegistry } from '../../src/tool-registry/registry';
 import { AutoStartManager } from '../../src/utils/auto-start-manager';
 
 jest.mock('fs/promises');
-jest.mock('../../src/utils/config');
+jest.mock('../../packages/core/src/core/config-service', () => ({
+  getConfigService: jest.fn(() => ({
+    getAIConfig: jest.fn(),
+  })),
+  getAIConfig: jest.fn(),
+}));
 jest.mock('../../src/registry/client');
 jest.mock('../../src/process-manager/manager');
 jest.mock('../../src/workflow/manager');

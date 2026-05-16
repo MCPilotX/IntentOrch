@@ -1,7 +1,7 @@
-import { WorkflowEngine } from "../workflow/engine.js";
-import { MCPClient } from "../mcp/client.js";
-import { getRegistryClient } from "../registry/client.js";
-import { getProcessManager } from "../process-manager/manager.js";
+import { WorkflowEngine } from "../../packages/core/src/workflow/engine.js";
+import { MCPClient } from "../../packages/core/src/mcp/client.js";
+import { getRegistryClient } from "../../packages/core/src/registry/client.js";
+import { getProcessManager } from "../../packages/core/src/process-manager/manager.js";
 
 // Mock uuid to prevent ESM parsing issues
 jest.mock("uuid", () => ({
@@ -9,15 +9,15 @@ jest.mock("uuid", () => ({
 }));
 
 // Mock MCPClient
-jest.mock("../mcp/client.js");
+jest.mock("../../packages/core/src/mcp/client.js");
 const MockedMCPClient = MCPClient as jest.MockedClass<typeof MCPClient>;
 
 // Mock RegistryClient
-jest.mock("../registry/client.js");
+jest.mock("../../packages/core/src/registry/client.js");
 const mockedGetRegistryClient = getRegistryClient as any;
 
 // Mock ProcessManager
-jest.mock("../process-manager/manager.js");
+jest.mock("../../packages/core/src/process-manager/manager.js");
 const mockedGetProcessManager = getProcessManager as any;
 
 describe("Multi-Transport Workflow Execution", () => {

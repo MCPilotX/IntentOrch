@@ -4,7 +4,7 @@
  */
 
 // Export configuration management
-export { ConfigService, getConfigService } from "./config-service.js";
+export { ConfigService, getConfigService, getAIConfig } from "./config-service.js";
 
 // Export types
 export type {

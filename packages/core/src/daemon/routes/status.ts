@@ -11,7 +11,6 @@ import fs from "fs/promises";
 import { getProcessManager } from "../../process-manager/manager.js";
 import { ProcessInfo } from "../../process-manager/types.js";
 import { getRegistryClient } from "../../registry/client.js";
-import { getSecretManager } from "../../secret/manager.js";
 import { sendJson, type RouteContext } from "./index.js";
 import { logger } from "../../core/logger.js";
 
@@ -95,6 +94,43 @@ export async function handleStatusRoutes(
           message: `Failed to read logs: ${(error instanceof Error ? error.message : String(error))}`,
         });
       }
+    }
+    return true;
+  }
+
+  // GET /api/dashboard — Aggregated dashboard data (single request)
+  if (
+    (path === "/api/dashboard" || path === "/api/dashboard/") &&
+    method === "GET"
+  ) {
+    try {
+      const processManager = getProcessManager();
+      const registryClient = getRegistryClient();
+      const allProcesses = await processManager.list();
+      const runningProcesses = allProcesses.filter(
+        (p: ProcessInfo) => p.status === "running",
+      );
+      const cachedManifests = await registryClient.listCachedManifests();
+
+      sendJson(res, 200, {
+        alive: true,
+        stats: {
+          totalServers: cachedManifests.length,
+          runningServers: runningProcesses.length,
+          totalProcesses: allProcesses.length,
+          uptime: Date.now() - startTime,
+          requestCount,
+        },
+        processes: allProcesses,
+        logs: "", // Logs are too heavy to include on every poll
+        version: Date.now(), // Monotonic timestamp so the frontend can skip rendering when unchanged
+      });
+    } catch (error: unknown) {
+      logger.error("[Daemon] Error fetching dashboard data:", error);
+      sendJson(res, 500, {
+        error: "Failed to fetch dashboard data",
+        message: (error instanceof Error ? error.message : String(error)),
+      });
     }
     return true;
   }

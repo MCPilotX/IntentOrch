@@ -134,6 +134,17 @@ CREATE TABLE IF NOT EXISTS execution_steps (
 );
 
 CREATE INDEX IF NOT EXISTS idx_execution_steps_execution_id ON execution_steps(execution_id);
+
+-- ==================== 8. Daemon Locks ====================
+CREATE TABLE IF NOT EXISTS daemon_locks (
+  lock_name   TEXT PRIMARY KEY,
+  pid         INTEGER NOT NULL,
+  hostname    TEXT NOT NULL DEFAULT '',
+  acquired_at TEXT NOT NULL DEFAULT (datetime('now')),
+  expires_at  TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_daemon_locks_expires ON daemon_locks(expires_at);
 `;
 
 // ==================== Database Manager ====================
@@ -395,6 +406,37 @@ export interface IWorkflowExecutionRepository {
   getSteps(executionId: string): Promise<Record<string, unknown>[]>;
 }
 
+/**
+ * Lock repository for daemon-level mutual exclusion.
+ * Uses SQLite's built-in serialization to provide reliable locking
+ * without relying on filesystem race conditions.
+ */
+export interface ILockRepository {
+  /**
+   * Attempt to acquire a named lock.
+   * @param lockName - Unique lock identifier (e.g., "daemon:pid")
+   * @param pid - Process ID that holds the lock
+   * @param ttlMs - Time-to-live in milliseconds (lock expires after this)
+   * @returns true if lock was acquired, false otherwise
+   */
+  acquire(lockName: string, pid: number, ttlMs: number): Promise<boolean>;
+
+  /**
+   * Release a named lock (only if held by the given PID).
+   */
+  release(lockName: string, pid: number): Promise<void>;
+
+  /**
+   * Refresh the lock expiration (touch) to prevent staleness.
+   */
+  touch(lockName: string, pid: number, ttlMs: number): Promise<void>;
+
+  /**
+   * Read the PID currently holding the lock, or null if not held.
+   */
+  getLockHolder(lockName: string): Promise<{ pid: number; expiresAt: string } | null>;
+}
+
 // ==================== SQLite Repository Implementations ====================
 
 class SqliteConfigRepository implements IConfigRepository {
@@ -556,16 +598,16 @@ class SqliteToolRepository implements IToolRepository {
         keywords, requires_preprocessing, is_dynamic, discovery_time, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
       [
-        tool.name,
+        tool.name ?? "",
         tool.description ?? "",
-        tool.server_name,
-        tool.actual_server_name ?? null,
-        tool.parameters ?? null,
-        tool.categories ?? null,
-        tool.keywords ?? null,
-        tool.requires_preprocessing ?? 0,
-        tool.is_dynamic ?? 0,
-        tool.discovery_time ?? null,
+        tool.serverName ?? tool.server_name ?? "",
+        tool.actualServerName ?? tool.actual_server_name ?? null,
+        tool.parameters ? (typeof tool.parameters === 'string' ? tool.parameters : JSON.stringify(tool.parameters)) : null,
+        tool.categories ? (typeof tool.categories === 'string' ? tool.categories : JSON.stringify(tool.categories)) : null,
+        tool.keywords ? (typeof tool.keywords === 'string' ? tool.keywords : JSON.stringify(tool.keywords)) : null,
+        tool.requiresPreprocessing ?? tool.requires_preprocessing ?? 0,
+        tool.isDynamic ?? tool.is_dynamic ?? 0,
+        tool.discoveryTime ?? tool.discovery_time ?? null,
       ],
     );
   }
@@ -699,7 +741,12 @@ class SqliteWorkflowExecutionRepository implements IWorkflowExecutionRepository 
     await DatabaseManager.getInstance().execute(
       `INSERT INTO workflow_executions (id, workflow_id, status, input, started_at)
        VALUES (?, ?, ?, ?, datetime('now'))`,
-      [execution.id, execution.workflow_id, execution.status, execution.input ?? null],
+      [
+        execution.id, 
+        execution.workflowId ?? execution.workflow_id, 
+        execution.status ?? 'running', 
+        execution.input ?? null
+      ],
     );
   }
 
@@ -735,6 +782,114 @@ class SqliteWorkflowExecutionRepository implements IWorkflowExecutionRepository 
       "SELECT * FROM execution_steps WHERE execution_id = ? ORDER BY step_index",
       [executionId],
     );
+  }
+}
+
+class SqliteLockRepository implements ILockRepository {
+  async acquire(lockName: string, pid: number, ttlMs: number): Promise<boolean> {
+    const db = DatabaseManager.getInstance();
+    const expiresAt = new Date(Date.now() + ttlMs).toISOString();
+    const hostname = await this.getHostname();
+
+    try {
+      // Try to insert a new lock row — will fail with SQLITE_CONSTRAINT if exists
+      await db.execute(
+        `INSERT INTO daemon_locks (lock_name, pid, hostname, acquired_at, expires_at)
+         VALUES (?, ?, ?, datetime('now'), ?)`,
+        [lockName, pid, hostname, expiresAt],
+      );
+      return true;
+    } catch (err: unknown) {
+      // Lock already exists — check if it's stale
+      const errObj = err as Record<string, unknown>;
+      if (
+        String(errObj?.code ?? "").includes("SQLITE_CONSTRAINT") ||
+        String(errObj?.message ?? "").includes("UNIQUE constraint")
+      ) {
+        return await this.tryReplaceStale(lockName, pid, ttlMs, hostname);
+      }
+      throw err;
+    }
+  }
+
+  async release(lockName: string, pid: number): Promise<void> {
+    await DatabaseManager.getInstance().execute(
+      "DELETE FROM daemon_locks WHERE lock_name = ? AND pid = ?",
+      [lockName, pid],
+    );
+  }
+
+  async touch(lockName: string, pid: number, ttlMs: number): Promise<void> {
+    const expiresAt = new Date(Date.now() + ttlMs).toISOString();
+    await DatabaseManager.getInstance().execute(
+      "UPDATE daemon_locks SET expires_at = ? WHERE lock_name = ? AND pid = ?",
+      [expiresAt, lockName, pid],
+    );
+  }
+
+  async getLockHolder(lockName: string): Promise<{ pid: number; expiresAt: string } | null> {
+    const row = await DatabaseManager.getInstance().queryOne<{
+      pid: number;
+      expires_at: string;
+    }>(
+      "SELECT pid, expires_at FROM daemon_locks WHERE lock_name = ?",
+      [lockName],
+    );
+    if (!row) return null;
+    return { pid: row.pid, expiresAt: row.expires_at };
+  }
+
+  /**
+   * Try to replace a stale lock. Returns true if replaced, false if still alive.
+   */
+  private async tryReplaceStale(
+    lockName: string,
+    pid: number,
+    ttlMs: number,
+    hostname: string,
+  ): Promise<boolean> {
+    const db = DatabaseManager.getInstance();
+    const row = await db.queryOne<{ pid: number; expires_at: string }>(
+      "SELECT pid, expires_at FROM daemon_locks WHERE lock_name = ?",
+      [lockName],
+    );
+    if (!row) {
+      // Lock disappeared between check and replace — retry
+      return this.acquire(lockName, pid, ttlMs);
+    }
+
+    const now = new Date();
+    const expiresAt = new Date(
+      row.expires_at + (row.expires_at.includes("Z") ? "" : "Z"),
+    );
+
+    if (expiresAt > now) {
+      // Lock is still valid — check if the holding process is alive
+      try {
+        process.kill(row.pid, 0);
+        return false; // Process is alive, cannot break lock
+      } catch {
+        // Process is dead, we can break the lock
+      }
+    }
+
+    // Lock is stale — replace it
+    const newExpiresAt = new Date(Date.now() + ttlMs).toISOString();
+    await db.execute(
+      `UPDATE daemon_locks SET pid = ?, hostname = ?, acquired_at = datetime('now'), expires_at = ?
+       WHERE lock_name = ? AND (pid = ? OR expires_at <= datetime('now'))`,
+      [pid, hostname, newExpiresAt, lockName, row.pid],
+    );
+    return true;
+  }
+
+  private async getHostname(): Promise<string> {
+    try {
+      const os = await import("os");
+      return os.hostname();
+    } catch {
+      return "";
+    }
   }
 }
 
@@ -781,6 +936,14 @@ export function getWorkflowRepository(): IWorkflowRepository {
 export function getWorkflowExecutionRepository(): IWorkflowExecutionRepository {
   if (!workflowExecutionRepo) workflowExecutionRepo = new SqliteWorkflowExecutionRepository();
   return workflowExecutionRepo;
+}
+
+
+let lockRepo: ILockRepository | null = null;
+
+export function getLockRepository(): ILockRepository {
+  if (!lockRepo) lockRepo = new SqliteLockRepository();
+  return lockRepo;
 }
 
 // ==================== Legacy Compatibility ====================

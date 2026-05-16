@@ -1,9 +1,7 @@
 /** @type {import('jest').Config} */
-const path = require('path');
 const config = {
   preset: 'ts-jest',
   testEnvironment: 'node',
-  roots: ['<rootDir>/../../tests/core'],
   testMatch: ['**/*.test.ts'],
   testPathIgnorePatterns: ['/node_modules/'],
   transform: {
@@ -17,6 +15,7 @@ const config = {
     }],
   },
   moduleNameMapper: {
+    // .cjs rule must be BEFORE .js to take precedence for CJS files in node_modules
     '^(.*)\.cjs$': '$1.cjs',
     '^(\.{1,2}/.*)\.js$': '$1',
   },

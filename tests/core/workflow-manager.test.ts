@@ -6,8 +6,8 @@
  * - Persistence via filesystem
  */
 
-import { WorkflowManager } from "../workflow/manager.js";
-import type { Workflow } from "../workflow/types.js";
+import { WorkflowManager } from "../../packages/core/src/workflow/manager.js";
+import type { Workflow } from "../../packages/core/src/workflow/types.js";
 
 // Mock uuid to prevent ESM parsing issues
 jest.mock("uuid", () => ({
@@ -56,7 +56,7 @@ jest.mock("fs/promises", () => ({
   }),
 }));
 
-jest.mock("../utils/paths.js", () => ({
+jest.mock("../../packages/core/src/utils/paths.js", () => ({
   getInTorchDir: jest.fn(() => "/tmp/.intorch"),
   ensureInTorchDir: jest.fn(),
 }));

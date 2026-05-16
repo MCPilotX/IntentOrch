@@ -7,6 +7,7 @@ import type {
   Secret,
   Workflow,
   SystemStats,
+  DashboardData,
   PullServerRequest,
   StartServerRequest,
   StopProcessRequest,
@@ -408,6 +409,15 @@ class ApiService {
   async getSystemLogs(): Promise<string> {
     const data = await this.client.get<LogsEnvelopeResponse>('/api/system/logs');
     return data.logs || '';
+  }
+
+  /**
+   * Aggregated dashboard data — replaces 4 separate requests with 1.
+   * Returns a `version` field (monotonic timestamp) so the caller can
+   * skip re-rendering when nothing has changed.
+   */
+  async getDashboard(): Promise<DashboardData> {
+    return await this.client.get<DashboardData>('/api/dashboard');
   }
 
   async healthCheck(): Promise<boolean> {

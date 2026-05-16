@@ -10,8 +10,8 @@
  * 6. Custom apiEndpoint is properly used
  */
 
-import { LLMClient, getLLMClient } from "../ai/llm-client";
-import type { AIConfig } from "../core/types";
+import { LLMClient, getLLMClient } from "../../packages/core/src/ai/llm-client";
+import type { AIConfig } from "../../packages/core/src/core/types";
 
 // ==================== Mock fetch ====================
 
@@ -439,7 +439,7 @@ describe("CloudIntentEngine - Ollama Integration", () => {
 
     // Spy on getLLMClient to return our mock
     getLLMClientSpy = jest
-      .spyOn(require("../ai/llm-client"), "getLLMClient")
+      .spyOn(require("../../packages/core/src/ai/llm-client"), "getLLMClient")
       .mockReturnValue(mockClient);
   });
 
@@ -448,7 +448,7 @@ describe("CloudIntentEngine - Ollama Integration", () => {
   });
 
   it("should configure LLMClient with Ollama settings including endpoint", () => {
-    const { CloudIntentEngine } = require("../ai/cloud-intent-engine");
+    const { CloudIntentEngine } = require("../../packages/core/src/ai/cloud-intent-engine");
 
     new CloudIntentEngine({
       llm: {
@@ -509,7 +509,7 @@ describe("CloudIntentEngine - Ollama Integration", () => {
       ],
     });
 
-    const { CloudIntentEngine } = require("../ai/cloud-intent-engine");
+    const { CloudIntentEngine } = require("../../packages/core/src/ai/cloud-intent-engine");
 
     const engine = new CloudIntentEngine({
       llm: {

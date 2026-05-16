@@ -35,7 +35,7 @@ export async function handleServerRoutes(
       const cachedNames = await registryClient.listCachedManifests();
 
       // Use a Map to merge processes and cached manifests by name
-      const serverMap = new Map<string, any>();
+      const serverMap = new Map<string, Record<string, unknown>>();
 
       // 1. Add all active/stored processes
       // For duplicate server names, prefer the running process over stopped ones.
@@ -245,7 +245,7 @@ export async function handleServerRoutes(
       sendJson(res, 200, {
         success: true,
         message: `Successfully imported ${manifests.length} MCP server(s)`,
-        imported: manifests.map((m: any) => ({
+        imported: manifests.map((m) => ({
           name: m.name,
           version: m.version,
           description: m.description,

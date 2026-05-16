@@ -7,7 +7,6 @@
  */
 
 import http from "http";
-import fs from "fs/promises";
 import { getProcessManager } from "../process-manager/manager.js";
 import type { ProcessInfo } from "../process-manager/types.js";
 import { getRegistryClient } from "../registry/client.js";
@@ -16,7 +15,6 @@ import {
   ensureInTorchDir,
   getDaemonPidPath,
   getDaemonLogPath,
-  getLogPath,
 } from "../utils/paths.js";
 import { DaemonConfig } from "./types.js";
 import { healthCheckScheduler } from "../kernel/health-check-scheduler.js";
@@ -39,7 +37,6 @@ import {
   authMiddleware,
   bodyParserMiddleware,
   loggingMiddleware,
-  errorHandlerMiddleware,
   runMiddlewareChain,
   type MiddlewareFn,
 } from "./routes/middleware.js";
@@ -49,7 +46,7 @@ import { sendJson, type RouteContext } from "./routes/index.js";
 
 import { Router } from "./router/router.js";
 
-import { FSLock } from "../utils/fs-lock.js";
+import { getLockRepository } from "../utils/sqlite.js";
 
 export class DaemonServer {
   private server: http.Server;
@@ -208,19 +205,25 @@ export class DaemonServer {
       logger.info("[Daemon] Change it via: intorch secret set daemon_auth_token <your-token>");
     }
 
-    // Use FSLock to prevent multiple instances and handle stale PID files
-    const acquired = await FSLock.acquire(this.config.pidFile, 60000); // 1 min TTL
+    // Use SQLite-backed lock to prevent multiple daemon instances.
+    // The lock is stored in the daemon_locks table and handles stale locks
+    // via TTL expiration + process-liveness check automatically.
+    const lockName = `daemon:pid:${this.config.pidFile}`;
+    const lockRepo = getLockRepository();
+    const acquired = await lockRepo.acquire(lockName, process.pid, 60000);
     if (!acquired) {
-      const existingPid = await fs.readFile(this.config.pidFile, "utf-8").catch(() => "unknown");
-      logger.error(`[Daemon] Failed to start: Another instance is running with PID ${existingPid}`);
+      const holder = await lockRepo.getLockHolder(lockName);
+      logger.error(
+        `[Daemon] Failed to start: Another instance is running (PID ${holder?.pid ?? "unknown"})`,
+      );
       process.exit(1);
     }
 
-    // Update PID file content (FSLock already wrote the PID, but let's be explicit)
-    await fs.writeFile(this.config.pidFile, process.pid.toString());
-
-    // Setup periodic touch to keep lock alive
-    const touchInterval = setInterval(() => FSLock.touch(this.config.pidFile), 30000);
+    // Setup periodic touch to keep lock alive (refreshes TTL every 30s)
+    const touchInterval = setInterval(
+      () => lockRepo.touch(lockName, process.pid, 60000),
+      30000,
+    );
 
     return new Promise<void>((resolve) => {
       this.server.listen(this.config.port, this.config.host, async () => {
@@ -401,7 +404,6 @@ export class DaemonServer {
   ): Promise<void> {
     try {
       logger.info("[Daemon] Ensuring tools are registered for servers...");
-      const { MCPClient: MCPClientImport } = await import("../mcp/client.js");
       const processManager = getProcessManager();
       const toolRegistry = getToolRegistry();
       const registryClient = getRegistryClient();
@@ -560,7 +562,8 @@ export class DaemonServer {
   }
 
   async stop() {
-    await FSLock.release(this.config.pidFile);
+    const lockName = `daemon:pid:${this.config.pidFile}`;
+    await getLockRepository().release(lockName, process.pid);
     return new Promise<void>((r) => this.server.close(() => r()));
   }
 }

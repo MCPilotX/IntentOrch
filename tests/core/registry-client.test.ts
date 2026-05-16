@@ -8,11 +8,11 @@
  * - listCachedManifests
  */
 
-import { RegistryClient } from "../registry/client.js";
+import { RegistryClient } from "../../packages/core/src/registry/client.js";
 
 // Mock dependencies
-jest.mock("../registry/cache.js");
-jest.mock("../utils/paths.js", () => ({
+jest.mock("../../packages/core/src/registry/cache.js");
+jest.mock("../../packages/core/src/utils/paths.js", () => ({
   ensureInTorchDir: jest.fn(),
 }));
 

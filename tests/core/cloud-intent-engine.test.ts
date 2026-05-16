@@ -5,13 +5,13 @@ import {
   CloudIntentEngine,
   PlanStep,
   ToolExecutionPlan,
-} from "../ai/cloud-intent-engine";
-import { LLMClient } from "../ai/llm-client";
-import { ParameterMapper, ValidationLevel } from "../mcp/parameter-mapper";
-import type { Tool } from "../mcp/types";
+} from "../../packages/core/src/ai/cloud-intent-engine";
+import { LLMClient } from "../../packages/core/src/ai/llm-client";
+import { ParameterMapper, ValidationLevel } from "../../packages/core/src/mcp/parameter-mapper";
+import type { Tool } from "../../packages/core/src/mcp/types";
 
 // Mock LLMClient
-jest.mock("../ai/llm-client", () => {
+jest.mock("../../packages/core/src/ai/llm-client", () => {
   const mockChat = jest.fn();
   const mockConfigure = jest.fn();
   const mockIsConfigured = jest.fn().mockReturnValue(true);
@@ -37,8 +37,8 @@ jest.mock("../ai/llm-client", () => {
 });
 
 // Mock ParameterMapper
-jest.mock("../mcp/parameter-mapper", () => {
-  const actual = jest.requireActual("../mcp/parameter-mapper");
+jest.mock("../../packages/core/src/mcp/parameter-mapper", () => {
+  const actual = jest.requireActual("../../packages/core/src/mcp/parameter-mapper");
   return {
     ...actual,
     ParameterMapper: {
@@ -55,7 +55,7 @@ describe("CloudIntentEngine", () => {
   beforeEach(() => {
     // Reset all mocks including implementations
     jest.clearAllMocks();
-    const { getLLMClient } = require("../ai/llm-client");
+    const { getLLMClient } = require("../../packages/core/src/ai/llm-client");
     const client = getLLMClient();
     client.chat.mockReset();
     client.chat.mockResolvedValue(undefined);
@@ -205,7 +205,7 @@ describe("CloudIntentEngine", () => {
         ],
       };
 
-      const { getLLMClient } = require("../ai/llm-client");
+      const { getLLMClient } = require("../../packages/core/src/ai/llm-client");
       const client = getLLMClient();
       client.chat.mockResolvedValue(mockLLMResponse);
 
@@ -229,7 +229,7 @@ describe("CloudIntentEngine", () => {
         model: "gpt-3.5-turbo",
       };
 
-      const { getLLMClient } = require("../ai/llm-client");
+      const { getLLMClient } = require("../../packages/core/src/ai/llm-client");
       const client = getLLMClient();
       client.chat.mockResolvedValue(noToolResponse);
 
@@ -241,7 +241,7 @@ describe("CloudIntentEngine", () => {
     });
 
     it("should handle plan generation errors", async () => {
-      const { getLLMClient } = require("../ai/llm-client");
+      const { getLLMClient } = require("../../packages/core/src/ai/llm-client");
       const client = getLLMClient();
       client.chat.mockRejectedValue(new Error("LLM unavailable"));
 
@@ -281,7 +281,7 @@ describe("CloudIntentEngine", () => {
         ],
       };
 
-      const { getLLMClient } = require("../ai/llm-client");
+      const { getLLMClient } = require("../../packages/core/src/ai/llm-client");
       const client = getLLMClient();
       client.chat.mockResolvedValue(mockLLMResponse);
 
@@ -506,7 +506,7 @@ describe("CloudIntentEngine", () => {
         ],
       };
 
-      const { getLLMClient } = require("../ai/llm-client");
+      const { getLLMClient } = require("../../packages/core/src/ai/llm-client");
       const client = getLLMClient();
       client.chat.mockResolvedValue(mockLLMResponse);
 

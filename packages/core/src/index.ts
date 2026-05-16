@@ -66,7 +66,7 @@ export { ReActLoopEngine, PlanExecutor, SessionOrchestrator, WorkflowOrchestrato
 export type { UnifiedExecutionOptions, UnifiedExecutionResult, WorkflowExecutionResult } from './ai/execute-service.js';
 
 // ==================== MCP Modules ====================
-export { MCPClient, MCPServerToolRegistry } from './mcp/index.js';
+export { MCPClient, MCPServerToolIndex } from './mcp/index.js';
 export type { Tool, ToolCall, ToolMetadata, RegisteredTool, ToolExecutor } from './mcp/index.js';
 
 // ==================== Runtime Modules ====================
@@ -148,7 +148,7 @@ export { getProcessManager } from './process-manager/manager.js';
 export { getRegistryClient } from './registry/client.js';
 export { getWorkflowManager } from './workflow/manager.js';
 export { getToolRegistry } from './tool-registry/registry.js';
-export { getAIConfig } from './utils/config.js';
+export { getAIConfig } from './core/config-service.js';
 export { AutoStartManager } from './utils/auto-start-manager.js';
 export { printError } from './utils/cli-error.js';
 export { PROGRAM_NAME, PROGRAM_DESCRIPTION, PROGRAM_VERSION } from './utils/constants.js';
