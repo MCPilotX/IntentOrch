@@ -30,7 +30,7 @@ export function startCommand(): Command {
           const pid = await processManager.start(server);
           console.log(`✓ Started ${displayName} in local mode (PID: ${pid})`);
           console.log(`⚠️  Note: Use "${PROGRAM_NAME} ps --no-daemon" to view this process`);
-          return;
+          process.exit(0);
         }
 
         // Try daemon mode
@@ -44,7 +44,7 @@ export function startCommand(): Command {
           console.log(`  Status: running`);
           console.log(`⚠️  Daemon not running — started in local mode.`);
           console.log(`   Use "${PROGRAM_NAME} ps --no-daemon" to view this process.`);
-          return;
+          process.exit(0);
         }
 
         const response = await client.startServer(server);
@@ -78,6 +78,8 @@ export function startCommand(): Command {
             console.log(`  Status: ${response.status}`);
           }
         }
+
+        process.exit(0);
       } catch (error) {
         console.error(
           `✗ Failed to start ${getDisplayName(server)}:`,

@@ -7,7 +7,7 @@ import { MCPClient } from "../mcp/client.js";
 import type { TransportConfig } from "../mcp/types.js";
 import { getInTorchDir } from "../utils/paths.js";
 import { getExecutionRecorder } from "./execution-recorder.js";
-import { v4 as uuidv4 } from "uuid";
+import { randomUUID } from "crypto";
 import fs from "fs/promises";
 import fsSync from "fs";
 import path from "path";
@@ -30,7 +30,7 @@ export class WorkflowEngine {
     };
 
     // Start execution recording
-    const executionId = uuidv4();
+    const executionId = randomUUID();
     const recorder = getExecutionRecorder();
     await recorder.startExecution(executionId, workflow, userInputs);
 

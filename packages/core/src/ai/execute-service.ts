@@ -32,6 +32,14 @@ import { createCloudIntentEngine } from "../utils/cloud-intent-engine-factory.js
 import { DatabaseManager } from "../utils/sqlite.js";
 import { IntentOrchError, ErrorCode } from "../core/error-handler.js";
 import { logger } from "../core/logger.js";
+import {
+  TraceContextManager,
+  InterceptorChain,
+} from "../core/index.js";
+import { LoggingTraceInterceptor } from "../core/interceptors/logging-trace.js";
+import { PersistenceTraceInterceptor } from "../core/interceptors/persistence-trace.js";
+import { SemanticRoutingInterceptor } from "../core/interceptors/semantic-routing.js";
+import { SandboxInterceptor } from "../core/interceptors/sandbox.js";
 
 import type { AIConfig } from "../core/types.js";
 import type { ToolExecutionPlan } from "./cloud-intent-engine.js";
@@ -144,11 +152,26 @@ export class ExecuteService {
   private workflowOrchestrator = new WorkflowOrchestrator();
   private daemonDelegator = new DaemonDelegator();
 
+  /** 
+   * Interceptor chain for session execution.
+   * This is the "infrastructure" for auditing, sandbox checks, and self-healing.
+   */
+  private executionChain = new InterceptorChain<
+    { sessionId: string; options: UnifiedExecutionOptions },
+    UnifiedExecutionResult
+  >();
+
   /** Optional callback for streaming step results */
   public onStreamEvent: StreamCallback | null = null;
 
   constructor() {
     logger.debug("[ExecuteService] Creating service instance");
+
+    // Register default infrastructure interceptors
+    this.executionChain.use(new LoggingTraceInterceptor());
+    this.executionChain.use(new PersistenceTraceInterceptor());
+    this.executionChain.use(new SandboxInterceptor());
+    this.executionChain.use(new SemanticRoutingInterceptor());
   }
 
   /**
@@ -224,129 +247,163 @@ export class ExecuteService {
     sessionId: string,
     options: UnifiedExecutionOptions = {},
   ): Promise<UnifiedExecutionResult> {
-    logger.info(`[ExecuteService] Executing session: ${sessionId}`);
+    return TraceContextManager.trace(
+      `executeSession:${sessionId}`,
+      async (span) => {
+        return this.executionChain.execute(
+          { sessionId, options },
+          async (input) => {
+            const { sessionId, options } = input;
+            logger.info(`[ExecuteService] Executing session: ${sessionId}`);
 
-    try {
-      await this.initialize();
+            try {
+              await this.initialize();
+              
+              // Populate provider/model in metadata for interceptors
+              if (this.aiConfig) {
+                span.metadata.provider = this.aiConfig.provider;
+                span.metadata.model = this.aiConfig.model;
+              }
 
-      if (!this.cloudIntentEngine) {
-        throw new IntentOrchError(ErrorCode.ENGINE_NOT_INITIALIZED, "CloudIntentEngine not initialized");
-      }
+              if (!this.cloudIntentEngine) {
+                throw new IntentOrchError(
+                  ErrorCode.ENGINE_NOT_INITIALIZED,
+                  "CloudIntentEngine not initialized",
+                );
+              }
 
-      const session = await this.sessionManager.getSession(sessionId);
-      if (!session) {
-        return { success: false, error: `Session not found: ${sessionId}` };
-      }
+              const session = await this.sessionManager.getSession(sessionId);
+              if (!session) {
+                return {
+                  success: false,
+                  error: `Session not found: ${sessionId}`,
+                };
+              }
 
-      // Clear cache at start of each session
-      this.toolExecutor.clearToolResultCache();
+              // Update span metadata with query info
+              span.metadata.query = session.query;
 
-      // Handle auto-start if requested
-      if (options.autoStart) {
-        await this.toolExecutor.handleAutoStart(session.query, options);
-      }
+              // Clear cache at start of each session
+              this.toolExecutor.clearToolResultCache();
 
-      // Connect to running MCP servers
-      if (!options.simulate) {
-        await this.toolExecutor.connectToRunningServers(options);
-      }
+              // Handle auto-start if requested
+              if (options.autoStart) {
+                await this.toolExecutor.handleAutoStart(session.query, options);
+              }
 
-      // Get available tools
-      const tools = await this.toolExecutor.getAvailableTools();
+              // Connect to running MCP servers
+              if (!options.simulate) {
+                await this.toolExecutor.connectToRunningServers(options);
+              }
 
-      if (tools.length === 0) {
-        return {
-          success: false,
-          error: "No MCP tools available. Please start some MCP servers first.",
-        };
-      }
+              // Get available tools
+              const tools = await this.toolExecutor.getAvailableTools();
 
-      this.cloudIntentEngine.setAvailableTools(tools);
-      const toolExecutorFn = this.toolExecutor.createToolExecutor(tools);
+              if (tools.length === 0) {
+                return {
+                  success: false,
+                  error:
+                    "No MCP tools available. Please start some MCP servers first.",
+                };
+              }
 
-      // ==================== Phase 1: Plan ====================
-      let plan = session.plan;
-      if (!plan && session.state === "planning") {
-        try {
-          plan = await this.cloudIntentEngine.planQuery(session.query);
-        } catch (planError: unknown) {
-          logger.warn(`[ExecuteService] planQuery failed: ${planError instanceof Error ? planError.message : String(planError)}. Falling back to direct ReAct execution.`);
-          plan = {
-            id: `plan_${Date.now()}`,
-            query: session.query,
-            steps: [],
-            confirmed: false,
-            createdAt: new Date(),
-            summary: "Plan generation failed, using direct ReAct execution.",
-          };
-        }
-        await this.sessionManager.storePlan(sessionId, plan);
+              this.cloudIntentEngine.setAvailableTools(tools);
+              const toolExecutorFn = this.toolExecutor.createToolExecutor(tools);
 
-        const updatedSession = await this.sessionManager.getSession(sessionId);
-        if (updatedSession?.state === "reviewing") {
-          return {
-            success: true,
-            result: plan,
-            status: "planning",
-            steps: plan!.steps.map((s): PlanStepRecord => ({
-              id: s.id,
-              toolName: s.toolName,
-              description: s.description,
-              parameters: s.arguments,
-            })),
-          };
-        }
-      }
+              // ==================== Phase 1: Plan ====================
+              let plan = session.plan;
+              if (!plan && session.state === "planning") {
+                try {
+                  plan = await this.cloudIntentEngine.planQuery(session.query);
+                } catch (planError: unknown) {
+                  logger.warn(
+                    `[ExecuteService] planQuery failed: ${planError instanceof Error ? planError.message : String(planError)}. Falling back to direct ReAct execution.`,
+                  );
+                  plan = {
+                    id: `plan_${Date.now()}`,
+                    query: session.query,
+                    steps: [],
+                    confirmed: false,
+                    createdAt: new Date(),
+                    summary:
+                      "Plan generation failed, using direct ReAct execution.",
+                  };
+                }
+                await this.sessionManager.storePlan(sessionId, plan);
 
-      // ==================== Phase 2: Delegate to ReActLoopEngine ====================
-      // The plan + ReAct loop logic (previously ~200 lines duplicated inline) is now
-      // consolidated in ReActLoopEngine.execute(). This single call handles: plan-step
-      // execution, multi-turn LLM function calling, conversation history trimming,
-      // execution timeout protection, and step result recording.
-      // Use streaming execution if a callback is registered
-      let reactResult: UnifiedExecutionResult;
-      if (this.onStreamEvent) {
-        reactResult = await this.reactLoopEngine.executeStream(
-          sessionId,
-          session.query,
-          plan || { steps: [], summary: '' },
-          this.sessionManager,
-          this.cloudIntentEngine,
-          toolExecutorFn,
-          this.onStreamEvent,
-          options,
+                const updatedSession =
+                  await this.sessionManager.getSession(sessionId);
+                if (updatedSession?.state === "reviewing") {
+                  return {
+                    success: true,
+                    result: plan,
+                    status: "planning",
+                    steps: plan!.steps.map(
+                      (s): PlanStepRecord => ({
+                        id: s.id,
+                        toolName: s.toolName,
+                        description: s.description,
+                        parameters: s.arguments,
+                      }),
+                    ),
+                  };
+                }
+              }
+
+              // ==================== Phase 2: Delegate to ReActLoopEngine ====================
+              let reactResult: UnifiedExecutionResult;
+              if (this.onStreamEvent) {
+                reactResult = await this.reactLoopEngine.executeStream(
+                  sessionId,
+                  session.query,
+                  plan || { steps: [], summary: "" },
+                  this.sessionManager,
+                  this.cloudIntentEngine,
+                  toolExecutorFn,
+                  this.onStreamEvent,
+                  options,
+                );
+              } else {
+                reactResult = await this.reactLoopEngine.execute(
+                  sessionId,
+                  session.query,
+                  plan || { steps: [], summary: "" },
+                  this.sessionManager,
+                  this.cloudIntentEngine,
+                  toolExecutorFn,
+                  options,
+                );
+              }
+
+              // Finalize session
+              if (reactResult.success) {
+                await this.sessionManager.completeSession(sessionId);
+              } else {
+                await this.sessionManager.failSession(sessionId);
+              }
+
+              // Daemon mode: keep MCP connections alive across requests.
+              const isDaemonProcess = process.env.INTORCH_DAEMON === "true";
+              if (!options.keepAlive && !isDaemonProcess) {
+                await this.toolExecutor.cleanupConnections();
+              }
+
+              return reactResult;
+            } catch (error: unknown) {
+              logger.error(
+                `[ExecuteService] Failed to execute session: ${error instanceof Error ? error.message : String(error)}`,
+              );
+              return {
+                success: false,
+                error: error instanceof Error ? error.message : String(error),
+              };
+            }
+          },
+          { sessionId, options, span },
         );
-      } else {
-        reactResult = await this.reactLoopEngine.execute(
-          sessionId,
-          session.query,
-          plan || { steps: [], summary: '' },
-          this.sessionManager,
-          this.cloudIntentEngine,
-          toolExecutorFn,
-          options,
-        );
-      }
-
-      // Finalize session
-      if (reactResult.success) {
-        await this.sessionManager.completeSession(sessionId);
-      } else {
-        await this.sessionManager.failSession(sessionId);
-      }
-
-      // Daemon mode: keep MCP connections alive across requests.
-      // Local mode: clean up unless explicitly requested to keep alive.
-      const isDaemonProcess = process.env.INTORCH_DAEMON === "true";
-      if (!options.keepAlive && !isDaemonProcess) {
-        await this.toolExecutor.cleanupConnections();
-      }
-
-      return reactResult;
-    } catch (error: unknown) {
-      logger.error(`[ExecuteService] Failed to execute session: ${(error instanceof Error ? error.message : String(error))}`);
-      return { success: false, error: (error instanceof Error ? error.message : String(error)) };
-    }
+      },
+      { sessionId, options },
+    );
   }
 
   async executeNaturalLanguage(

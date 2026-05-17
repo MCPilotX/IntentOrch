@@ -175,11 +175,24 @@ export class CloudIntentEngine {
   }
 
   /**
-   * Set available tools for the engine
+   * Set available tools for the engine.
+   * Duplicate tool names are deduplicated (first occurrence wins) because
+   * some LLM providers (e.g. DeepSeek) reject requests with duplicate tool names.
    */
   setAvailableTools(tools: ToolInfo[]): void {
-    this.availableTools = tools;
-    logger.debug(`[CloudIntentEngine] Set ${tools.length} available tools`);
+    const seen = new Set<string>();
+    this.availableTools = [];
+    for (const tool of tools) {
+      if (!seen.has(tool.name)) {
+        seen.add(tool.name);
+        this.availableTools.push(tool);
+      }
+    }
+    const dedupedCount = tools.length - this.availableTools.length;
+    if (dedupedCount > 0) {
+      logger.debug(`[CloudIntentEngine] Deduplicated ${dedupedCount} tools with duplicate names`);
+    }
+    logger.debug(`[CloudIntentEngine] Set ${this.availableTools.length} available tools`);
   }
 
   /**

@@ -76,7 +76,8 @@ export class DaemonServer {
     const router = new Router();
     
     // Register all routes
-    router.use("ALL", /^\/api\/status/, handleStatusRoutes);
+    // /api/status and /api/system/* share the same handler
+    router.use("ALL", /^\/api\/(?:status(?:\/|$)|system\/|dashboard(?:\/|$))/, handleStatusRoutes);
     router.use("ALL", /^\/api\/servers/, handleServerRoutes);
     router.use("ALL", /^\/api\/workflows/, handleWorkflowRoutes);
     router.use("ALL", /^\/api\/execute/, handleExecutionRoutes);

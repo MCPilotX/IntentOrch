@@ -6,13 +6,14 @@
  * Handles serialization/deserialization of complex session data.
  */
 
-import { v4 as uuidv4 } from "uuid";
+import { randomUUID } from "crypto";
 import { DatabaseManager } from "../utils/sqlite.js";
 import { logger } from "../core/logger.js";
 import type {
   ExecutionSession,
   SessionFilter,
   SessionListResponse,
+  SessionState,
   ConversationMessage,
   StepResult,
   UserFeedback,
@@ -134,7 +135,7 @@ export class SessionStore {
   async create(session: Partial<ExecutionSession> & { query: string; type: "direct" | "interactive" }): Promise<ExecutionSession> {
     await this.ensureSchema();
 
-    const id = session.id || uuidv4();
+    const id = session.id || randomUUID();
     const now = new Date().toISOString();
 
     const newSession: ExecutionSession = {
@@ -347,19 +348,16 @@ export class SessionStore {
   }
 
   /**
-   * List active (running) sessions.
+   * List active (running) sessions — includes planning, reviewing, confirmed, and executing.
    */
   async listActive(): Promise<ExecutionSession[]> {
-    const result = await this.list({
-      state: "planning",
-      limit: 100,
-    });
-    // Also include executing sessions
-    const executingResult = await this.list({
-      state: "executing",
-      limit: 100,
-    });
-    return [...result.sessions, ...executingResult.sessions];
+    const activeStates: SessionState[] = ["planning", "reviewing", "confirmed", "executing"];
+    const results = await Promise.all(
+      activeStates.map((state) =>
+        this.list({ state, limit: 100 }).then((r) => r.sessions),
+      ),
+    );
+    return results.flat();
   }
 
   /**

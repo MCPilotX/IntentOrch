@@ -145,7 +145,65 @@ CREATE TABLE IF NOT EXISTS daemon_locks (
 );
 
 CREATE INDEX IF NOT EXISTS idx_daemon_locks_expires ON daemon_locks(expires_at);
+
+-- ==================== 9. Trace Spans (Full-Link Tracing) ====================
+CREATE TABLE IF NOT EXISTS trace_spans (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  trace_id        TEXT NOT NULL,
+  span_id         TEXT NOT NULL,
+  parent_span_id  TEXT,
+  name            TEXT NOT NULL,
+  start_time      INTEGER NOT NULL,
+  end_time        INTEGER,
+  status          TEXT NOT NULL DEFAULT 'unset',
+  input           TEXT,
+  output          TEXT,
+  error           TEXT,
+  metadata        TEXT,
+  created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(trace_id, span_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_trace_spans_trace_id ON trace_spans(trace_id);
+CREATE INDEX IF NOT EXISTS idx_trace_spans_parent_id ON trace_spans(parent_span_id);
+CREATE INDEX IF NOT EXISTS idx_trace_spans_start_time ON trace_spans(start_time);
+
+-- ==================== 10. Semantic Routing Governance ====================
+CREATE TABLE IF NOT EXISTS routing_evaluations (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  trace_id        TEXT NOT NULL,
+  query           TEXT NOT NULL,
+  provider        TEXT,
+  model           TEXT,
+  planned_tools   TEXT, -- JSON array of tool names
+  executed_tools  TEXT, -- JSON array of tool names
+  success_rate    REAL, -- Ratio of successful steps
+  is_accurate     INTEGER DEFAULT 0, -- 1 if planned == executed correctly
+  error_details   TEXT,
+  created_at      TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_routing_eval_trace_id ON routing_evaluations(trace_id);
 `;
+
+// ==================== TTL / Data Retention Configuration ====================
+
+/**
+ * Default TTL for trace spans: 7 days.
+ * After this period, old spans will be purged by the cleanup routine.
+ */
+export const TRACE_SPANS_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+
+/**
+ * Default TTL for routing evaluations: 30 days.
+ * Governance data is kept longer since it is used for trend analysis.
+ */
+export const ROUTING_EVALUATIONS_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+
+/**
+ * Interval at which the cleanup routine runs: 1 hour.
+ */
+export const CLEANUP_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
 
 // ==================== Database Manager ====================
 
@@ -154,6 +212,7 @@ export class DatabaseManager {
   private db: Awaited<ReturnType<typeof createClient>> | null = null;
   private dbPath: string;
   private _initialized = false;
+  private cleanupTimer: ReturnType<typeof setInterval> | null = null;
 
   private constructor() {
     this.dbPath = path.join(getInTorchDir(), "intorch.db");
@@ -208,6 +267,56 @@ export class DatabaseManager {
 
     this._initialized = true;
     logger.info("[SQLite] Database initialized successfully");
+
+    // Start periodic cleanup of old data
+    this.startCleanupRoutine();
+  }
+
+  /**
+   * Start the periodic cleanup routine for trace spans and routing evaluations.
+   */
+  private startCleanupRoutine(): void {
+    if (this.cleanupTimer) return;
+
+    logger.info("[SQLite] Starting periodic data cleanup routine");
+
+    // Run an initial cleanup after a short delay to avoid slowing startup
+    setTimeout(() => this.runCleanup(), 10_000);
+
+    this.cleanupTimer = setInterval(() => {
+      this.runCleanup().catch((err) =>
+        logger.warn(`[SQLite] Cleanup routine failed: ${err instanceof Error ? err.message : String(err)}`),
+      );
+    }, CLEANUP_INTERVAL_MS);
+
+    // Allow the Node.js process to exit even if the timer is still active
+    if (this.cleanupTimer.unref) {
+      this.cleanupTimer.unref();
+    }
+  }
+
+  /**
+   * Execute a single cleanup pass: purge old trace spans and routing evaluations.
+   * Exported as a static method so it can also be invoked manually.
+   */
+  static async runCleanup(): Promise<{ traceSpansRemoved: number; evaluationsRemoved: number }> {
+    const inst = DatabaseManager.getInstance();
+    if (!inst._initialized) {
+      return { traceSpansRemoved: 0, evaluationsRemoved: 0 };
+    }
+
+    const traceRemoved = await getTraceRepository().cleanupOldSpans(TRACE_SPANS_TTL_MS);
+    const evalRemoved = await getRoutingEvaluationRepository().cleanupOldEvaluations(ROUTING_EVALUATIONS_TTL_MS);
+
+    if (traceRemoved > 0 || evalRemoved > 0) {
+      logger.info(`[SQLite] Cleanup complete: ${traceRemoved} trace spans, ${evalRemoved} evaluations removed`);
+    }
+
+    return { traceSpansRemoved: traceRemoved, evaluationsRemoved: evalRemoved };
+  }
+
+  private async runCleanup(): Promise<void> {
+    await DatabaseManager.runCleanup();
   }
 
   /**
@@ -269,6 +378,12 @@ export class DatabaseManager {
    * Close the database connection
    */
   close(): void {
+    // Stop the cleanup timer
+    if (this.cleanupTimer) {
+      clearInterval(this.cleanupTimer);
+      this.cleanupTimer = null;
+    }
+
     if (this.db) {
       this.db.close();
       this.db = null;
@@ -435,6 +550,26 @@ export interface ILockRepository {
    * Read the PID currently holding the lock, or null if not held.
    */
   getLockHolder(lockName: string): Promise<{ pid: number; expiresAt: string } | null>;
+}
+
+/**
+ * Trace repository for persisting spans.
+ */
+export interface ITraceRepository {
+  create(span: Record<string, unknown>): Promise<void>;
+  update(traceId: string, spanId: string, updates: Record<string, unknown>): Promise<void>;
+  listByTraceId(traceId: string): Promise<Record<string, unknown>[]>;
+  deleteByTraceId(traceId: string): Promise<void>;
+  cleanupOldSpans(maxAgeMs: number): Promise<number>;
+}
+
+/**
+ * Routing Evaluation repository for governance.
+ */
+export interface IRoutingEvaluationRepository {
+  create(evalData: Record<string, unknown>): Promise<void>;
+  listRecent(limit: number): Promise<Record<string, unknown>[]>;
+  cleanupOldEvaluations(maxAgeMs: number): Promise<number>;
 }
 
 // ==================== SQLite Repository Implementations ====================
@@ -893,6 +1028,116 @@ class SqliteLockRepository implements ILockRepository {
   }
 }
 
+class SqliteTraceRepository implements ITraceRepository {
+  async create(span: Record<string, unknown>): Promise<void> {
+    await DatabaseManager.getInstance().execute(
+      `INSERT INTO trace_spans
+       (trace_id, span_id, parent_span_id, name, start_time, status, input, metadata)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        span.traceId,
+        span.spanId,
+        span.parentSpanId ?? null,
+        span.name,
+        span.startTime,
+        span.status ?? "unset",
+        span.input ? JSON.stringify(span.input) : null,
+        span.metadata ? JSON.stringify(span.metadata) : null,
+      ],
+    );
+  }
+
+  async update(
+    traceId: string,
+    spanId: string,
+    updates: Record<string, unknown>,
+  ): Promise<void> {
+    const setClauses: string[] = [];
+    const params: unknown[] = [];
+
+    for (const [key, value] of Object.entries(updates)) {
+      // Skip undefined values — SQLite driver cannot bind undefined
+      if (value === undefined) continue;
+      // Map JS camelCase to SQL snake_case
+      const sqlKey = key.replace(/[A-Z]/g, (m) => `_${m.toLowerCase()}`);
+      setClauses.push(`${sqlKey} = ?`);
+      params.push(typeof value === "object" ? JSON.stringify(value) : value);
+    }
+
+    if (setClauses.length > 0) {
+      params.push(traceId, spanId);
+      await DatabaseManager.getInstance().execute(
+        `UPDATE trace_spans SET ${setClauses.join(", ")} WHERE trace_id = ? AND span_id = ?`,
+        params,
+      );
+    }
+  }
+
+  async listByTraceId(traceId: string): Promise<Record<string, unknown>[]> {
+    return DatabaseManager.getInstance().query(
+      "SELECT * FROM trace_spans WHERE trace_id = ? ORDER BY start_time ASC",
+      [traceId],
+    );
+  }
+
+  async deleteByTraceId(traceId: string): Promise<void> {
+    await DatabaseManager.getInstance().execute(
+      "DELETE FROM trace_spans WHERE trace_id = ?",
+      [traceId],
+    );
+  }
+
+  async cleanupOldSpans(maxAgeMs: number): Promise<number> {
+    const cutoff = Date.now() - maxAgeMs;
+    const db = DatabaseManager.getInstance();
+    const result = await db.getClient().execute({
+      sql: "DELETE FROM trace_spans WHERE start_time < ?",
+      args: [cutoff],
+    });
+    return Number(result.rowsAffected);
+  }
+}
+
+class SqliteRoutingEvaluationRepository
+  implements IRoutingEvaluationRepository
+{
+  async create(evalData: Record<string, unknown>): Promise<void> {
+    await DatabaseManager.getInstance().execute(
+      `INSERT INTO routing_evaluations
+       (trace_id, query, provider, model, planned_tools, executed_tools, success_rate, is_accurate, error_details)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        evalData.traceId,
+        evalData.query,
+        evalData.provider ?? null,
+        evalData.model ?? null,
+        evalData.plannedTools ? JSON.stringify(evalData.plannedTools) : null,
+        evalData.executedTools ? JSON.stringify(evalData.executedTools) : null,
+        evalData.successRate ?? 0,
+        evalData.isAccurate ? 1 : 0,
+        evalData.errorDetails ?? null,
+      ],
+    );
+  }
+
+  async listRecent(limit: number = 50): Promise<Record<string, unknown>[]> {
+    return DatabaseManager.getInstance().query(
+      "SELECT * FROM routing_evaluations ORDER BY created_at DESC LIMIT ?",
+      [limit],
+    );
+  }
+
+  async cleanupOldEvaluations(maxAgeMs: number): Promise<number> {
+    const cutoff = Date.now() - maxAgeMs;
+    const db = DatabaseManager.getInstance();
+    const result = await db.getClient().execute({
+      sql: "DELETE FROM routing_evaluations WHERE created_at < datetime(? / 1000, 'unixepoch')",
+      args: [cutoff],
+    });
+    return Number(result.rowsAffected);
+  }
+}
+
 // ==================== Factory Functions ====================
 
 let configRepo: IConfigRepository | null = null;
@@ -902,6 +1147,8 @@ let toolRepo: IToolRepository | null = null;
 let manifestCacheRepo: IManifestCacheRepository | null = null;
 let workflowRepo: IWorkflowRepository | null = null;
 let workflowExecutionRepo: IWorkflowExecutionRepository | null = null;
+let traceRepo: ITraceRepository | null = null;
+let routingEvalRepo: IRoutingEvaluationRepository | null = null;
 
 export function getConfigRepository(): IConfigRepository {
   if (!configRepo) configRepo = new SqliteConfigRepository();
@@ -938,6 +1185,16 @@ export function getWorkflowExecutionRepository(): IWorkflowExecutionRepository {
   return workflowExecutionRepo;
 }
 
+export function getTraceRepository(): ITraceRepository {
+  if (!traceRepo) traceRepo = new SqliteTraceRepository();
+  return traceRepo;
+}
+
+export function getRoutingEvaluationRepository(): IRoutingEvaluationRepository {
+  if (!routingEvalRepo)
+    routingEvalRepo = new SqliteRoutingEvaluationRepository();
+  return routingEvalRepo;
+}
 
 let lockRepo: ILockRepository | null = null;
 

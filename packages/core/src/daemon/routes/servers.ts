@@ -34,8 +34,17 @@ export async function handleServerRoutes(
       const processes = await processManager.list();
       const cachedNames = await registryClient.listCachedManifests();
 
-      // Use a Map to merge processes and cached manifests by name
-      const serverMap = new Map<string, Record<string, unknown>>();
+      // Use a Map to merge processes and cached manifests by name.
+      // Use a more specific partial shape so we can compare status/startTime without casts.
+      interface ServerEntry {
+        serverName?: string;
+        name?: string;
+        status?: string;
+        startTime?: number;
+        source?: string;
+        [key: string]: unknown;
+      }
+      const serverMap = new Map<string, ServerEntry>();
 
       // 1. Add all active/stored processes
       // For duplicate server names, prefer the running process over stopped ones.
@@ -54,7 +63,7 @@ export async function handleServerRoutes(
           if (existingRunning && !currentRunning) {
             continue; // Keep the running entry
           }
-          if (existingRunning && currentRunning && existing.startTime >= proc.startTime) {
+          if (existingRunning && currentRunning && (existing.startTime ?? 0) >= (proc.startTime ?? 0)) {
             continue; // Keep the more recent running entry
           }
         }

@@ -13,7 +13,7 @@
  * with a unified, persistent, and testable state machine.
  */
 
-import { v4 as uuidv4 } from "uuid";
+import { randomUUID } from "crypto";
 import { logger } from "../core/logger.js";
 import { SessionStore, getSessionStore } from "./session-store.js";
 import type {
@@ -268,7 +268,7 @@ export class SessionManager {
   }
 
   /**
-   * Get active sessions (planning or executing).
+   * Get active sessions (planning, reviewing, confirmed, or executing).
    */
   async getActiveSessions(): Promise<ExecutionSession[]> {
     return this.store.listActive();

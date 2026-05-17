@@ -1,7 +1,7 @@
 import { logger } from "../core/logger.js";
 import fs from "fs/promises";
 import path from "path";
-import { v4 as uuidv4 } from "uuid";
+import { randomUUID } from "crypto";
 import { Workflow } from "./types.js";
 import { getInTorchDir, ensureInTorchDir } from "../utils/paths.js";
 
@@ -39,12 +39,12 @@ export class WorkflowManager {
         filePath = existingFilePath;
       } catch {
         // File doesn't exist, treat as new workflow
-        workflowId = uuidv4();
+        workflowId = randomUUID();
         filePath = path.join(this.workflowsDir, `${workflowId}.json`);
       }
     } else {
       // New workflow: generate UUID
-      workflowId = uuidv4();
+      workflowId = randomUUID();
       filePath = path.join(this.workflowsDir, `${workflowId}.json`);
     }
 

@@ -50,3 +50,21 @@ export {
 
 // Export logger
 export { logger } from "./logger.js";
+
+// Export trace context
+export {
+  TraceContextManager,
+  SpanStatus,
+} from "./trace-context.js";
+export type {
+  TraceSpan,
+  TraceContextData,
+  TraceMetadata,
+} from "./trace-context.js";
+
+// Export interceptors
+export { InterceptorChain } from "./interceptor.js";
+export type {
+  Interceptor,
+  InterceptorContext,
+} from "./interceptor.js";
