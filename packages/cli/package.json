@@ -41,7 +41,7 @@
   },
   "homepage": "https://github.com/mcpilotx/intentorch#readme",
   "dependencies": {
-    "@intentorch/core": "^0.8.0",
+    "@intentorch/core": "workspace:^",
     "cli-table3": "^0.6.5",
     "commander": "^14.0.3",
     "enquirer": "^2.4.1"

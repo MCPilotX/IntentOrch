@@ -74,14 +74,14 @@ export class PythonAdapter implements RuntimeAdapter {
       }
 
       logger.info(`Python setup completed for ${config.name}`);
-    } catch (error: any) {
+    } catch (error: unknown) {
       logger.error(
-        `Failed to setup Python environment for ${config.name}: ${error.message}`,
+        `Failed to setup Python environment for ${config.name}: ${(error instanceof Error ? error.message : String(error))}`,
         {
-          stack: error.stack,
+          stack: error instanceof Error ? error.stack : undefined,
         },
       );
-      throw new Error(`Python environment setup failed: ${error.message}`);
+      throw new Error(`Python environment setup failed: ${(error instanceof Error ? error.message : String(error))}`);
     }
   }
 
@@ -111,9 +111,9 @@ export class PythonAdapter implements RuntimeAdapter {
             if (stderr && stderr.includes("WARNING")) {
               logger.warn(`Installation warnings for ${dep}: ${stderr}`);
             }
-          } catch (depError: any) {
+          } catch (depError: unknown) {
             logger.error(
-              `Failed to install dependency ${dep}: ${depError.message}`,
+              `Failed to install dependency ${dep}: ${depError instanceof Error ? depError.message : String(depError)}`,
             );
             // Continue installing other dependencies
           }
@@ -148,11 +148,11 @@ export class PythonAdapter implements RuntimeAdapter {
           logger.warn(`Requirements file not found: ${requirementsPath}`);
         }
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       logger.error(
-        `Failed to install dependencies for ${config.name}: ${error.message}`,
+        `Failed to install dependencies for ${config.name}: ${(error instanceof Error ? error.message : String(error))}`,
       );
-      throw new Error(`Dependency installation failed: ${error.message}`);
+      throw new Error(`Dependency installation failed: ${(error instanceof Error ? error.message : String(error))}`);
     }
   }
 }

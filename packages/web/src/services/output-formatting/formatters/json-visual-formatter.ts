@@ -89,18 +89,20 @@ export class JSONVisualFormatter extends BaseFormatter {
       parsedData = data;
     }
     
-    // Create visual rendering metadata
-    const visualRendering: VisualRenderingMetadata = {
-      renderingType: RenderingType.JSON_VISUAL,
-      rawData: parsedData,
-      options: this.getVisualRenderingOptions(context),
-      componentName: 'JsonRenderer'
-    };
-    
-    // Return a placeholder text with visual rendering metadata
-    // The actual rendering will be handled by the UI component
+    // Create visual rendering metadata for summary
     const summary = this.createJsonSummary(parsedData);
-    return `${summary}\n\n*(JSON data available for visual rendering)*`;
+    
+    // Encode data for the visual renderer marker
+    // We use btoa for base64 encoding as expected by MessageContentRenderer
+    let encodedData = '';
+    try {
+      encodedData = btoa(JSON.stringify(parsedData));
+    } catch (e) {
+      console.error('Failed to encode JSON for visual rendering:', e);
+      return `${summary}\n\n*(Error: Could not encode data for visual rendering)*`;
+    }
+
+    return `${summary}\n\n<!-- JSON_RENDERER_START:${encodedData} -->\n<!-- JSON_RENDERER_END -->`;
   }
 
   /**

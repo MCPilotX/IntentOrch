@@ -1,5 +1,6 @@
 import { logger } from "../core/logger.js";
 import fs from "fs";
+import { TransportConfig, TransportType } from "./types.js";
 /**
  * MCP (Model Context Protocol) Module Entry
  * Provides complete MCP protocol support, focusing on MCP tool management
@@ -11,11 +12,17 @@ export * from "./types.js";
 // Export client
 export * from "./client.js";
 
-// Export tool registry
-export * from "./tool-registry.js";
+// Export MCP server tool registry
+export { MCPServerToolIndex } from "./tool-registry.js";
+export type { RegisteredTool, ToolExecutor } from "./tool-registry.js";
 
 // Export tool metadata standardization
 export * from "./tool-metadata.js";
+
+// Export transports
+export * from "./stdio-transport.js";
+export * from "./http-transport.js";
+export * from "./sse-transport.js";
 
 // ==================== Utility Functions ====================
 
@@ -23,7 +30,7 @@ export * from "./tool-metadata.js";
  * Create MCP client configuration
  */
 export function createMCPConfig(
-  transportType: "stdio" | "http" | "sse",
+  transportType: TransportType,
   options: {
     command?: string;
     args?: string[];
@@ -146,10 +153,10 @@ export const TOOL_PATTERNS = {
 export async function discoverLocalMCPServers(): Promise<
   Array<{
     name: string;
-    transport: any;
+    transport: TransportConfig;
   }>
 > {
-  const servers: Array<{ name: string; transport: any }> = [];
+  const servers: Array<{ name: string; transport: TransportConfig }> = [];
 
   // 1. Discover from MCP configuration file
   try {
@@ -218,9 +225,9 @@ export async function discoverLocalMCPServers(): Promise<
  */
 export function loadMCPServersFromEnv(): Array<{
   name: string;
-  transport: any;
+  transport: TransportConfig;
 }> {
-  const servers: Array<{ name: string; transport: any }> = [];
+  const servers: Array<{ name: string; transport: TransportConfig }> = [];
 
   // Read MCP server configurations from environment variables
   // Format: MCP_SERVER_<NAME>_TYPE=stdio|http|sse
@@ -232,9 +239,9 @@ export function loadMCPServersFromEnv(): Array<{
   Object.keys(process.env).forEach((key) => {
     if (key.startsWith(envPrefix) && key.endsWith("_TYPE")) {
       const serverName = key.slice(envPrefix.length, -5).toLowerCase();
-      const transportType = process.env[key] as "stdio" | "http" | "sse";
+      const transportType = process.env[key] as TransportType;
 
-      const transport: any = { type: transportType };
+      const transport: TransportConfig = { type: transportType };
 
       if (transportType === "stdio") {
         const commandKey = `${envPrefix}${serverName.toUpperCase()}_COMMAND`;

@@ -7,7 +7,7 @@ import { Tool, ToolCall, ToolResult } from "./types.js";
 import { ParameterMapper } from "./parameter-mapper.js";
 
 export interface ToolExecutor {
-  (args: Record<string, any>): Promise<ToolResult>;
+  (args: Record<string, unknown>): Promise<ToolResult>;
 }
 
 export interface RegisteredTool {
@@ -23,10 +23,13 @@ export interface RegisteredTool {
 }
 
 /**
- * MCP Tool Registry
- * Focuses on managing tools discovered from MCP servers
+ * MCP Server Tool Index
+ * Focuses on managing tools discovered from and registered with MCP servers.
+ * Each tool has an associated executor function for direct invocation.
+ * This is distinct from the persistent ToolRegistry in tool-registry/registry.ts
+ * which manages tool metadata with SQLite persistence.
  */
-export class ToolRegistry {
+export class MCPServerToolIndex {
   private tools: Map<string, RegisteredTool> = new Map();
   private serverTools: Map<string, Set<string>> = new Map(); // Server ID -> Tool name set
 
@@ -329,7 +332,7 @@ export class ToolRegistry {
 
   // ==================== Tool Validation ====================
 
-  private validateToolArguments(tool: Tool, args: Record<string, any>): void {
+  private validateToolArguments(tool: Tool, args: Record<string, unknown>): void {
     const schema = tool.inputSchema;
     const toolName = tool.name;
 

@@ -6,8 +6,8 @@ import {
 } from "@intentorch/core";
 
 function handleDaemonError(daemonError: unknown): never {
-  console.error("❌ Daemon mode failed:", (daemonError as Error).message);
-  console.error("\n💡 Please start the daemon first:");
+  console.error("Daemon mode failed:", (daemonError as Error).message);
+  console.error("\nPlease start the daemon first:");
   console.error(`   ${PROGRAM_NAME} daemon start`);
   console.error("\nOr use --no-daemon flag to force local mode.");
   process.exit(1);
@@ -48,10 +48,10 @@ export function stopCommand(): Command {
             );
             if (stoppedProcesses.length > 0) {
               console.error(
-                `✗ MCP Server "${serverName}" is not running. (${stoppedProcesses.length} stopped instance(s) found)`,
+                `MCP Server "${serverName}" is not running. (${stoppedProcesses.length} stopped instance(s) found)`,
               );
             } else {
-              console.error(`✗ MCP Server "${serverName}" is not running.`);
+              console.error(`MCP Server "${serverName}" is not running.`);
             }
             process.exit(1);
           }
@@ -59,15 +59,21 @@ export function stopCommand(): Command {
           if (matchingServers.length > 1) {
             // Multiple instances found - stop all of them
             console.log(
-              `ℹ️  Found ${matchingServers.length} running instances of "${serverName}"`,
+              `Found ${matchingServers.length} running instances of "${serverName}"`,
             );
             for (const server of matchingServers) {
               if (!useDaemon) {
                 const pm = getProcessManager();
                 await pm.stop(server.pid);
-                console.log(
-                  `✓ Process ${server.pid} (${serverName}) stopped in local mode`,
-                );
+                if (server.external) {
+                  console.log(
+                    `Deregistered external service ${server.name} (${server.pid})`,
+                  );
+                } else {
+                  console.log(
+                    `Process ${server.pid} (${serverName}) stopped in local mode`,
+                  );
+                }
               } else {
                 const client = new DaemonClient();
                 const isDaemonRunning = await client.isDaemonRunning();
@@ -75,7 +81,7 @@ export function stopCommand(): Command {
                   handleDaemonError(new Error("Daemon is not running"));
                 }
                 const response = await client.stopServer(server.pid);
-                console.log(`✓ ${response.message} (${serverName})`);
+                console.log(`${response.message} (${serverName})`);
               }
             }
             return;
@@ -92,16 +98,25 @@ export function stopCommand(): Command {
           const processInfo = await processManager.get(pid);
           if (processInfo && processInfo.status === "stopped") {
             console.log(
-              `ℹ️  Process ${pid} ${serverName ? `(${serverName}) ` : ""}is already stopped.`,
+              `Process ${pid} ${serverName ? `(${serverName}) ` : ""}is already stopped.`,
+            );
+            return;
+          }
+
+          // Check if this is an external service
+          if (processInfo?.external) {
+            await processManager.stop(pid);
+            console.log(
+              `Deregistered external service ${processInfo.name} (${pid})`,
             );
             return;
           }
 
           await processManager.stop(pid);
           console.log(
-            `✓ Process ${pid} ${serverName ? `(${serverName}) ` : ""}stopped in local mode`,
+            `Process ${pid} ${serverName ? `(${serverName}) ` : ""}stopped in local mode`,
           );
-          console.log(`⚠️  Note: Process was not managed by daemon`);
+          console.log(`Note: Process was not managed by daemon`);
           return;
         }
 
@@ -115,9 +130,9 @@ export function stopCommand(): Command {
         // Check if process is already stopped before attempting to stop via daemon
         try {
           const serverStatus = await client.getServerStatus(pid);
-          if (serverStatus && serverStatus.status === "stopped") {
+          if (serverStatus && (serverStatus as Record<string, unknown>).status === "stopped") {
             console.log(
-              `ℹ️  Process ${pid} ${serverName ? `(${serverName}) ` : ""}is already stopped.`,
+              `Process ${pid} ${serverName ? `(${serverName}) ` : ""}is already stopped.`,
             );
             return;
           }
@@ -127,11 +142,11 @@ export function stopCommand(): Command {
 
         const response = await client.stopServer(pid);
         console.log(
-          `✓ ${response.message}${serverName ? ` (${serverName})` : ""}`,
+          `${response.message}${serverName ? ` (${serverName})` : ""}`,
         );
       } catch (error) {
         console.error(
-          `✗ Failed to stop "${target}":`,
+          `Failed to stop "${target}":`,
           (error as Error).message,
         );
         process.exit(1);

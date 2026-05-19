@@ -78,9 +78,9 @@ export class AutoStartManager {
           try {
             await this.registryClient.fetchManifest(serverName);
             logger.info(`   ✓ Manifest pulled successfully`);
-          } catch (pullError: any) {
-            logger.error(`   ❌ Failed to pull manifest: ${pullError.message}`);
-            result.error = `Failed to pull manifest: ${pullError.message}`;
+          } catch (pullError: unknown) {
+            logger.error(`   ❌ Failed to pull manifest: ${pullError instanceof Error ? pullError.message : String(pullError)}`);
+            result.error = `Failed to pull manifest: ${pullError instanceof Error ? pullError.message : String(pullError)}`;
             results.push(result);
             continue;
           }
@@ -99,13 +99,13 @@ export class AutoStartManager {
 
           // Wait a moment for server to initialize
           await new Promise((resolve) => setTimeout(resolve, 2000));
-        } catch (startError: any) {
-          logger.error(`   ❌ Failed to start server: ${startError.message}`);
-          result.error = `Failed to start: ${startError.message}`;
+        } catch (startError: unknown) {
+          logger.error(`   ❌ Failed to start server: ${startError instanceof Error ? startError.message : String(startError)}`);
+          result.error = `Failed to start: ${startError instanceof Error ? startError.message : String(startError)}`;
         }
-      } catch (error: any) {
-        logger.error(`❌ Error processing ${displayName}: ${error.message}`);
-        result.error = error.message;
+      } catch (error: unknown) {
+        logger.error(`❌ Error processing ${displayName}: ${(error instanceof Error ? error.message : String(error))}`);
+        result.error = (error instanceof Error ? error.message : String(error));
       }
 
       results.push(result);

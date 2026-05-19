@@ -12,7 +12,7 @@ export interface AdapterOptions {
 export class PythonAdapter {
   private process: ChildProcess | null = null;
   private requestId = 0;
-  private pendingRequests = new Map<number, (res: any) => void>();
+  private pendingRequests = new Map<number, (res: unknown) => void>();
 
   constructor(private options: AdapterOptions) {}
 
@@ -55,7 +55,7 @@ export class PythonAdapter {
     });
   }
 
-  async call(method: string, params: any = {}): Promise<any> {
+  async call(method: string, params: Record<string, unknown> = {}): Promise<unknown> {
     if (!this.process) {
       throw new Error(`Service ${this.options.name} is not running.`);
     }

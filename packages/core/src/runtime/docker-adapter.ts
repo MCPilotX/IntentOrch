@@ -77,9 +77,9 @@ export class DockerAdapter implements RuntimeAdapter {
         logger.info(`[Docker] Pulling image: ${config.image}`);
         try {
           execSync(`docker pull ${config.image}`, { stdio: "inherit" });
-        } catch (pullError: any) {
+        } catch (pullError) {
           throw new Error(
-            `Failed to pull Docker image ${config.image}: ${pullError.message}`,
+            `Failed to pull Docker image ${config.image}: ${pullError instanceof Error ? pullError.message : String(pullError)}`,
           );
         }
       }
@@ -100,9 +100,9 @@ export class DockerAdapter implements RuntimeAdapter {
               cwd: config.path || ".",
             },
           );
-        } catch (buildError: any) {
+        } catch (buildError) {
           throw new Error(
-            `Failed to build Docker image: ${buildError.message}`,
+            `Failed to build Docker image: ${buildError instanceof Error ? buildError.message : String(buildError)}`,
           );
         }
       } else {
@@ -200,8 +200,8 @@ export class DockerAdapter implements RuntimeAdapter {
       return execSync(`docker logs --tail ${tail} ${this.containerName}`, {
         encoding: "utf-8",
       });
-    } catch (error: any) {
-      return `Failed to get logs: ${error.message}`;
+    } catch (error) {
+      return `Failed to get logs: ${error instanceof Error ? error.message : String(error)}`;
     }
   }
 }

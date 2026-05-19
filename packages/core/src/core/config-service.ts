@@ -32,9 +32,22 @@ import {
   AIConfig,
   AIProvider,
   DetectionResult,
-  DetectionEvidence,
 } from "./types.js";
 import { logger } from "./logger.js";
+import { DatabaseManager, getConfigRepository } from "../utils/sqlite.js";
+
+// Helper to safely extract error code from unknown errors
+function getErrorCode(error: unknown): string | undefined {
+  if (error && typeof error === "object" && "code" in error) {
+    return (error as { code: string }).code;
+  }
+  return undefined;
+}
+
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  return String(error);
+}
 
 // ==================== Type Definitions ====================
 
@@ -80,9 +93,11 @@ export class ConfigService {
   private runtimeProfilesCache = new Map<string, RuntimeSpecificConfig>();
   private servicesListCache: string[] | null = null;
 
-  // Lock mechanism
-  private lockPath: string;
-  private isLocked = false;
+  // Key prefixes for SQLite
+  private static readonly KEY_GLOBAL = "global:app_config";
+  private static readonly PREFIX_SERVICE = "service:";
+  private static readonly PREFIX_DOCKER_HOST = "docker-host:";
+  private static readonly PREFIX_RUNTIME_PROFILE = "runtime-profile:";
 
   private constructor() {
     this.configDir = INTORCH_HOME;
@@ -94,7 +109,6 @@ export class ConfigService {
       "runtime-profiles",
     );
     this.configPath = CONFIG_PATH;
-    this.lockPath = this.configPath + ".lock";
   }
 
   static getInstance(): ConfigService {
@@ -108,7 +122,8 @@ export class ConfigService {
 
   async initialize(): Promise<void> {
     await this.ensureDirectories();
-    await this.ensureDefaultConfig();
+    await DatabaseManager.getInstance().initialize();
+    await this.migrateLegacyConfigs();
   }
 
   private async ensureDirectories(): Promise<void> {
@@ -125,21 +140,105 @@ export class ConfigService {
     for (const dir of dirs) {
       try {
         await fs.mkdir(dir, { recursive: true });
-      } catch (error: any) {
-        if (error.code !== "EEXIST") {
-          logger.error(`Failed to create directory ${dir}: ${error.message}`);
+      } catch (error: unknown) {
+        const err = error as NodeJS.ErrnoException;
+        if (err.code !== "EEXIST") {
+          logger.error(`Failed to create directory ${dir}: ${err.message}`);
           throw error;
         }
       }
     }
   }
 
-  private async ensureDefaultConfig(): Promise<void> {
+  /**
+   * Migrate legacy JSON configuration files to SQLite
+   */
+  private async migrateLegacyConfigs(): Promise<void> {
+    const repo = getConfigRepository();
+
+    // 1. Migrate global app config
+    const globalExists = await repo.get(ConfigService.KEY_GLOBAL);
+    if (!globalExists) {
+      try {
+        if (fsSync.existsSync(this.configPath)) {
+          const data = await fs.readFile(this.configPath, "utf-8");
+          const config = JSON.parse(data);
+          await repo.set(ConfigService.KEY_GLOBAL, JSON.stringify(config));
+          await fs.rename(this.configPath, this.configPath + ".bak");
+          logger.info("[ConfigService] Migrated global config to SQLite");
+        }
+      } catch (e) {
+        logger.warn(`[ConfigService] Global config migration failed: ${getErrorMessage(e)}`);
+      }
+    }
+
+    // 2. Migrate service configs
     try {
-      await fs.access(this.configPath);
-    } catch {
-      // Config file doesn't exist, create with defaults
-      await this.saveAppConfig(this.getDefaultAppConfig());
+      if (fsSync.existsSync(this.servicesDir)) {
+        const files = await fs.readdir(this.servicesDir);
+        for (const file of files) {
+          if (file.endsWith(".json")) {
+            const serviceName = file.replace(".json", "");
+            const sqliteKey = ConfigService.PREFIX_SERVICE + serviceName;
+            const exists = await repo.get(sqliteKey);
+            if (!exists) {
+              const filePath = path.join(this.servicesDir, file);
+              const data = await fs.readFile(filePath, "utf-8");
+              await repo.set(sqliteKey, data);
+              await fs.rename(filePath, filePath + ".bak");
+              logger.info(`[ConfigService] Migrated service config ${serviceName} to SQLite`);
+            }
+          }
+        }
+      }
+    } catch (e) {
+      logger.warn(`[ConfigService] Service config migration failed: ${getErrorMessage(e)}`);
+    }
+
+    // 3. Migrate Docker host configs
+    try {
+      if (fsSync.existsSync(this.dockerHostsDir)) {
+        const files = await fs.readdir(this.dockerHostsDir);
+        for (const file of files) {
+          if (file.endsWith(".json")) {
+            const hostName = file.replace(".json", "");
+            const sqliteKey = ConfigService.PREFIX_DOCKER_HOST + hostName;
+            const exists = await repo.get(sqliteKey);
+            if (!exists) {
+              const filePath = path.join(this.dockerHostsDir, file);
+              const data = await fs.readFile(filePath, "utf-8");
+              await repo.set(sqliteKey, data);
+              await fs.rename(filePath, filePath + ".bak");
+              logger.info(`[ConfigService] Migrated Docker host config ${hostName} to SQLite`);
+            }
+          }
+        }
+      }
+    } catch (e) {
+      logger.warn(`[ConfigService] Docker host config migration failed: ${getErrorMessage(e)}`);
+    }
+
+    // 4. Migrate runtime profile configs
+    try {
+      if (fsSync.existsSync(this.runtimeProfilesDir)) {
+        const files = await fs.readdir(this.runtimeProfilesDir);
+        for (const file of files) {
+          if (file.endsWith(".json")) {
+            const runtimeName = file.replace(".json", "");
+            const sqliteKey = ConfigService.PREFIX_RUNTIME_PROFILE + runtimeName;
+            const exists = await repo.get(sqliteKey);
+            if (!exists) {
+              const filePath = path.join(this.runtimeProfilesDir, file);
+              const data = await fs.readFile(filePath, "utf-8");
+              await repo.set(sqliteKey, data);
+              await fs.rename(filePath, filePath + ".bak");
+              logger.info(`[ConfigService] Migrated runtime profile ${runtimeName} to SQLite`);
+            }
+          }
+        }
+      }
+    } catch (e) {
+      logger.warn(`[ConfigService] Runtime profile migration failed: ${getErrorMessage(e)}`);
     }
   }
 
@@ -176,8 +275,19 @@ export class ConfigService {
       return this.appConfigCache;
     }
 
+    await this.ensureInitialized();
+
     try {
-      const data = await fs.readFile(this.configPath, "utf-8");
+      const repo = getConfigRepository();
+      const data = await repo.get(ConfigService.KEY_GLOBAL);
+      
+      if (!data) {
+        // No config in SQLite, return defaults
+        const defaultConfig = this.getDefaultAppConfig();
+        this.appConfigCache = defaultConfig;
+        return defaultConfig;
+      }
+
       const config = JSON.parse(data);
 
       // Merge with defaults to ensure all fields exist
@@ -199,31 +309,22 @@ export class ConfigService {
       };
 
       return this.appConfigCache!;
-    } catch (error: any) {
-      if (error.code === "ENOENT") {
-        // Config file doesn't exist, return defaults
-        const defaultConfig = this.getDefaultAppConfig();
-        this.appConfigCache = defaultConfig;
-        return defaultConfig;
-      }
-      logger.error(`Failed to read app config: ${error.message}`);
-      throw error;
+    } catch (error: unknown) {
+      logger.error(`Failed to read app config from SQLite: ${getErrorMessage(error)}`);
+      return this.getDefaultAppConfig();
     }
   }
 
   async saveAppConfig(config: AppConfig): Promise<void> {
-    await this.acquireLock();
-
+    await this.ensureInitialized();
+    const repo = getConfigRepository();
     try {
-      await fs.writeFile(
-        this.configPath,
-        JSON.stringify(config, null, 2),
-        "utf-8",
-      );
+      await repo.set(ConfigService.KEY_GLOBAL, JSON.stringify(config, null, 2));
       this.appConfigCache = config;
-      logger.debug("App configuration saved successfully");
-    } finally {
-      await this.releaseLock();
+      logger.debug("App configuration saved to SQLite successfully");
+    } catch (error: unknown) {
+      logger.error(`Failed to save app config to SQLite: ${getErrorMessage(error)}`);
+      throw error;
     }
   }
 
@@ -249,6 +350,12 @@ export class ConfigService {
   async setAIModel(model: string): Promise<void> {
     const appConfig = await this.getAppConfig();
     appConfig.ai.model = model;
+    await this.saveAppConfig(appConfig);
+  }
+
+  async setAIEndpoint(endpoint: string): Promise<void> {
+    const appConfig = await this.getAppConfig();
+    appConfig.ai.apiEndpoint = endpoint;
     await this.saveAppConfig(appConfig);
   }
 
@@ -284,6 +391,16 @@ export class ConfigService {
     await this.saveAppConfig(appConfig);
   }
 
+  /**
+   * Ensure the database is initialized before any data access.
+   * Silently succeeds if already initialized.
+   */
+  private async ensureInitialized(): Promise<void> {
+    if (!DatabaseManager.getInstance().initialized) {
+      await this.initialize();
+    }
+  }
+
   // ==================== Service Configuration ====================
 
   async getServiceConfig(serviceName: string): Promise<ServiceConfig | null> {
@@ -291,21 +408,23 @@ export class ConfigService {
       return this.serviceConfigCache.get(serviceName)!;
     }
 
-    const configPath = path.join(this.servicesDir, `${serviceName}.json`);
+    await this.ensureInitialized();
 
     try {
-      const data = await fs.readFile(configPath, "utf-8");
+      const repo = getConfigRepository();
+      const sqliteKey = ConfigService.PREFIX_SERVICE + serviceName;
+      const data = await repo.get(sqliteKey);
+      
+      if (!data) return null;
+
       const config = JSON.parse(data);
       this.serviceConfigCache.set(serviceName, config);
       return config;
-    } catch (error: any) {
-      if (error.code === "ENOENT") {
-        return null;
-      }
+    } catch (error: unknown) {
       logger.error(
-        `Failed to read service config for ${serviceName}: ${error.message}`,
+        `Failed to read service config for ${serviceName} from SQLite: ${getErrorMessage(error)}`,
       );
-      throw error;
+      return null;
     }
   }
 
@@ -313,15 +432,17 @@ export class ConfigService {
     serviceName: string,
     config: ServiceConfig,
   ): Promise<void> {
-    const configPath = path.join(this.servicesDir, `${serviceName}.json`);
-
     try {
-      await fs.writeFile(configPath, JSON.stringify(config, null, 2), "utf-8");
+      const repo = getConfigRepository();
+      const sqliteKey = ConfigService.PREFIX_SERVICE + serviceName;
+      await repo.set(sqliteKey, JSON.stringify(config, null, 2));
+      
       this.serviceConfigCache.set(serviceName, config);
-      logger.debug(`Service config saved: ${serviceName}`);
-    } catch (error: any) {
+      this.servicesListCache = null; // Invalidate list cache
+      logger.debug(`Service config saved to SQLite: ${serviceName}`);
+    } catch (error: unknown) {
       logger.error(
-        `Failed to save service config for ${serviceName}: ${error.message}`,
+        `Failed to save service config for ${serviceName} to SQLite: ${getErrorMessage(error)}`,
       );
       throw error;
     }
@@ -451,21 +572,15 @@ export class ConfigService {
   async getServiceDetectionCache(
     serviceName: string,
   ): Promise<DetectionResult | null> {
-    const cachePath = path.join(
-      this.servicesDir,
-      serviceName,
-      "detection-cache.json",
-    );
-
+    const sqliteKey = `detection-cache:${serviceName}`;
     try {
-      const data = await fs.readFile(cachePath, "utf-8");
+      const repo = getConfigRepository();
+      const data = await repo.get(sqliteKey);
+      if (!data) return null;
       return JSON.parse(data);
-    } catch (error: any) {
-      if (error.code === "ENOENT") {
-        return null;
-      }
+    } catch (error: unknown) {
       logger.error(
-        `Failed to read detection cache for ${serviceName}: ${error.message}`,
+        `Failed to read detection cache for ${serviceName} from SQLite: ${getErrorMessage(error)}`,
       );
       return null;
     }
@@ -478,24 +593,14 @@ export class ConfigService {
     serviceName: string,
     detection: DetectionResult,
   ): Promise<void> {
-    const cachePath = path.join(
-      this.servicesDir,
-      serviceName,
-      "detection-cache.json",
-    );
-    const cacheDir = path.dirname(cachePath);
-
+    const sqliteKey = `detection-cache:${serviceName}`;
     try {
-      await fs.mkdir(cacheDir, { recursive: true });
-      await fs.writeFile(
-        cachePath,
-        JSON.stringify(detection, null, 2),
-        "utf-8",
-      );
-      logger.debug(`Detection cache saved for ${serviceName}`);
-    } catch (error: any) {
+      const repo = getConfigRepository();
+      await repo.set(sqliteKey, JSON.stringify(detection, null, 2));
+      logger.debug(`Detection cache saved for ${serviceName} to SQLite`);
+    } catch (error: unknown) {
       logger.error(
-        `Failed to save detection cache for ${serviceName}: ${error.message}`,
+        `Failed to save detection cache for ${serviceName} to SQLite: ${getErrorMessage(error)}`,
       );
     }
   }
@@ -505,20 +610,20 @@ export class ConfigService {
       return this.servicesListCache;
     }
 
+    await this.ensureInitialized();
+
     try {
-      const files = await fs.readdir(this.servicesDir);
-      const services = files
-        .filter((file) => file.endsWith(".json"))
-        .map((file) => file.replace(".json", ""));
+      const repo = getConfigRepository();
+      const allConfigs = await repo.getAll();
+      const services = Object.keys(allConfigs)
+        .filter((key) => key.startsWith(ConfigService.PREFIX_SERVICE))
+        .map((key) => key.replace(ConfigService.PREFIX_SERVICE, ""));
 
       this.servicesListCache = services;
       return services;
-    } catch (error: any) {
-      if (error.code === "ENOENT") {
-        return [];
-      }
-      logger.error(`Failed to list services: ${error.message}`);
-      throw error;
+    } catch (error: unknown) {
+      logger.error(`Failed to list services from SQLite: ${getErrorMessage(error)}`);
+      return [];
     }
   }
 
@@ -531,21 +636,21 @@ export class ConfigService {
       return this.dockerHostsCache.get(hostName)!;
     }
 
-    const configPath = path.join(this.dockerHostsDir, `${hostName}.json`);
-
     try {
-      const data = await fs.readFile(configPath, "utf-8");
+      const repo = getConfigRepository();
+      const sqliteKey = ConfigService.PREFIX_DOCKER_HOST + hostName;
+      const data = await repo.get(sqliteKey);
+      
+      if (!data) return null;
+
       const config = JSON.parse(data);
       this.dockerHostsCache.set(hostName, config);
       return config;
-    } catch (error: any) {
-      if (error.code === "ENOENT") {
-        return null;
-      }
+    } catch (error: unknown) {
       logger.error(
-        `Failed to read Docker host config ${hostName}: ${error.message}`,
+        `Failed to read Docker host config ${hostName} from SQLite: ${getErrorMessage(error)}`,
       );
-      throw error;
+      return null;
     }
   }
 
@@ -553,15 +658,16 @@ export class ConfigService {
     hostName: string,
     config: DockerConnectionConfig,
   ): Promise<void> {
-    const configPath = path.join(this.dockerHostsDir, `${hostName}.json`);
-
     try {
-      await fs.writeFile(configPath, JSON.stringify(config, null, 2), "utf-8");
+      const repo = getConfigRepository();
+      const sqliteKey = ConfigService.PREFIX_DOCKER_HOST + hostName;
+      await repo.set(sqliteKey, JSON.stringify(config, null, 2));
+      
       this.dockerHostsCache.set(hostName, config);
-      logger.debug(`Docker host config saved: ${hostName}`);
-    } catch (error: any) {
+      logger.debug(`Docker host config saved to SQLite: ${hostName}`);
+    } catch (error: unknown) {
       logger.error(
-        `Failed to save Docker host config ${hostName}: ${error.message}`,
+        `Failed to save Docker host config ${hostName} to SQLite: ${getErrorMessage(error)}`,
       );
       throw error;
     }
@@ -576,21 +682,21 @@ export class ConfigService {
       return this.runtimeProfilesCache.get(runtime)!;
     }
 
-    const configPath = path.join(this.runtimeProfilesDir, `${runtime}.json`);
-
     try {
-      const data = await fs.readFile(configPath, "utf-8");
+      const repo = getConfigRepository();
+      const sqliteKey = ConfigService.PREFIX_RUNTIME_PROFILE + runtime;
+      const data = await repo.get(sqliteKey);
+      
+      if (!data) return null;
+
       const config = JSON.parse(data);
       this.runtimeProfilesCache.set(runtime, config);
       return config;
-    } catch (error: any) {
-      if (error.code === "ENOENT") {
-        return null;
-      }
+    } catch (error: unknown) {
       logger.error(
-        `Failed to read runtime profile for ${runtime}: ${error.message}`,
+        `Failed to read runtime profile for ${runtime} from SQLite: ${getErrorMessage(error)}`,
       );
-      throw error;
+      return null;
     }
   }
 
@@ -598,57 +704,18 @@ export class ConfigService {
     runtime: RuntimeType,
     config: RuntimeSpecificConfig,
   ): Promise<void> {
-    const configPath = path.join(this.runtimeProfilesDir, `${runtime}.json`);
-
     try {
-      await fs.writeFile(configPath, JSON.stringify(config, null, 2), "utf-8");
+      const repo = getConfigRepository();
+      const sqliteKey = ConfigService.PREFIX_RUNTIME_PROFILE + runtime;
+      await repo.set(sqliteKey, JSON.stringify(config, null, 2));
+      
       this.runtimeProfilesCache.set(runtime, config);
-      logger.debug(`Runtime profile saved: ${runtime}`);
-    } catch (error: any) {
+      logger.debug(`Runtime profile saved to SQLite: ${runtime}`);
+    } catch (error: unknown) {
       logger.error(
-        `Failed to save runtime profile for ${runtime}: ${error.message}`,
+        `Failed to save runtime profile for ${runtime} to SQLite: ${getErrorMessage(error)}`,
       );
       throw error;
-    }
-  }
-
-  // ==================== Lock Management ====================
-
-  private async acquireLock(): Promise<void> {
-    const maxAttempts = 10;
-    const retryDelay = 100; // ms
-
-    for (let attempt = 0; attempt < maxAttempts; attempt++) {
-      try {
-        await fs.writeFile(this.lockPath, process.pid.toString(), {
-          flag: "wx",
-        });
-        this.isLocked = true;
-        return;
-      } catch (error: any) {
-        if (error.code === "EEXIST") {
-          if (attempt === maxAttempts - 1) {
-            throw new Error(
-              "Configuration storage is locked by another process.",
-            );
-          }
-          await new Promise((resolve) => setTimeout(resolve, retryDelay));
-          continue;
-        }
-        throw error;
-      }
-    }
-  }
-
-  private async releaseLock(): Promise<void> {
-    if (this.isLocked) {
-      try {
-        await fs.unlink(this.lockPath);
-      } catch (error) {
-        // Ignore errors when releasing lock
-      } finally {
-        this.isLocked = false;
-      }
     }
   }
 
@@ -695,30 +762,28 @@ export class ConfigService {
 
   private async listDockerHosts(): Promise<string[]> {
     try {
-      const files = await fs.readdir(this.dockerHostsDir);
-      return files
-        .filter((file) => file.endsWith(".json"))
-        .map((file) => file.replace(".json", ""));
-    } catch (error: any) {
-      if (error.code === "ENOENT") {
-        return [];
-      }
-      throw error;
+      const repo = getConfigRepository();
+      const allConfigs = await repo.getAll();
+      return Object.keys(allConfigs)
+        .filter((key) => key.startsWith(ConfigService.PREFIX_DOCKER_HOST))
+        .map((key) => key.replace(ConfigService.PREFIX_DOCKER_HOST, ""));
+    } catch (error: unknown) {
+      logger.error(`Failed to list Docker hosts from SQLite: ${getErrorMessage(error)}`);
+      return [];
     }
   }
 
   private async listRuntimeProfiles(): Promise<RuntimeType[]> {
     try {
-      const files = await fs.readdir(this.runtimeProfilesDir);
-      return files
-        .filter((file) => file.endsWith(".json"))
-        .map((file) => file.replace(".json", "") as RuntimeType)
+      const repo = getConfigRepository();
+      const allConfigs = await repo.getAll();
+      return Object.keys(allConfigs)
+        .filter((key) => key.startsWith(ConfigService.PREFIX_RUNTIME_PROFILE))
+        .map((key) => key.replace(ConfigService.PREFIX_RUNTIME_PROFILE, "") as RuntimeType)
         .filter((runtime) => Object.values(RuntimeTypes).includes(runtime));
-    } catch (error: any) {
-      if (error.code === "ENOENT") {
-        return [];
-      }
-      throw error;
+    } catch (error: unknown) {
+      logger.error(`Failed to list runtime profiles from SQLite: ${getErrorMessage(error)}`);
+      return [];
     }
   }
 }
@@ -727,4 +792,12 @@ export class ConfigService {
 
 export function getConfigService(): ConfigService {
   return ConfigService.getInstance();
+}
+
+/**
+ * Convenience function to get AI configuration directly.
+ * This replaces the deprecated getAIConfig from utils/config.js.
+ */
+export async function getAIConfig(): Promise<AIConfig> {
+  return getConfigService().getAIConfig();
 }

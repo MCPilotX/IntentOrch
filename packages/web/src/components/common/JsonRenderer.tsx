@@ -77,7 +77,7 @@ const JsonRenderer: React.FC<JsonRendererProps> = ({
       
       <div 
         ref={containerRef}
-        className="json-renderer-content rounded-lg overflow-hidden border border-gray-200 dark:border-gray-700"
+        className="json-renderer-content rounded-lg overflow-hidden border border-gray-200 dark:border-gray-700 break-all"
         style={{ maxHeight }}
       />
 

@@ -15,26 +15,65 @@ import { logger } from "./core/logger.js";
  */
 
 // ==================== Core Modules ====================
-export { ConfigService, getConfigService } from './core/index.js';
+export {
+  ConfigService,
+  getConfigService,
+  // Unified error types
+  IntentOrchError,
+  ErrorCode,
+  ErrorSeverity,
+  ErrorFactory,
+  ErrorHandler,
+  createError,
+  wrapError,
+  isIntentOrchError,
+  isMCPilotError,
+  shouldRetry,
+} from './core/index.js';
 export type { RuntimeType, ServiceConfig, Config, AIConfig, DetectionResult } from './core/index.js';
+
+// ==================== Execution Session Module ====================
+export {
+  SessionManager,
+  getSessionManager,
+  SessionStore,
+  getSessionStore,
+  SessionError,
+  SessionNotFoundError,
+  InvalidSessionStateError,
+} from './execution/index.js';
+export type {
+  ExecutionSession,
+  SessionType,
+  SessionState,
+  ConversationMessage,
+  StepResult,
+  UserFeedback,
+  SessionFilter,
+  SessionListResponse,
+  CreateSessionRequest,
+  FeedbackRequest,
+} from './execution/index.js';
 
 // ==================== AI Modules ====================
 export { CloudIntentEngine, LLMClient, getLLMClient } from './ai/index.js';
+export { ProviderRegistry } from './ai/providers/index.js';
 export type { CloudIntentEngineConfig } from './ai/index.js';
 
 // ==================== Execute Service ====================
 export { ExecuteService, getExecuteService, createExecuteService } from './ai/execute-service.js';
+export { ReActLoopEngine, PlanExecutor, SessionOrchestrator, WorkflowOrchestrator, DaemonDelegator } from './ai/execute-service.js';
 export type { UnifiedExecutionOptions, UnifiedExecutionResult, WorkflowExecutionResult } from './ai/execute-service.js';
 
 // ==================== MCP Modules ====================
-export { MCPClient, ToolRegistry } from './mcp/index.js';
-export type { Tool, ToolCall, ToolMetadata } from './mcp/index.js';
+export { MCPClient, MCPServerToolIndex } from './mcp/index.js';
+export type { Tool, ToolCall, ToolMetadata, RegisteredTool, ToolExecutor } from './mcp/index.js';
 
 // ==================== Runtime Modules ====================
 export { RuntimeDetector, RuntimeAdapter } from './runtime/index.js';
 
-// ==================== Tool Registry ====================
-export { ToolRegistry as ToolRegistryModule } from './tool-registry/index.js';
+// ==================== Persistent Tool Registry ====================
+export { ToolRegistry } from './tool-registry/index.js';
 
 // ==================== Process Management ====================
 export { ProcessManager, ProcessStore } from './process-manager/index.js';
@@ -109,8 +148,7 @@ export { getProcessManager } from './process-manager/manager.js';
 export { getRegistryClient } from './registry/client.js';
 export { getWorkflowManager } from './workflow/manager.js';
 export { getToolRegistry } from './tool-registry/registry.js';
-export { getIntentService } from './ai/intent-service.js';
-export { getAIConfig, getConfigManager } from './utils/config.js';
+export { getAIConfig } from './core/config-service.js';
 export { AutoStartManager } from './utils/auto-start-manager.js';
 export { printError } from './utils/cli-error.js';
 export { PROGRAM_NAME, PROGRAM_DESCRIPTION, PROGRAM_VERSION } from './utils/constants.js';

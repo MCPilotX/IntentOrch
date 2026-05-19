@@ -1,5 +1,5 @@
 import { logger } from "../core/logger.js";
-import axios from "axios";
+import axios, { AxiosError } from "axios";
 import {
   Manifest,
   RegistrySource,
@@ -26,8 +26,8 @@ function inferRuntimeType(command: string): string {
 /**
  * Check if the given JSON data is a Claude Desktop format (has mcpServers field)
  */
-function isClaudeDesktopConfig(data: any): boolean {
-  return data && typeof data === "object" && "mcpServers" in data;
+function isClaudeDesktopConfig(data: unknown): data is { mcpServers: Record<string, unknown> } {
+  return data !== null && typeof data === "object" && "mcpServers" in data;
 }
 
 /**
@@ -35,20 +35,26 @@ function isClaudeDesktopConfig(data: any): boolean {
  */
 function claudeDesktopEntryToManifest(
   serverName: string,
-  entry: any,
+  entry: Record<string, unknown>,
 ): Manifest {
+  const isNetworkService = !!entry.url;
+  const transportEntry = entry.transport as Record<string, unknown> | undefined;
+  const transportType: string = (transportEntry?.type as string) || (isNetworkService ? "sse" : "stdio");
+
   const manifest: Manifest = {
     name: serverName,
     version: "1.0.0",
     description: `Imported from MCP config: ${serverName}`,
     runtime: {
-      type: inferRuntimeType(entry.command || ""),
-      command: entry.command || "",
-      args: entry.args || [],
-      env: entry.env ? Object.keys(entry.env) : [],
+      type: isNetworkService ? "remote" : inferRuntimeType((entry.command as string) || ""),
+      command: (entry.command as string) || "",
+      args: (entry.args as string[]) || [],
+      env: entry.env ? Object.keys(entry.env as Record<string, string>) : [],
     },
     transport: {
-      type: "stdio",
+      type: transportType as "sse" | "http" | "stdio" | "websocket" | "tcp",
+      url: (entry.url as string) || ((entry.transport as Record<string, unknown> | undefined)?.url as string) || undefined,
+      headers: ((entry.headers as Record<string, string>) || (entry.transport as Record<string, unknown> | undefined)?.headers as Record<string, string>) || undefined,
     },
   };
   return manifest;
@@ -70,9 +76,11 @@ export function parseClaudeDesktopConfig(configJson: string): Manifest[] {
   const servers = data.mcpServers;
 
   for (const [serverName, entry] of Object.entries(servers)) {
-    const entryObj = entry as any;
-    if (!entryObj.command) {
-      logger.warn(`Skipping server "${serverName}": missing "command" field`);
+    const entryObj = entry as Record<string, unknown>;
+    
+    // Support both stdio (needs command) and network (needs url) services
+    if (!entryObj.command && !entryObj.url && !(entryObj.transport as Record<string, unknown> | undefined)?.url) {
+      logger.warn(`Skipping server "${serverName}": missing both "command" and "url" fields`);
       continue;
     }
     manifests.push(claudeDesktopEntryToManifest(serverName, entryObj));
@@ -113,7 +121,7 @@ export class GitHubRegistrySource implements RegistrySource {
       // Try different branch names if not specified
       const branchesToTry = branch ? [branch] : ["main", "master"];
 
-      let lastError: any = null;
+      let lastError: unknown = null;
 
       for (const tryBranch of branchesToTry) {
         try {
@@ -121,9 +129,9 @@ export class GitHubRegistrySource implements RegistrySource {
           logger.info(`Trying GitHub URL: ${url}`);
           const response = await axios.get(url, { timeout: 10000 });
           return response.data;
-        } catch (error: any) {
+        } catch (error: unknown) {
           lastError = error;
-          if (error.response?.status === 404) {
+          if (error instanceof AxiosError && error.response?.status === 404) {
             // Continue to try next branch
             continue;
           }
@@ -133,7 +141,7 @@ export class GitHubRegistrySource implements RegistrySource {
       }
 
       // If we tried all branches and still got 404
-      if (lastError?.response?.status === 404) {
+      if (lastError instanceof AxiosError && lastError.response?.status === 404) {
         throw new Error(
           `MCP Server "${serverName}" not found on GitHub.\n` +
             `Tried branches: ${branchesToTry.join(", ")}\n` +
@@ -222,8 +230,8 @@ export class GitHubRegistrySource implements RegistrySource {
     try {
       const response = await axios.get(url, { timeout: 10000 });
       return response.data;
-    } catch (error: any) {
-      if (error.response?.status === 404) {
+    } catch (error: unknown) {
+      if (error instanceof AxiosError && error.response?.status === 404) {
         throw new Error(
           `MCP Server "${moduleName}" not found in GitHub Hub.\n` +
             `Hub: ${hubOwner}/${hubRepo} (branch: ${hubBranch})\n` +
@@ -264,41 +272,42 @@ export class GitHubRegistrySource implements RegistrySource {
           },
         });
 
-        const contents = response.data;
+        const contents = response.data as Array<Record<string, unknown>>;
 
         // Filter directories (each directory is a potential service)
-        const serviceDirs = contents.filter((item: any) => item.type === "dir");
+        const serviceDirs = contents.filter((item) => item.type === "dir");
 
         allServices = await Promise.all(
-          serviceDirs.map(async (dir: any) => {
+          serviceDirs.map(async (dir) => {
             try {
               // Try to get mcp.json from the directory
               const manifestUrl = `https://raw.githubusercontent.com/${hubOwner}/${hubRepo}/${hubBranch}/${dir.name}/mcp.json`;
               const manifestResponse = await axios.get(manifestUrl, {
                 timeout: 5000,
               });
-              const manifest = manifestResponse.data;
+              const manifest = manifestResponse.data as Record<string, unknown>;
 
+              const dirName = dir.name as string;
               return {
-                name: dir.name,
+                name: dirName,
                 description:
-                  manifest.description || `GitHub MCP service: ${dir.name}`,
-                version: manifest.version || "1.0.0",
-                source: "github",
-                tags: manifest.tags || ["github", "mcp"],
+                  (manifest.description as string) || `GitHub MCP service: ${dirName}`,
+                version: (manifest.version as string) || "1.0.0",
+                source: "github" as const,
+                tags: (manifest.tags as string[]) || ["github", "mcp"],
                 lastUpdated:
-                  dir.git_timestamp || new Date().toISOString().split("T")[0],
-              };
+                  (dir.git_timestamp as string) || new Date().toISOString().split("T")[0],
+              } as ServiceInfo;
             } catch (error) {
               // If mcp.json not found, return basic info
               return {
-                name: dir.name,
-                description: `GitHub MCP service: ${dir.name}`,
+                name: dir.name as string,
+                description: `GitHub MCP service: ${dir.name as string}`,
                 version: "1.0.0",
-                source: "github",
+                source: "github" as const,
                 tags: ["github", "mcp"],
                 lastUpdated: new Date().toISOString().split("T")[0],
-              };
+              } as ServiceInfo;
             }
           }),
         );
@@ -385,7 +394,7 @@ export class GitHubRegistrySource implements RegistrySource {
               `${PROGRAM_NAME} secret set GITHUB_TOKEN <your-token>`,
           );
         default:
-          const errorMsg = error.response.data?.message || error.message;
+          const errorMsg = error.response.data?.message || (error instanceof Error ? error.message : String(error));
           return new Error(
             `GitHub API error: ${errorMsg}\n` +
               `Status: ${error.response?.status || "N/A"}\n\n` +
@@ -405,7 +414,7 @@ export class GitHubRegistrySource implements RegistrySource {
           `2. Try again later`,
       );
     } else {
-      return new Error(`Error fetching from GitHub: ${error.message}`);
+      return new Error(`Error fetching from GitHub: ${(error instanceof Error ? error.message : String(error))}`);
     }
   }
 }
@@ -589,8 +598,8 @@ export class GiteeRegistrySource implements RegistrySource {
 
       // Return original data if no tools found
       return data;
-    } catch (error: any) {
-      if (error.response) {
+    } catch (error: unknown) {
+      if (error instanceof AxiosError && error.response) {
         switch (error.response.status) {
           case 404:
             throw new Error(
@@ -605,18 +614,18 @@ export class GiteeRegistrySource implements RegistrySource {
                 `3. Use service URL directly (if known)`,
             );
           default:
-            const errorMsg = error.response.data?.message || error.message;
+            const errorMsg = error instanceof AxiosError && error.response?.data ? (error.response.data as Record<string, unknown>)?.message as string || error.message : String(error);
             throw new Error(
               `Gitee Registry API error: ${errorMsg}\n` +
                 `URL: ${url}\n` +
-                `Status: ${error.response?.status || "N/A"}\n\n` +
+                `Status: ${error instanceof AxiosError ? error.response?.status || "N/A" : "N/A"}\n\n` +
                 `Suggestions:\n` +
                 `1. Check network connection\n` +
                 `2. Try other registry source\n` +
                 `3. Check if Gitee service is available`,
             );
         }
-      } else if (error.request) {
+      } else if (error instanceof AxiosError && error.request) {
         throw new Error(
           `Cannot connect to Gitee Registry (URL: ${url}). Possible reasons:\n` +
             `1. Network connection issue\n` +
@@ -627,7 +636,7 @@ export class GiteeRegistrySource implements RegistrySource {
             `3. Use URL directly`,
         );
       } else {
-        throw new Error(`Error fetching from Gitee Registry: ${error.message}`);
+        throw new Error(`Error fetching from Gitee Registry: ${(error instanceof Error ? error.message : String(error))}`);
       }
     }
   }
@@ -825,8 +834,209 @@ export class DirectRegistrySource implements RegistrySource {
     }
 
     // HTTP/HTTPS URL
-    const response = await axios.get(serverNameOrUrl);
-    return response.data;
+    try {
+      const response = await axios.get(serverNameOrUrl, { timeout: 5000 });
+      const data = response.data;
+
+      // If it looks like a manifest, return it
+      if (
+        data &&
+        typeof data === "object" &&
+        (data.name || data.mcpServers || data.runtime)
+      ) {
+        return data;
+      }
+
+      // If it's not a manifest but we got a response, it might be an SSE/HTTP endpoint
+      throw new Error("Response is not a valid manifest");
+    } catch (error: unknown) {
+      // Automatic sensing based on URL features
+      const lowerUrl = serverNameOrUrl.toLowerCase();
+      const isLikelySse = lowerUrl.includes("sse") || lowerUrl.includes("/events");
+      const isLikelyHttp = (lowerUrl.includes("http") && lowerUrl.includes("mcp")) || 
+                          lowerUrl.includes("/rpc");
+      
+      if (isLikelySse || isLikelyHttp) {
+        const type = isLikelySse ? "sse" : "http";
+        logger.info(
+          `[DirectRegistrySource] URL features suggest ${type.toUpperCase()} endpoint: ${serverNameOrUrl}`,
+        );
+        return {
+          name: serverNameOrUrl.split("/").filter(Boolean).pop() || `remote-${type}-service`,
+          version: "1.0.0",
+          description: `Remote ${type.toUpperCase()} service at ${serverNameOrUrl}`,
+          runtime: {
+            type: "remote",
+            command: "",
+          },
+          transport: {
+            type: type as "sse" | "http",
+            url: serverNameOrUrl,
+          },
+        };
+      }
+
+      // Default fallback for URLs if manifest fetch fails - assume SSE as it's the most common remote transport
+      logger.info(
+        `[DirectRegistrySource] Manifest fetch failed for ${serverNameOrUrl}, defaulting to virtual SSE manifest`,
+      );
+      return {
+        name: serverNameOrUrl.split("/").filter(Boolean).pop() || "remote-service",
+        version: "1.0.0",
+        description: `Remote service at ${serverNameOrUrl}`,
+        runtime: {
+          type: "remote",
+          command: "",
+        },
+        transport: {
+          type: "sse",
+          url: serverNameOrUrl,
+        },
+      };
+    }
+  }
+}
+
+export class SSERegistrySource implements RegistrySource {
+  name = "sse";
+
+  async fetchManifest(url: string): Promise<Manifest> {
+    const fullUrl =
+      url.startsWith("http://") || url.startsWith("https://")
+        ? url
+        : `http://${url}`;
+    return {
+      name: url.split("/").filter(Boolean).pop() || "remote-sse-service",
+      version: "1.0.0",
+      description: `Remote SSE service at ${fullUrl}`,
+      runtime: {
+        type: "remote",
+        command: "",
+      },
+      transport: {
+        type: "sse",
+        url: fullUrl,
+      },
+    };
+  }
+}
+
+export class HTTPRegistrySource implements RegistrySource {
+  name = "http";
+
+  async fetchManifest(url: string): Promise<Manifest> {
+    const fullUrl =
+      url.startsWith("http://") || url.startsWith("https://")
+        ? url
+        : `http://${url}`;
+    return {
+      name: url.split("/").filter(Boolean).pop() || "remote-http-service",
+      version: "1.0.0",
+      description: `Remote HTTP service at ${fullUrl}`,
+      runtime: {
+        type: "remote",
+        command: "",
+      },
+      transport: {
+        type: "http",
+        url: fullUrl,
+      },
+    };
+  }
+}
+
+export class SmitheryRegistrySource implements RegistrySource {
+  name = "smithery";
+
+  async fetchManifest(serverName: string): Promise<Manifest> {
+    // If it's a full qualified name like "namespace/slug"
+    // or just a slug (Smithery supports both)
+    const url = `https://api.smithery.ai/servers/${encodeURIComponent(serverName)}`;
+
+    try {
+      logger.info(`[SmitherySource] Fetching details from: ${url}`);
+      const response = await axios.get(url, { timeout: 10000 });
+      const data = response.data;
+
+      // Map Smithery detail format to our Manifest format
+      const isRemote = !!data.remote;
+      const mcpUrl =
+        data.deploymentUrl ||
+        (data.connections && data.connections[0]?.deploymentUrl);
+
+      const manifest: Manifest = {
+        name: data.qualifiedName || serverName,
+        version: "1.0.0", // Smithery doesn't always provide a specific version string in details
+        description: data.description || data.displayName,
+        runtime: {
+          type: isRemote ? "remote" : "process",
+          command: "", // Stdio servers on Smithery usually require manual install instructions
+        },
+        transport: {
+          type: isRemote ? "sse" : "stdio", // Default to sse for remote, stdio for local
+          url: mcpUrl,
+        },
+        tools: data.tools || [],
+        metadata: {
+          author: data.namespace,
+          repository: data.homepage,
+        },
+      };
+
+      return manifest;
+    } catch (error: unknown) {
+      logger.error(
+        `[SmitherySource] Failed to fetch server details: ${(error instanceof Error ? error.message : String(error))}`,
+      );
+      throw new Error(
+        `Smithery server "${serverName}" not found or inaccessible: ${(error instanceof Error ? error.message : String(error))}`,
+      );
+    }
+  }
+
+  async searchServices(options: SearchOptions): Promise<SearchResult> {
+    const { query = "", limit = 20, offset = 0 } = options;
+    const page = Math.floor(offset / limit) + 1;
+
+    // Smithery API: GET /servers?q={query}&page={page}&pageSize={pageSize}
+    const url = `https://api.smithery.ai/servers?q=${encodeURIComponent(query)}&page=${page}&pageSize=${limit}`;
+
+    try {
+      logger.info(`[SmitherySource] Searching: ${url}`);
+      const response = await axios.get(url, { timeout: 10000 });
+      const data = response.data;
+
+      const servers = data.servers || [];
+      const services: ServiceInfo[] = servers.map((s: any) => ({
+        name: s.qualifiedName || s.id,
+        description: s.description,
+        version: "latest",
+        source: "smithery",
+        tags: s.remote
+          ? ["remote", "hosted", "smithery"]
+          : ["stdio", "smithery"],
+        lastUpdated: s.createdAt ? s.createdAt.split("T")[0] : undefined,
+      }));
+
+      return {
+        services,
+        total: data.pagination?.totalCount || services.length,
+        source: this.name,
+        hasMore: data.pagination?.currentPage < data.pagination?.totalPages,
+      };
+    } catch (error: unknown) {
+      logger.error(`[SmitherySource] Search failed: ${(error instanceof Error ? error.message : String(error))}`);
+      return {
+        services: [],
+        total: 0,
+        source: this.name,
+        hasMore: false,
+      };
+    }
+  }
+
+  async listAvailableServices(): Promise<ServiceInfo[]> {
+    return (await this.searchServices({ limit: 50 })).services;
   }
 }
 
@@ -836,8 +1046,14 @@ export function createRegistrySource(type: string): RegistrySource {
       return new GitHubRegistrySource();
     case "gitee":
       return new GiteeRegistrySource();
+    case "smithery":
+      return new SmitheryRegistrySource();
     case "direct":
       return new DirectRegistrySource();
+    case "sse":
+      return new SSERegistrySource();
+    case "http":
+      return new HTTPRegistrySource();
     default:
       throw new Error(`Unknown registry source type: ${type}`);
   }

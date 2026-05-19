@@ -7,6 +7,7 @@ import type {
   Secret,
   Workflow,
   SystemStats,
+  DashboardData,
   PullServerRequest,
   StartServerRequest,
   StopProcessRequest,
@@ -15,20 +16,69 @@ import type {
   ExecuteWorkflowRequest,
   Notification,
   NotificationStats,
+  ExecutionSession,
+  SessionCreateResponse,
+  SessionExecuteResponse,
+  SessionListResponse,
 } from '../types';
 
 import type { 
   UnifiedExecutionOptions, 
-  UnifiedExecutionResult 
+  UnifiedExecutionResult,
 } from '@intentorch/core';
 
 import { API_BASE_URL } from './config';
 
+/**
+ * Generic wrapper type for daemon API responses that wrap data in an envelope.
+ */
+interface EnvelopeResponse<T> {
+  success?: boolean;
+  error?: string;
+}
+
+/** Response envelope for endpoints that return a single server object. */
+interface ServerEnvelopeResponse {
+  server?: Record<string, unknown>;
+}
+
+/** Response envelope for endpoints that return a servers list. */
+interface ServersEnvelopeResponse {
+  servers?: Record<string, unknown>[];
+}
+
+/** Response envelope for endpoints that return a session object. */
+interface SessionEnvelopeResponse {
+  session: ExecutionSession;
+}
+
+/** Response envelope for endpoints that return a workflow object. */
+interface WorkflowEnvelopeResponse {
+  workflow: Workflow;
+}
+
+/** Response envelope for endpoints that return logs. */
+interface LogsEnvelopeResponse {
+  logs?: string;
+}
+
+/**
+ * HTTP client wrapper whose methods already account for the response interceptor
+ * that unwraps `response.data`.  `client.get<T>(url)` returns `Promise<T>`
+ * rather than the default axios `Promise<AxiosResponse<T>>`.
+ */
+interface UnwrappedHttpClient {
+  get<T = unknown>(url: string, config?: Record<string, unknown>): Promise<T>;
+  post<T = unknown>(url: string, data?: unknown, config?: Record<string, unknown>): Promise<T>;
+  put<T = unknown>(url: string, data?: unknown, config?: Record<string, unknown>): Promise<T>;
+  delete<T = unknown>(url: string, config?: Record<string, unknown>): Promise<T>;
+}
+
 class ApiService {
-  private client: AxiosInstance;
+  private client: UnwrappedHttpClient;
 
   constructor() {
-    this.client = axios.create({
+    const rawClient = axios.create({
       baseURL: API_BASE_URL,
       timeout: 60000,
       headers: {
@@ -37,7 +87,7 @@ class ApiService {
     });
 
     // Request interceptor
-    this.client.interceptors.request.use(
+    rawClient.interceptors.request.use(
       async (config: InternalAxiosRequestConfig) => {
         // 1. Prioritize token from URL (one-time injection from CLI)
         const urlParams = new URLSearchParams(window.location.search);
@@ -78,7 +128,7 @@ class ApiService {
     );
 
     // Response interceptor - flattening the Daemon response
-    this.client.interceptors.response.use(
+    rawClient.interceptors.response.use(
       (response) => response.data,
       (error) => {
         if (error.response?.status === 401) {
@@ -89,128 +139,189 @@ class ApiService {
         return Promise.reject(new Error(errorMessage));
       }
     );
+
+    // Wrap so that every method returns the unwrapped body type directly.
+    // The response interceptor above already does `response => response.data`,
+    // so `rawClient.get<T>(url)` resolves to the JSON body (not AxiosResponse).
+    this.client = {
+      get: <T>(url: string, config?: Record<string, unknown>) =>
+        rawClient.get<T>(url, config as any) as Promise<T>,
+      post: <T>(url: string, data?: unknown, config?: Record<string, unknown>) =>
+        rawClient.post<T>(url, data, config as any) as Promise<T>,
+      put: <T>(url: string, data?: unknown, config?: Record<string, unknown>) =>
+        rawClient.put<T>(url, data, config as any) as Promise<T>,
+      delete: <T>(url: string, config?: Record<string, unknown>) =>
+        rawClient.delete<T>(url, config as any) as Promise<T>,
+    };
   }
 
-  // Server management
+  // ==================== Server Management ====================
+
+  /**
+   * Converts a raw server record from the daemon API into a typed MCPServer.
+   */
+  private toMCPServer(raw: Record<string, unknown>): MCPServer {
+    const manifest = (raw.manifest as Record<string, unknown> | undefined) || {};
+    const serverIdentity = (raw.serverName as string) || (raw.name as string) || (manifest.name as string) || 'unknown';
+    const displayName = (manifest.name as string) || (raw.name as string) || 'unknown';
+    const runtimeRaw = (manifest.runtime as Record<string, unknown>) || (raw.runtime as Record<string, unknown>) || {};
+
+    return {
+      id: (raw.id as string) || String(raw.pid ?? '') || serverIdentity,
+      name: serverIdentity,
+      displayName,
+      version: (manifest.version as string) || (raw.version as string) || 'unknown',
+      description: (manifest.description as string) || (raw.description as string) || '',
+      runtime: {
+        type: (runtimeRaw.type as string) || 'unknown',
+        command: (runtimeRaw.command as string) || '',
+        args: (runtimeRaw.args as string[]) || [],
+        env: (runtimeRaw.env as string[]) || [],
+      },
+      capabilities: (manifest.capabilities as Record<string, unknown>) || (raw.capabilities as Record<string, unknown>) || {},
+      tools: (raw.tools as MCPServer['tools']) || [],
+      status: (raw.status as MCPServer['status']) || 'stopped',
+      lastStartedAt: raw.startTime ? new Date(raw.startTime as number).toISOString() : undefined,
+      transportType: raw.transportType as string | undefined,
+      url: raw.url as string | undefined,
+      external: raw.external as boolean | undefined,
+    };
+  }
+
   async getServers(): Promise<MCPServer[]> {
-    const response = await this.client.get('/api/servers') as any;
-    const servers = response.servers || [];
-    
-    return servers.map((server: any) => {
-      const manifest = server.manifest || {};
-      const serverName = manifest.name || server.name || server.serverName || 'unknown';
-      const version = manifest.version || server.version || 'unknown';
-      const description = manifest.description || server.description || '';
-      const runtime = manifest.runtime || server.runtime || {
-        type: 'unknown',
-        command: '',
-        args: [],
-        env: []
-      };
-      
-      return {
-        id: server.pid?.toString() || server.id || '0',
-        name: serverName,
-        version: version,
-        description: description,
-        runtime: runtime,
-        capabilities: manifest.capabilities || server.capabilities || {},
-        status: server.status || 'stopped',
-        lastStartedAt: server.startTime ? new Date(server.startTime).toISOString() : undefined
-      };
-    });
+    const data = await this.client.get<ServersEnvelopeResponse>('/api/servers');
+    return (data.servers || []).map((raw) => this.toMCPServer(raw));
   }
 
   async getServer(id: string): Promise<MCPServer> {
-    const response = await this.client.get(`/api/servers/${id}`) as any;
-    const server = response.server || response;
-    
-    return {
-      id: server.pid?.toString() || server.id || id,
-      name: server.manifest?.name || server.name || server.serverName,
-      version: server.manifest?.version || server.version,
-      description: server.manifest?.description || server.description,
-      runtime: server.manifest?.runtime || server.runtime,
-      capabilities: server.manifest?.capabilities || server.capabilities,
-      status: server.status,
-      lastStartedAt: server.startTime ? new Date(server.startTime).toISOString() : undefined
-    };
+    const data = await this.client.get<ServerEnvelopeResponse>(`/api/servers/${id}`);
+    const raw = (data.server as Record<string, unknown>) || {};
+    return this.toMCPServer(raw);
   }
 
   async pullServer(request: PullServerRequest): Promise<MCPServer> {
     const backendRequest = { serverNameOrUrl: request.serverName };
-    const response = await this.client.post('/api/servers/pull', backendRequest) as any;
-    
-    const server = response.server || response;
-    const result: MCPServer = {
-      id: server.pid?.toString() || '0',
-      name: server.manifest?.name || server.name || server.serverName,
-      version: server.manifest?.version || server.version || 'unknown',
-      description: server.manifest?.description || server.description || '',
-      runtime: server.manifest?.runtime || server.runtime || { type: 'unknown', command: '', args: [], env: [] },
-      capabilities: server.manifest?.capabilities || server.capabilities || {},
-      status: server.status || 'pulled',
-      lastStartedAt: server.startTime ? new Date(server.startTime).toISOString() : undefined
-    };
-
-    return result;
+    const data = await this.client.post<ServerEnvelopeResponse>('/api/servers/pull', backendRequest);
+    const raw = (data.server as Record<string, unknown>) || {};
+    return this.toMCPServer(raw);
   }
 
   /**
    * Import MCP config (Claude Desktop format)
    */
-  async importConfig(config: string): Promise<{ success: boolean; message: string; imported: any[]; total: number }> {
-    return await this.client.post('/api/servers/import', { config }) as any;
+  async importConfig(config: string): Promise<{ success: boolean; message: string; imported: Record<string, unknown>[]; total: number }> {
+    return await this.client.post('/api/servers/import', { config });
   }
 
   async startServer(request: StartServerRequest): Promise<ProcessInfo> {
-    const response = await this.client.post(`/api/servers`, { serverNameOrUrl: request.serverId }) as any;
+    const data = await this.client.post<Record<string, unknown>>(`/api/servers`, { serverNameOrUrl: request.serverId });
     return {
-      pid: response.pid,
-      serverName: response.name,
-      name: response.name,
-      version: response.version,
-      status: response.status,
-      logPath: response.logPath,
+      pid: data.pid as number,
+      serverName: data.name as string,
+      name: data.name as string,
+      version: data.version as string,
+      status: (data.status as string) as ProcessInfo['status'],
+      logPath: data.logPath as string,
       startTime: Date.now(),
       manifest: {
-        name: response.name,
-        version: response.version,
+        name: data.name as string,
+        version: data.version as string,
         runtime: { type: "unknown", command: "" }
       }
-    } as any;
+    };
   }
 
   async deleteServer(id: string): Promise<void> {
     await this.client.delete(`/api/servers/${id}`);
   }
 
-  // Execution & AI
-  async parseIntent(intent: string, context?: any): Promise<UnifiedExecutionResult> {
-    const response = await this.client.post('/api/execute/parse-intent', { intent, context }) as any;
-    return response.data || response;
+  // ==================== Session-Based API ====================
+
+  /**
+   * Create a new execution session.
+   */
+  async createSession(query: string, type: 'direct' | 'interactive' = 'direct', metadata?: Record<string, unknown>): Promise<SessionCreateResponse> {
+    return await this.client.post<SessionCreateResponse>('/api/execute/session/create', { query, type, metadata });
+  }
+
+  /**
+   * Execute a session by ID.
+   */
+  async executeSession(sessionId: string, options?: UnifiedExecutionOptions): Promise<SessionExecuteResponse> {
+    return await this.client.post<SessionExecuteResponse>(`/api/execute/session/${sessionId}/execute`, { options });
+  }
+
+  /**
+   * Send feedback for an interactive session.
+   */
+  async sendFeedback(sessionId: string, type: string, message?: string, modifiedPlan?: Record<string, unknown>): Promise<ExecutionSession> {
+    const data = await this.client.post<{ session: ExecutionSession }>(`/api/execute/session/${sessionId}/feedback`, { type, message, modifiedPlan });
+    return data.session;
+  }
+
+  /**
+   * Get a session by ID.
+   */
+  async getSession(sessionId: string): Promise<ExecutionSession> {
+    const data = await this.client.get<{ session: ExecutionSession }>(`/api/execute/session/${sessionId}`);
+    return data.session;
+  }
+
+  /**
+   * List all sessions.
+   */
+  async listSessions(): Promise<SessionListResponse> {
+    return await this.client.get<SessionListResponse>('/api/execute/sessions');
+  }
+
+  /**
+   * Cancel a session.
+   */
+  async cancelSession(sessionId: string): Promise<ExecutionSession> {
+    const data = await this.client.post<{ session: ExecutionSession }>(`/api/execute/session/${sessionId}/cancel`);
+    return data.session;
+  }
+
+  // ==================== Legacy Execution & AI (kept for backward compatibility) ====================
+
+  async parseIntent(intent: string, context?: Record<string, unknown>): Promise<UnifiedExecutionResult> {
+    const response = await this.client.post<UnifiedExecutionResult>('/api/execute/parse-intent', { intent, context });
+    return response;
   }
 
   async executeNaturalLanguage(query: string, options?: UnifiedExecutionOptions): Promise<UnifiedExecutionResult> {
-    return await this.client.post('/api/execute/natural-language', { query, options }) as any;
+    return await this.client.post<UnifiedExecutionResult>('/api/execute/natural-language', { query, options });
   }
 
-  async executeSteps(request: { steps: any[]; options?: UnifiedExecutionOptions }): Promise<UnifiedExecutionResult> {
-    const response = await this.client.post('/api/execute/steps', request) as any;
-    return response.data || response;
+  async executeSteps(request: { steps: Record<string, unknown>[]; options?: UnifiedExecutionOptions }): Promise<UnifiedExecutionResult> {
+    const response = await this.client.post<UnifiedExecutionResult>('/api/execute/steps', request);
+    return response;
   }
 
-  // Process management
+  // ==================== Process Management ====================
+
   async getProcesses(): Promise<ProcessInfo[]> {
-    const response = await this.client.get('/api/servers') as any;
-    const servers = (response.servers || []) as any[];
-    return servers.map(server => ({
-      ...server,
-      serverId: server.pid?.toString() || '0',
-      serverName: server.name || server.serverName,
-      status: server.status || 'running',
-      startedAt: server.startTime ? new Date(server.startTime).toISOString() : new Date().toISOString()
-    }));
+    const data = await this.client.get<ServersEnvelopeResponse>('/api/servers');
+    return (data.servers || []).map((raw) => {
+      const pidVal = raw.pid as number | undefined;
+      const name = (raw.name as string) || (raw.serverName as string) || '';
+      return {
+        pid: pidVal ?? 0,
+        serverId: String(pidVal ?? '0'),
+        serverName: name,
+        name,
+        version: (raw.version as string) || '',
+        status: (raw.status as string) || 'running',
+        logPath: (raw.logPath as string) || '',
+        startTime: (raw.startTime as number) || Date.now(),
+        startedAt: (raw as { startedAt?: string }).startedAt || (raw.startTime ? new Date(raw.startTime as number).toISOString() : new Date().toISOString()),
+        manifest: {
+          name,
+          version: (raw.version as string) || '',
+          runtime: { type: 'unknown', command: '' },
+        },
+      } as ProcessInfo;
+    });
   }
 
   async stopProcess(request: StopProcessRequest): Promise<void> {
@@ -218,51 +329,64 @@ class ApiService {
   }
 
   async getProcessLogs(pid: number): Promise<string> {
-    const response = await this.client.get(`/api/servers/${pid}/logs`) as any;
-    return response.logs || '';
+    const data = await this.client.get<LogsEnvelopeResponse>(`/api/servers/${pid}/logs`);
+    return data.logs || '';
   }
 
-  // Configuration management
+  // ==================== Configuration Management ====================
+
   async getConfig(): Promise<Config> {
-    const response = await this.client.get('/api/config') as any;
-    return response.config;
+    return await this.client.get<Config>('/api/config');
   }
 
   async updateConfig(request: UpdateConfigRequest): Promise<Config> {
-    const response = await this.client.put('/api/config', request) as any;
-    return response.config;
+    return await this.client.put<Config>('/api/config', request);
   }
 
-  // Secrets management
+  // ==================== Secrets Management ====================
+
   async getSecrets(): Promise<Secret[]> {
-    const response = await this.client.get('/api/secrets') as any;
-    return response.secrets || [];
+    const data = await this.client.get<{ secrets: unknown }>('/api/secrets');
+    // Backend returns: { secrets: ["key1", "key2"] } (string array)
+    // Frontend expects: [{ name, lastUpdated, description }] (object array)
+    const rawSecrets = data.secrets;
+    if (Array.isArray(rawSecrets)) {
+      if (rawSecrets.length > 0 && typeof rawSecrets[0] === 'string') {
+        return (rawSecrets as string[]).map(name => ({
+          name,
+          lastUpdated: new Date().toISOString(),
+        }));
+      }
+      return rawSecrets as Secret[];
+    }
+    return [];
   }
 
   async createSecret(request: CreateSecretRequest): Promise<Secret> {
-    const response = await this.client.post('/api/secrets', request) as any;
-    return response.secret;
+    const data = await this.client.post<{ secret: Secret }>('/api/secrets', request);
+    return data.secret;
   }
 
   async deleteSecret(name: string): Promise<void> {
     await this.client.delete(`/api/secrets/${name}`);
   }
 
-  // Workflow management
+  // ==================== Workflow Management ====================
+
   async getWorkflows(): Promise<Workflow[]> {
-    const response = await this.client.get('/api/workflows') as any;
-    return response.workflows || [];
+    const data = await this.client.get<{ workflows: Workflow[] }>('/api/workflows');
+    return data.workflows || [];
   }
 
   async getWorkflow(id: string): Promise<Workflow> {
     const encodedId = encodeURIComponent(id);
-    const response = await this.client.get(`/api/workflows/${encodedId}`) as any;
-    return response.workflow;
+    const data = await this.client.get<WorkflowEnvelopeResponse>(`/api/workflows/${encodedId}`);
+    return data.workflow;
   }
 
   async saveWorkflow(workflow: Workflow): Promise<Workflow> {
-    const response = await this.client.post('/api/workflows', workflow) as any;
-    return response.workflow || response;
+    const response = await this.client.post<WorkflowEnvelopeResponse>('/api/workflows', workflow);
+    return response.workflow || (response as unknown as Workflow);
   }
 
   async deleteWorkflow(id: string): Promise<void> {
@@ -270,26 +394,36 @@ class ApiService {
     await this.client.delete(`/api/workflows/${encodedId}`);
   }
 
-  async executeWorkflow(request: ExecuteWorkflowRequest): Promise<any> {
+  async executeWorkflow(request: ExecuteWorkflowRequest): Promise<Record<string, unknown>> {
     const encodedId = encodeURIComponent(request.workflowId);
-    return await this.client.post(`/api/workflows/${encodedId}/execute`, request.parameters || {}) as any;
+    return await this.client.post<Record<string, unknown>>(`/api/workflows/${encodedId}/execute`, request.parameters || {});
   }
 
-  // System information
+  // ==================== System Information ====================
+
   async getSystemStats(): Promise<SystemStats> {
-    const response = await this.client.get('/api/system/stats') as any;
-    return response.stats;
+    const data = await this.client.get<{ stats: SystemStats }>('/api/system/stats');
+    return data.stats;
   }
 
   async getSystemLogs(): Promise<string> {
-    const response = await this.client.get('/api/system/logs') as any;
-    return response.logs || '';
+    const data = await this.client.get<LogsEnvelopeResponse>('/api/system/logs');
+    return data.logs || '';
+  }
+
+  /**
+   * Aggregated dashboard data — replaces 4 separate requests with 1.
+   * Returns a `version` field (monotonic timestamp) so the caller can
+   * skip re-rendering when nothing has changed.
+   */
+  async getDashboard(): Promise<DashboardData> {
+    return await this.client.get<DashboardData>('/api/dashboard');
   }
 
   async healthCheck(): Promise<boolean> {
     try {
-      const response = await this.client.get('/api/status') as any;
-      return !!response.running;
+      const data = await this.client.get<{ running?: boolean }>('/api/status');
+      return !!data.running;
     } catch {
       return false;
     }
@@ -304,37 +438,36 @@ class ApiService {
     }
   }
 
-  async testAIConfig(config: { provider: string; model: string; apiKey: string }): Promise<{ success: boolean; message?: string }> {
+  async testAIConfig(config: { provider: string; model: string; apiKey: string; apiEndpoint?: string }): Promise<{ success: boolean; message?: string }> {
     try {
-      const response = await this.client.post('/api/ai/test', config) as any;
-      return { success: true, message: response.message || 'Configuration test successful' };
-    } catch (error: any) {
+      const data = await this.client.post<{ message?: string } & Record<string, unknown>>('/api/ai/test', config);
+      return { success: true, message: (data as { message?: string }).message || 'Configuration test successful' };
+    } catch (error: unknown) {
       return {
         success: false,
-        message: error.message || 'Configuration test failed'
+        message: error instanceof Error ? error.message : 'Configuration test failed'
       };
     }
   }
 
-  // Notification management
-  async getNotifications(): Promise<Notification[]> {
-    try {
-      const response = await this.client.get('/api/notifications') as any;
-      return response.notifications || [];
-    } catch {
-      return [];
-    }
+  // ==================== Telemetry & Trace = :
+  async getAIRecordsByTrace(traceId: string): Promise<any[]> {
+    return await this.client.get(`/api/telemetry/ai-records/${traceId}`);
   }
 
-  async markNotificationAsRead(id: string): Promise<void> {
-    await this.client.post(`/api/notifications/${id}/read`);
+  async getSpansByTrace(traceId: string): Promise<{ traceId: string; spans: any[] }> {
+    return await this.client.get(`/api/telemetry/spans/${traceId}`);
+  }
+
+  async markNotificationAsRead(_id: string): Promise<void> {
+    // no-op
   }
 
   // Search logic (Kept for compatibility, but simplified)
-  async searchServices(query: string, source?: string, limit?: number, offset?: number) {
-    const params: any = { q: query, source, limit, offset };
+  async searchServices(query: string, source?: string, limit?: number, offset?: number): Promise<{ services?: Record<string, unknown>[]; total?: number; source?: string; hasMore?: boolean }> {
+    const params: Record<string, unknown> = { q: query, source, limit, offset };
     try {
-      return await this.client.get('/api/servers/search', { params }) as any;
+      return await this.client.get('/api/servers/search', { params });
     } catch {
       return { services: [], total: 0, source: source || 'unknown', hasMore: false };
     }

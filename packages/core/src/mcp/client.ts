@@ -8,7 +8,6 @@ import { logger } from "../core/logger.js";
  */
 
 import { EventEmitter } from "events";
-import { spawn, ChildProcess } from "child_process";
 import {
   MCPClientConfig,
   JSONRPCRequest,
@@ -29,171 +28,22 @@ import {
   ErrorBoundary,
   globalErrorBoundary,
 } from "../kernel/error-boundary.js";
-
-// ==================== Simple Stdio Transport ====================
-
-class StdioTransport extends EventEmitter {
-  private process: ChildProcess | null = null;
-  private buffer: string = "";
-  private _connected: boolean = false;
-  private _existingProcess: ChildProcess | null = null;
-
-  constructor(
-    private config: {
-      command: string;
-      args?: string[];
-      env?: Record<string, string>;
-      existingProcess?: ChildProcess;
-    },
-  ) {
-    super();
-    this._existingProcess = config.existingProcess || null;
-  }
-
-  async connect(): Promise<void> {
-    if (this._connected) return;
-
-    // Helper to setup listeners for a process
-    const setupProcessListeners = (child: ChildProcess) => {
-      child.stdout?.on("data", (data: Buffer) => {
-        this.buffer += data.toString();
-        this.processBuffer();
-      });
-
-      child.stderr?.on("data", (data: Buffer) => {
-        // MCP servers often log to stderr, forward as debug
-        const msg = data.toString().trim();
-        if (msg) {
-          this.emit("stderr", msg);
-        }
-      });
-
-      child.on("error", (error: Error) => {
-        this._connected = false;
-        this.emit("error", error);
-      });
-
-      child.on("exit", (code: number | null) => {
-        this._connected = false;
-        this.emit("disconnected");
-        if (code !== 0 && code !== null) {
-          this.emit("error", new Error(`Process exited with code ${code}`));
-        }
-      });
-
-      child.on("close", () => {
-        this._connected = false;
-        this.emit("disconnected");
-      });
-    };
-
-    // If an existing process was provided, use it directly
-    if (this._existingProcess) {
-      this.process = this._existingProcess;
-      setupProcessListeners(this.process);
-      this._connected = true;
-      this.emit("connected");
-      return;
-    }
-
-    return new Promise((resolve, reject) => {
-      try {
-        const child = spawn(this.config.command, this.config.args || [], {
-          stdio: ["pipe", "pipe", "pipe"],
-          env: this.config.env || (process.env as Record<string, string>),
-          shell: false,
-        });
-
-        this.process = child;
-        setupProcessListeners(child);
-
-        // Give the process a moment to start
-        setTimeout(() => {
-          if (child.exitCode === null) {
-            this._connected = true;
-            this.emit("connected");
-            resolve();
-          } else {
-            reject(
-              new Error(
-                `Process exited immediately with code ${child.exitCode}`,
-              ),
-            );
-          }
-        }, 500);
-      } catch (error) {
-        reject(error);
-      }
-    });
-  }
-
-  async disconnect(): Promise<void> {
-    if (this.process) {
-      // If this is an existing process (not spawned by us), don't kill it
-      // Just detach from it
-      if (this._existingProcess) {
-        this.process = null;
-        this._connected = false;
-        return;
-      }
-
-      this.process.kill("SIGTERM");
-      // Give it a moment to exit gracefully
-      await new Promise((resolve) => setTimeout(resolve, 500));
-      if (this.process.exitCode === null) {
-        this.process.kill("SIGKILL");
-      }
-      this.process = null;
-    }
-    this._connected = false;
-  }
-
-  isConnected(): boolean {
-    return (
-      this._connected && this.process !== null && this.process.exitCode === null
-    );
-  }
-
-  async send(message: any): Promise<void> {
-    if (!this.process?.stdin) {
-      throw new Error("Transport not connected");
-    }
-
-    const data = JSON.stringify(message) + "\n";
-    this.process.stdin.write(data);
-  }
-
-  private processBuffer(): void {
-    const lines = this.buffer.split("\n");
-    // Keep the last incomplete line in the buffer
-    this.buffer = lines.pop() || "";
-
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed) continue;
-
-      try {
-        const message = JSON.parse(trimmed);
-        this.emit("message", message);
-      } catch (error) {
-        // Non-JSON output from stderr-like messages
-        this.emit("stderr", trimmed);
-      }
-    }
-  }
-}
+import { StdioTransport } from "./stdio-transport.js";
+import { HttpTransport } from "./http-transport.js";
+import { SseTransport } from "./sse-transport.js";
+import { MCPTransport } from "./transport.js";
 
 // ==================== MCP Client ====================
 
 export class MCPClient extends EventEmitter {
   private config: MCPClientConfig;
-  private transport: StdioTransport;
+  private transport: MCPTransport;
   private connected: boolean = false;
   private requestId: number = 0;
   private pendingRequests: Map<
     string | number,
     {
-      resolve: (value: any) => void;
+      resolve: (value: unknown) => void;
       reject: (error: Error) => void;
       timeout: NodeJS.Timeout;
     }
@@ -214,12 +64,28 @@ export class MCPClient extends EventEmitter {
       ...config,
     };
 
-    this.transport = new StdioTransport({
-      command: config.transport.command || "npx",
-      args: config.transport.args || [],
-      env: config.transport.env as Record<string, string> | undefined,
-      existingProcess: config.transport.existingProcess,
-    });
+    if (config.transport.type === "stdio") {
+      this.transport = new StdioTransport({
+        command: config.transport.command || "npx",
+        args: config.transport.args || [],
+        env: config.transport.env as Record<string, string> | undefined,
+        existingProcess: config.transport.existingProcess,
+      });
+    } else if (config.transport.type === "http") {
+      this.transport = new HttpTransport({
+        url: config.transport.url!,
+        headers: config.transport.headers,
+      });
+    } else if (config.transport.type === "sse") {
+      this.transport = new SseTransport({
+        url: config.transport.url!,
+        headers: config.transport.headers,
+      });
+    } else {
+      throw new Error(
+        `Transport type ${config.transport.type} is not supported yet`,
+      );
+    }
     this.setupTransportListeners();
   }
 
@@ -231,23 +97,36 @@ export class MCPClient extends EventEmitter {
     const result = await globalErrorBoundary.execute(
       async () => {
         await this.transport.connect();
+
+        // 1. Send mandatory initialize request
+        logger.info(`[MCPClient] Sending initialize request to ${this.config.serverName}...`);
+        const initResult = await this.sendRequest(MCP_METHODS.INITIALIZE, {
+          protocolVersion: "2024-11-05",
+          capabilities: {},
+          clientInfo: { name: "IntentOrch", version: "0.8.0" }
+        });
+
+        const initResultAny = initResult as { serverInfo?: { name?: string; version?: string } };
+        logger.info(`[MCPClient] Server initialized: ${initResultAny?.serverInfo?.name} ${initResultAny?.serverInfo?.version}`);
+
+        // 2. Send mandatory initialized notification (BARE-BONES - NO PARAMS)
+        // Many Java/Spring servers require this specific notification to "unlock" the session
+        logger.info(`[MCPClient] Sending initialized notification...`);
+        await this.sendNotification(MCP_METHODS.NOTIFICATIONS_INITIALIZED);
+
+        // 3. Set logging level (Follows Inspector's sequence for Java servers)
+        try {
+          logger.info(`[MCPClient] Setting logging level to info...`);
+          await this.sendRequest(MCP_METHODS.LOGGING_SET_LEVEL, { level: "info" });
+        } catch (e) {
+          logger.warn(`[MCPClient] logging/setLevel failed (ignoring):`, e);
+        }
+
         this.connected = true;
         this.emitEvent("connected");
 
         if (this.config.autoConnect) {
           await this.refreshTools();
-        }
-
-        // Health check
-        try {
-          const tools = await this.listTools();
-          logger.debug(
-            `[MCPClient] Health check passed: ${tools.length} tools available`,
-          );
-        } catch (healthError: any) {
-          logger.warn(
-            `[MCPClient] Health check failed: ${healthError.message}`,
-          );
         }
       },
       {
@@ -262,14 +141,37 @@ export class MCPClient extends EventEmitter {
     }
   }
 
+  /**
+   * Send a JSON-RPC notification (MUST NOT have an ID or empty PARAMS)
+   */
+  private async sendNotification(method: string, params?: Record<string, unknown>): Promise<void> {
+    const request: JSONRPCRequest = {
+      jsonrpc: "2.0",
+      id: null,
+      method,
+    };
+    // CRITICAL: Only add params if they are non-empty. 
+    // Java servers often fail if an empty {} is provided for notification methods that expect nothing.
+    if (params && Object.keys(params).length > 0) {
+      request.params = params;
+    }
+    await this.transport.send(request);
+  }
   async disconnect(): Promise<void> {
     if (!this.connected) return;
 
     try {
       await this.transport.disconnect();
     } catch (error) {
+      logger.warn(`[MCPClient] Transport disconnect error for "${this.config.serverName}" (non-fatal):`, error);
       this.emitEvent("error", error);
-      throw error;
+      // IMPORTANT: Do NOT re-throw. Transport disconnect can fail with EPIPE
+      // when the remote side has already closed the connection. The caller
+      // (disconnectServer / cleanupConnections) must still be able to clean up
+      // its internal state (connectedServers Map). Re-throwing here would
+      // prevent the finally block from running — but even with finally,
+      // the error would propagate to the caller and potentially leave the
+      // cleanup incomplete.
     } finally {
       this.connected = false;
       this.pendingRequests.forEach(({ reject, timeout }) => {
@@ -311,7 +213,7 @@ export class MCPClient extends EventEmitter {
 
   async callTool(
     toolName: string,
-    arguments_: Record<string, any>,
+    arguments_: Record<string, unknown>,
   ): Promise<ToolResult> {
     const tool = this.findTool(toolName);
     let mappedArguments = arguments_;
@@ -327,7 +229,7 @@ export class MCPClient extends EventEmitter {
       } catch (error) {
         logger.warn(
           `Parameter mapping failed for tool "${toolName}":`,
-          error instanceof Error ? error.message : String(error),
+          error instanceof Error ? (error instanceof Error ? error.message : String(error)) : String(error),
         );
       }
     }
@@ -402,8 +304,8 @@ export class MCPClient extends EventEmitter {
             }
 
             return toolResult;
-          } catch (error: any) {
-            lastError = error;
+          } catch (error) {
+            lastError = error as Error;
             if (attempt < maxRetries) {
               await this.delay(1000 * attempt);
             }
@@ -467,7 +369,7 @@ export class MCPClient extends EventEmitter {
     return result.result!;
   }
 
-  async readResource(uri: string): Promise<any> {
+  async readResource(uri: string): Promise<unknown> {
     const result = await globalErrorBoundary.execute(
       async () => {
         const response = await this.sendRequest(MCP_METHODS.RESOURCES_READ, {
@@ -522,8 +424,8 @@ export class MCPClient extends EventEmitter {
 
   async getPrompt(
     name: string,
-    arguments_?: Record<string, any>,
-  ): Promise<any> {
+    arguments_?: Record<string, unknown>,
+  ): Promise<unknown> {
     const result = await globalErrorBoundary.execute(
       async () => {
         const response = await this.sendRequest(MCP_METHODS.PROMPTS_GET, {
@@ -555,37 +457,44 @@ export class MCPClient extends EventEmitter {
 
   // ==================== Core Request Methods ====================
 
-  private async sendRequest(method: string, params?: any): Promise<any> {
+  private async sendRequest(method: string, params?: Record<string, unknown>): Promise<unknown> {
     if (!this.isConnected()) {
       throw new Error("Not connected to MCP server");
     }
 
     const requestId = this.generateRequestId();
+    // Ensure params is at least an empty object, never undefined
+    const normalizedParams = params || {};
+    
     const request: JSONRPCRequest = {
       jsonrpc: "2.0",
       id: requestId,
       method,
-      params,
+      params: normalizedParams,
     };
 
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
         this.pendingRequests.delete(requestId);
+        this.pendingRequests.delete(String(requestId)); // Cleanup both variants
         reject(new Error(`Request timeout after ${this.config.timeout}ms`));
       }, this.config.timeout);
 
+      // Store with both original ID and string ID for maximum lookup compatibility
       this.pendingRequests.set(requestId, { resolve, reject, timeout });
+      this.pendingRequests.set(String(requestId), { resolve, reject, timeout });
 
       this.transport.send(request).catch((error) => {
         this.pendingRequests.delete(requestId);
+        this.pendingRequests.delete(String(requestId));
         clearTimeout(timeout);
         reject(error);
       });
     });
   }
 
-  private generateRequestId(): string {
-    return `req_${++this.requestId}_${Date.now()}`;
+  private generateRequestId(): number {
+    return ++this.requestId;
   }
 
   // ==================== Transport Layer Event Handling ====================
@@ -603,7 +512,7 @@ export class MCPClient extends EventEmitter {
     });
   }
 
-  private handleTransportMessage(message: any): void {
+  private handleTransportMessage(message: unknown): void {
     try {
       const response = message as JSONRPCResponse;
 
@@ -612,23 +521,27 @@ export class MCPClient extends EventEmitter {
         return;
       }
 
-      if (response.id && this.pendingRequests.has(response.id)) {
-        const { resolve, reject, timeout } = this.pendingRequests.get(
-          response.id,
-        )!;
+      // Check if ID matches, handling both number and string representations
+      const id = response.id;
+      if (id !== undefined && id !== null && this.pendingRequests.has(id)) {
+        const { resolve, reject, timeout } = this.pendingRequests.get(id)!;
         clearTimeout(timeout);
-        this.pendingRequests.delete(response.id);
+        
+        // Cleanup all variants of this ID from the map
+        this.pendingRequests.delete(id);
+        this.pendingRequests.delete(String(id));
+        this.pendingRequests.delete(Number(id));
 
         if (response.error) {
           const errorMessage = response.error.message || "Unknown error";
           const error = new Error(errorMessage);
-          (error as any).code = response.error.code;
-          (error as any).data = response.error.data;
+          (error as { code?: number; data?: unknown }).code = response.error.code;
+          (error as { code?: number; data?: unknown }).data = response.error.data;
           reject(error);
         } else {
           resolve(response.result !== undefined ? response.result : null);
         }
-      } else if (!response.id) {
+      } else if (id === undefined || id === null) {
         this.handleNotification(response);
       }
     } catch (error) {
@@ -636,25 +549,41 @@ export class MCPClient extends EventEmitter {
     }
   }
 
-  private handleTransportError(error: Error): void {
+  private handleTransportError(error: unknown): void {
+    // Only log if it's a real error, avoid flooding with empty {} from SDK
+    if (error && Object.keys(error).length > 0) {
+      logger.error(`[MCPClient] Transport error for "${this.config.serverName}":`, error);
+    }
     this.emitEvent("error", error);
   }
 
   private handleNotification(response: JSONRPCResponse): void {
     if (response.result) {
-      logger.info("Received notification:", response);
+      logger.debug("Received notification:", response);
     }
   }
 
   // ==================== Event Emission ====================
 
-  private emitEvent(type: MCPEventType, data?: any): void {
+  private emitEvent(type: MCPEventType, data?: unknown): void {
     const event: MCPEvent = {
       type,
       data,
       timestamp: Date.now(),
     };
-    this.emit(type, event);
+    
+    // Safely emit 'error' to avoid ERR_UNHANDLED_ERROR if no listeners are attached
+    if (type === "error") {
+      if (this.listenerCount("error") > 0) {
+        this.emit("error", event);
+      } else if (data && Object.keys(data).length > 0) {
+        // Only log non-empty unhandled errors
+        logger.error(`[MCPClient] Unhandled error in "${this.config.serverName}":`, data);
+      }
+    } else {
+      this.emit(type, event);
+    }
+    
     this.emit("event", event);
   }
 

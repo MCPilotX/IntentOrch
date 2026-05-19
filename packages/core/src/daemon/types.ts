@@ -13,6 +13,9 @@ export interface ServerInfo {
   status: "running" | "stopped" | "error";
   startTime: number;
   logPath: string;
+  external?: boolean;
+  transportType?: string;
+  url?: string;
 }
 
 export interface StartServerRequest {
@@ -27,6 +30,7 @@ export interface StartServerResponse {
   status: string;
   logPath: string;
   alreadyRunning?: boolean;
+  external?: boolean;
 }
 
 export interface StopServerRequest {
@@ -56,4 +60,53 @@ export interface DaemonStatusResponse {
 export interface ErrorResponse {
   error: string;
   message: string;
+}
+
+import type { ExecutionSession } from "../execution/types.js";
+
+// ==================== Session API Types ====================
+
+export interface SessionCreateResponse {
+  success: boolean;
+  sessionId: string;
+  session: ExecutionSession;
+}
+
+export interface SessionExecuteResponse {
+  success: boolean;
+  result?: unknown;
+  executionSteps?: Record<string, unknown>[];
+  steps?: Record<string, unknown>[];
+  status?: string;
+  confidence?: number;
+  error?: string;
+  session?: ExecutionSession;
+  statistics?: {
+    totalSteps: number;
+    successfulSteps: number;
+    failedSteps: number;
+    totalDuration: number;
+    averageStepDuration: number;
+  };
+}
+
+export interface SessionFeedbackResponse {
+  success: boolean;
+  session: ExecutionSession;
+}
+
+export interface SessionGetResponse {
+  success: boolean;
+  session: ExecutionSession;
+}
+
+export interface SessionListResponse {
+  success: boolean;
+  sessions: ExecutionSession[];
+  total: number;
+}
+
+export interface SessionCancelResponse {
+  success: boolean;
+  session: ExecutionSession;
 }

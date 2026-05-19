@@ -13,6 +13,11 @@ export interface ProcessInfo {
       env?: string[];
       cwd?: string;
     };
+    transport?: {
+      type: "stdio" | "http" | "sse" | "websocket" | "tcp";
+      url?: string;
+      headers?: Record<string, string>;
+    };
   };
   startTime: number;
   startedAt?: string; // ISO string for web compatibility
@@ -22,6 +27,16 @@ export interface ProcessInfo {
   stdout?: string;
   stderr?: string;
   logPath?: string;
+  // External service fields (for HTTP/SSE transport types)
+  external?: boolean;
+  transportType?: string;
+  url?: string;
+  // Tools discovered from the server (for display in web UI)
+  tools?: Array<{
+    name: string;
+    description: string;
+    inputSchema?: Record<string, unknown>;
+  }>;
 }
 
 export interface ProcessStore {

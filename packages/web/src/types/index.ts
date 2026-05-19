@@ -6,16 +6,35 @@ import type {
   Config as CoreConfig,
   AIConfig as CoreAIConfig,
   DaemonResponse as CoreDaemonResponse,
-  RuntimeType
+  RuntimeType,
+  ExecutionSession as CoreExecutionSession,
+  SessionType,
 } from '@intentorch/core';
 
 // Re-export core types for convenience
-export type { CoreProcessInfo, CoreWorkflow, CoreWorkflowStep, CoreConfig, CoreAIConfig, CoreDaemonResponse };
+// IMPORTANT: SessionState is imported directly from @intentorch/core to ensure
+// consistency between frontend and backend state machine definitions.
+export type { 
+  CoreProcessInfo, 
+  CoreWorkflow, 
+  CoreWorkflowStep, 
+  CoreConfig, 
+  CoreAIConfig, 
+  CoreDaemonResponse,
+  CoreExecutionSession as ExecutionSession,
+  SessionType,
+};
+
+// Re-export SessionState from core — using `import type` + re-export alias
+// ensures frontend and backend always agree on the state machine.
+import type { SessionState as CoreSessionState } from '@intentorch/core';
+export type SessionState = CoreSessionState;
 
 // MCP Server related types
 export interface MCPServer {
   id: string;
   name: string;
+  displayName?: string;
   version: string;
   description?: string;
   runtime: {
@@ -25,11 +44,21 @@ export interface MCPServer {
     env?: string[];
   };
   capabilities?: {
-    tools?: any[];
+    tools?: Record<string, unknown>[];
   };
-  status: 'not_pulled' | 'pulled' | 'running' | 'stopped' | 'error';
+  tools?: Array<{
+    name: string;
+    description: string;
+    parameters?: Record<string, unknown>;
+    inputSchema?: Record<string, unknown>;
+  }>;
+  status: 'not_pulled' | 'pulled' | 'running' | 'stopped' | 'error' | 'starting';
   pulledAt?: string;
   lastStartedAt?: string;
+  // External service fields (for HTTP/SSE transport types)
+  transportType?: string;
+  url?: string;
+  external?: boolean;
 }
 
 // Map Core ProcessInfo to Web's simplified ProcessInfo if needed, 
@@ -45,23 +74,12 @@ export interface Secret {
   description?: string;
 }
 
-// Interactive session types
-export type SessionState = 
-  | 'initializing'
-  | 'parsing'
-  | 'validating'
-  | 'awaiting_feedback'
-  | 'executing'
-  | 'completed'
-  | 'failed'
-  | 'cancelled';
-
 export interface MissingParameter {
   toolName: string;
   parameterName: string;
   description: string;
   required: boolean;
-  currentValue: any;
+  currentValue: unknown;
   suggestions?: string[];
   validationError?: string;
 }
@@ -69,7 +87,7 @@ export interface MissingParameter {
 export interface UserFeedbackResponse {
   type: 'parameter_value' | 'clarification' | 'confirmation' | 'cancellation';
   parameterName?: string;
-  value?: any;
+  value?: unknown;
   clarification?: string;
   confirmed?: boolean;
   timestamp: Date;
@@ -83,12 +101,21 @@ export interface UserGuidanceMessage {
     id: string;
     label: string;
     description?: string;
-    value?: any;
+    value?: unknown;
   }>;
   requiresResponse: boolean;
   timestamp: Date;
 }
 
+/**
+ * InteractiveSession — legacy type that predates the unified ExecutionSession.
+ * 
+ * DEPRECATED: New code should use ExecutionSession from @intentorch/core directly.
+ * This type is retained only for backward compatibility with the legacy interactive
+ * test scripts (test-interactive.js, test-interactive-simple.js).
+ * 
+ * @deprecated Use ExecutionSession (@intentorch/core) instead.
+ */
 export interface InteractiveSession {
   sessionId: string;
   userId?: string;
@@ -101,23 +128,23 @@ export interface InteractiveSession {
     parameterName: string;
     isValid: boolean;
     message?: string;
-    suggestedValue?: any;
+    suggestedValue?: unknown;
   }>;
   conversationHistory: Array<{
     role: 'user' | 'system' | 'assistant';
     content: string;
     timestamp: Date;
-    metadata?: Record<string, any>;
+    metadata?: Record<string, unknown>;
   }>;
-  executionResult?: any;
+  executionResult?: unknown;
   error?: string;
   confidence: number;
   turnCount: number;
   createdAt: Date;
   updatedAt: Date;
   completedAt?: Date;
-  parsedIntents?: any[];
-  toolSelections?: any[];
+  parsedIntents?: Record<string, unknown>[];
+  toolSelections?: Record<string, unknown>[];
 }
 
 export type Workflow = CoreWorkflow;
@@ -131,7 +158,47 @@ export interface SystemStats {
   diskUsage: number;
 }
 
-export interface ApiResponse<T = any> {
+/** Aggregated payload returned by GET /api/dashboard — one request, all data. */
+export interface DashboardData {
+  alive: boolean;
+  stats: {
+    totalServers: number;
+    runningServers: number;
+    totalProcesses: number;
+    uptime: number;
+    requestCount: number;
+  };
+  processes: ProcessInfo[];
+  logs: string;
+  /** Monotonic timestamp to detect changes without deep-equality checks. */
+  version: number;
+}
+
+export interface SessionCreateResponse {
+  success: boolean;
+  sessionId: string;
+  session: CoreExecutionSession;
+}
+
+export interface SessionExecuteResponse {
+  success: boolean;
+  result?: unknown;
+  executionSteps?: Record<string, unknown>[];
+  steps?: Record<string, unknown>[];
+  status?: string;
+  confidence?: number;
+  error?: string;
+  session?: CoreExecutionSession;
+  traceId?: string;
+}
+
+export interface SessionListResponse {
+  success: boolean;
+  sessions: CoreExecutionSession[];
+  total: number;
+}
+
+export interface ApiResponse<T = unknown> {
   success: boolean;
   data?: T;
   error?: string;
@@ -171,7 +238,7 @@ export interface CreateSecretRequest {
 
 export interface ExecuteWorkflowRequest {
   workflowId: string;
-  parameters?: Record<string, any>;
+  parameters?: Record<string, unknown>;
 }
 
 // Notification types

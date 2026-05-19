@@ -1,10 +1,14 @@
 {
   "name": "@intentorch/web",
-  "version": "0.8.0",
+  "version": "0.8.1",
   "description": "Web dashboard for IntentOrch - MCP Ecosystem Orchestration Platform",
   "type": "module",
+  "bin": {
+    "intorch-web": "./bin/intorch-web.mjs"
+  },
   "files": [
     "dist",
+    "bin",
     "README.md"
   ],
   "scripts": {
@@ -20,7 +24,7 @@
   "dependencies": {
     "@headlessui/react": "^2.2.10",
     "@heroicons/react": "^2.2.0",
-    "@intentorch/core": "^0.8.0",
+    "@intentorch/core": "workspace:^",
     "@tanstack/react-query": "^5.99.0",
     "@tanstack/react-query-devtools": "^5.99.0",
     "axios": "^1.15.0",

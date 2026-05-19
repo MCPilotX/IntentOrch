@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { apiService } from '../services/api';
+import { API_BASE_URL } from '../services/config';
+import { useAuth } from '../contexts/AuthContext';
 import { useLanguage } from '../contexts/LanguageContext';
 import LanguageSwitcher from '../components/common/LanguageSwitcher';
 import { 
@@ -11,6 +13,7 @@ import {
 
 export default function Login() {
   const { t } = useLanguage();
+  const { login: authLogin } = useAuth();
   const [token, setToken] = useState('');
   const [error, setError] = useState('');
   const [errorType, setErrorType] = useState<'error' | 'warning' | 'success'>('error');
@@ -85,34 +88,26 @@ export default function Login() {
     setLoading(true);
 
     try {
-      localStorage.setItem('auth_token', trimmedToken);
+      const success = await authLogin(trimmedToken);
       
-      try {
-        await apiService.getServers();
-        
+      if (success) {
         // 处理"记住令牌"
         if (rememberToken) {
           localStorage.setItem('remembered_token', trimmedToken);
         } else {
           localStorage.removeItem('remembered_token');
         }
-        
         navigate('/');
-      } catch (authError) {
+      } else {
         try {
-          const isValid = await apiService.verifyToken();
-          if (isValid) {
-            showError(t('login.error.serverError'), 'warning');
-          } else {
-            showError(t('login.error.invalidToken'));
-          }
-        } catch (verifyError) {
           const isHealthy = await apiService.healthCheck();
           if (isHealthy) {
             showError(t('login.error.invalidToken'));
           } else {
             showError(t('login.error.cannotConnect'));
           }
+        } catch {
+          showError(t('login.error.cannotConnect'));
         }
         localStorage.removeItem('auth_token');
       }
@@ -129,7 +124,7 @@ export default function Login() {
     try {
       setError('');
       setLoading(true);
-      const response = await fetch('http://localhost:9658/api/auth/token', {
+      const response = await fetch(`${API_BASE_URL}/api/auth/token`, {
         method: 'GET',
         headers: { 'Accept': 'application/json' },
         mode: 'cors',

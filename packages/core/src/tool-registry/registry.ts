@@ -3,6 +3,9 @@ import fs from "fs/promises";
 import path from "path";
 import { getInTorchDir } from "../utils/paths.js";
 import { normalizeServerName, getDisplayName } from "../utils/server-name.js";
+import { createSingleton } from "../utils/singleton.js";
+import type { Manifest } from "../registry/types.js";
+import type { Tool } from "../mcp/types.js";
 
 export interface ToolMetadata {
   name: string;
@@ -21,7 +24,18 @@ export interface ParameterSchema {
   type: "string" | "number" | "boolean" | "object" | "array";
   description?: string;
   required?: boolean;
-  default?: any;
+  default?: unknown;
+}
+
+export interface DynamicToolShape {
+  name: string;
+  description?: string;
+  inputSchema?: {
+    type?: string;
+    properties?: Record<string, unknown>;
+    required?: string[];
+  };
+  [key: string]: unknown;
 }
 
 export interface ExtendedManifest {
@@ -40,9 +54,20 @@ export interface ExtendedManifest {
 export class ToolRegistry {
   private tools: Map<string, ToolMetadata> = new Map();
   private registryPath: string;
+  private initialized: Promise<void> | null = null;
 
   constructor() {
     this.registryPath = path.join(getInTorchDir(), "tool-registry.json");
+  }
+
+  /**
+   * Ensure the registry is loaded before any operation
+   */
+  private async ensureInitialized(): Promise<void> {
+    if (!this.initialized) {
+      this.initialized = this.load();
+    }
+    return this.initialized;
   }
 
   async load(): Promise<void> {
@@ -81,6 +106,7 @@ export class ToolRegistry {
   }
 
   async save(): Promise<void> {
+    await this.ensureInitialized();
     const registry = {
       version: "1.0.0",
       updatedAt: new Date().toISOString(),
@@ -97,18 +123,21 @@ export class ToolRegistry {
 
   async registerToolsFromManifest(
     serverName: string,
-    manifest: any,
+    manifest: Manifest,
   ): Promise<void> {
+    await this.ensureInitialized();
     // Normalize server name for uniqueness
     const normalizedServerName = normalizeServerName(serverName);
     const displayName = getDisplayName(serverName);
+    // ...
 
     // Support both manifest.tools and manifest.capabilities.tools
-    let tools = manifest.tools || [];
+    let tools = (manifest.tools as Record<string, unknown>[]) || [];
 
     // Check for capabilities.tools (MCP standard format)
-    if (manifest.capabilities && manifest.capabilities.tools) {
-      tools = manifest.capabilities.tools;
+    const capabilities = manifest.capabilities as Record<string, unknown> | undefined;
+    if (capabilities?.tools) {
+      tools = capabilities.tools as Record<string, unknown>[];
     }
 
     if (!tools || tools.length === 0) {
@@ -128,8 +157,9 @@ export class ToolRegistry {
         requiresPreprocessing,
       };
 
-      const key = this.getToolKey(normalizedServerName, tool.name);
-      this.tools.set(key, toolWithServer);
+      const toolName = (tool as Record<string, unknown>).name as string;
+      const key = this.getToolKey(normalizedServerName, toolName);
+      this.tools.set(key, toolWithServer as ToolMetadata);
 
       logger.info(
         `Registered tool: ${tool.name} from ${displayName} (${normalizedServerName})${requiresPreprocessing ? " [requires preprocessing]" : ""}`,
@@ -142,7 +172,8 @@ export class ToolRegistry {
   /**
    * Register tools discovered dynamically from a running MCP server
    */
-  async registerDynamicTools(serverName: string, tools: any[]): Promise<void> {
+  async registerDynamicTools(serverName: string, tools: Record<string, unknown>[]): Promise<void> {
+    await this.ensureInitialized();
     if (!tools || tools.length === 0) {
       logger.info(`No tools to register for ${serverName}`);
       return;
@@ -159,10 +190,11 @@ export class ToolRegistry {
     for (const tool of tools) {
       try {
         // Convert MCP tool format to ToolMetadata format
+        const dynamicTool = tool as DynamicToolShape;
         const toolMetadata: ToolMetadata = {
-          name: tool.name,
-          description: tool.description || `Tool: ${tool.name}`,
-          parameters: tool.inputSchema?.properties || {},
+          name: dynamicTool.name,
+          description: dynamicTool.description || `Tool: ${dynamicTool.name}`,
+          parameters: (dynamicTool.inputSchema?.properties || {}) as Record<string, ParameterSchema>,
           serverName: normalizedServerName,
           actualServerName: displayName,
           keywords: ["dynamic", "discovered"],
@@ -173,9 +205,9 @@ export class ToolRegistry {
 
         // Check if this tool requires parameter preprocessing
         toolMetadata.requiresPreprocessing =
-          this.doesToolRequirePreprocessing(toolMetadata);
+          this.doesToolRequirePreprocessing(toolMetadata as unknown as Record<string, unknown>);
 
-        const key = this.getToolKey(normalizedServerName, tool.name);
+        const key = this.getToolKey(normalizedServerName, tool.name as string);
 
         // Check if tool already exists
         const existingTool = this.tools.get(key);
@@ -218,6 +250,7 @@ export class ToolRegistry {
   }
 
   async findToolsByKeyword(keyword: string): Promise<ToolMetadata[]> {
+    await this.ensureInitialized();
     const results: ToolMetadata[] = [];
 
     for (const tool of this.tools.values()) {
@@ -239,6 +272,7 @@ export class ToolRegistry {
   }
 
   async findToolsByServer(serverName: string): Promise<ToolMetadata[]> {
+    await this.ensureInitialized();
     const normalizedServerName = normalizeServerName(serverName);
     const results: ToolMetadata[] = [];
 
@@ -255,15 +289,18 @@ export class ToolRegistry {
     serverName: string,
     toolName: string,
   ): Promise<ToolMetadata | undefined> {
+    await this.ensureInitialized();
     const normalizedServerName = normalizeServerName(serverName);
     return this.tools.get(this.getToolKey(normalizedServerName, toolName));
   }
 
   async getAllTools(): Promise<ToolMetadata[]> {
+    await this.ensureInitialized();
     return Array.from(this.tools.values());
   }
 
   async removeToolsByServer(serverName: string): Promise<void> {
+    await this.ensureInitialized();
     const normalizedServerName = normalizeServerName(serverName);
     const keysToDelete: string[] = [];
 
@@ -288,23 +325,23 @@ export class ToolRegistry {
    * Check if a tool requires parameter preprocessing
    * This is a generic method that can be extended for specific preprocessing needs
    */
-  private doesToolRequirePreprocessing(_tool: any): boolean {
+  private doesToolRequirePreprocessing(_tool: Record<string, unknown>): boolean {
     // By default, no preprocessing is required
     // This can be extended based on tool metadata or configuration
     return false;
   }
 }
 
-// Singleton instance
-let toolRegistry: ToolRegistry | null = null;
-
-export function getToolRegistry(): ToolRegistry {
-  if (!toolRegistry) {
-    toolRegistry = new ToolRegistry();
-    // Async load, but don't wait
-    toolRegistry.load().catch((err) => {
+// Singleton instance — uses ESM-safe singleton factory
+// Note: load() is called fire-and-forget in the factory to preserve the
+// original non-blocking initialization behavior.
+export const getToolRegistry = createSingleton<ToolRegistry>(
+  "core:tool-registry",
+  () => {
+    const instance = new ToolRegistry();
+    instance.load().catch((err) => {
       logger.warn("Failed to load tool registry:", err.message);
     });
-  }
-  return toolRegistry;
-}
+    return instance;
+  },
+);

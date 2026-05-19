@@ -4,7 +4,7 @@
  */
 
 // Export configuration management
-export { ConfigService, getConfigService } from "./config-service.js";
+export { ConfigService, getConfigService, getAIConfig } from "./config-service.js";
 
 // Export types
 export type {
@@ -34,6 +34,7 @@ export {
 // Export error handling
 export {
   MCPilotError,
+  IntentOrchError,
   ErrorCode,
   ErrorSeverity,
   ErrorFactory,
@@ -43,8 +44,27 @@ export {
   createError,
   wrapError,
   isMCPilotError,
+  isIntentOrchError,
   shouldRetry,
 } from "./error-handler.js";
 
 // Export logger
 export { logger } from "./logger.js";
+
+// Export trace context
+export {
+  TraceContextManager,
+  SpanStatus,
+} from "./trace-context.js";
+export type {
+  TraceSpan,
+  TraceContextData,
+  TraceMetadata,
+} from "./trace-context.js";
+
+// Export interceptors
+export { InterceptorChain } from "./interceptor.js";
+export type {
+  Interceptor,
+  InterceptorContext,
+} from "./interceptor.js";

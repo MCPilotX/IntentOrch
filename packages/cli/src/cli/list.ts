@@ -4,7 +4,7 @@ import { getRegistryClient, getProcessManager } from "@intentorch/core";
 export function listCommand(): Command {
   const command = new Command("list")
     .description("List locally cached MCP Server manifests")
-    .alias("ls") // Add 'ls' as an alias
+    .alias("ls")
     .action(async () => {
       try {
         const registryClient = getRegistryClient();
@@ -39,7 +39,7 @@ export function listCommand(): Command {
               (s.manifest && s.manifest.name === serverName),
           );
 
-          const statusIcon = runningInstance ? "🟢" : "⚪";
+          const statusIcon = runningInstance ? "\uD83D\uDFE2" : "\u26AA";
           console.log(`${statusIcon} ${serverName}`);
 
           // Try to get manifest details
@@ -47,18 +47,30 @@ export function listCommand(): Command {
             const manifest = await registryClient.getCachedManifest(serverName);
             if (manifest) {
               console.log(`  Version: ${manifest.version}`);
-              console.log(
-                `  Command: ${manifest.runtime.command} ${manifest.runtime.args?.join(" ") || ""}`,
-              );
+
+              // Show transport type and URL for external services
+              const transportType = manifest.transport?.type || "stdio";
+              if (transportType === "http" || transportType === "sse") {
+                console.log(`  Type: ${transportType.toUpperCase()}`);
+                if (manifest.transport?.url) {
+                  console.log(`  URL: ${manifest.transport.url}`);
+                }
+              } else {
+                console.log(
+                  `  Command: ${manifest.runtime.command} ${manifest.runtime.args?.join(" ") || ""}`,
+                );
+              }
+
               if (manifest.runtime.env && manifest.runtime.env.length > 0) {
                 console.log(`  Env vars: ${manifest.runtime.env.join(", ")}`);
               }
               if (runningInstance) {
-                console.log(
-                  `  Status: ✅ Running (PID: ${runningInstance.pid})`,
-                );
+                const typeLabel = runningInstance.external
+                  ? `External (${(runningInstance.transportType || "EXT").toUpperCase()})`
+                  : `Managed (PID: ${runningInstance.pid})`;
+                console.log(`  Status: Running - ${typeLabel}`);
               } else {
-                console.log(`  Status: ⏹️  Stopped`);
+                console.log(`  Status: Stopped`);
               }
             }
           } catch (err) {
@@ -73,7 +85,7 @@ export function listCommand(): Command {
         console.log(`Running: ${runningServers.length} server(s)`);
       } catch (error) {
         console.error(
-          "✗ Failed to list cached manifests:",
+          "Failed to list cached manifests:",
           (error as Error).message,
         );
         process.exit(1);

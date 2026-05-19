@@ -157,14 +157,14 @@ export class EnhancedRuntimeDetector {
         evidence,
         source: "legacy",
       };
-    } catch (error: any) {
-      logger.error(`Legacy detector failed: ${error.message}`);
+    } catch (error) {
+      logger.error(`Legacy detector failed: ${error instanceof Error ? error.message : String(error)}`);
       return {
         runtime: "binary",
         confidence: 0.1,
         evidence: {},
         source: "legacy",
-        warning: `Traditional detector failed: ${error.message}`,
+        warning: `Traditional detector failed: ${error instanceof Error ? error.message : String(error)}`,
       };
     }
   }
@@ -228,14 +228,14 @@ export class EnhancedRuntimeDetector {
         warning,
         suggestions: this.generateRuntimeSuggestions(servicePath),
       };
-    } catch (error: any) {
-      logger.error(`Enhanced detector failed: ${error.message}`);
+    } catch (error) {
+      logger.error(`Enhanced detector failed: ${error instanceof Error ? error.message : String(error)}`);
       return {
         runtime: "binary",
         confidence: 0.1,
         evidence: {},
         source: "enhanced",
-        warning: `Enhanced detector failed: ${error.message}`,
+        warning: `Enhanced detector failed: ${error instanceof Error ? error.message : String(error)}`,
       };
     }
   }

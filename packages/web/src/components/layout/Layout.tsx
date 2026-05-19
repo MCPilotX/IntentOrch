@@ -89,7 +89,7 @@ const Layout: React.FC = () => {
       ).slice(0, 10); // Limit to 10 log entries
 
       setSearchResults({
-        servers: serverResults.services,
+        servers: (serverResults as Record<string, unknown>).services as Record<string, unknown>[] || [],
         processes: filteredProcesses,
         logs: filteredLogs.map((log: string, index: number) => ({
           id: `log-${index}`,

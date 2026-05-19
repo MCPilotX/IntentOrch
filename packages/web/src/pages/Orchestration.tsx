@@ -3,9 +3,13 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import AIChatPanel from '../components/orchestration/AIChatPanel';
 import StepPreviewBoard from '../components/orchestration/StepPreviewBoard';
 import ExecutionResultPanel from '../components/orchestration/ExecutionResultPanel';
+import TraceInspector from '../components/orchestration/TraceInspector';
 import StepEditorModal from '../components/orchestration/StepEditorModal';
+import ToolLibraryDrawer from '../components/orchestration/ToolLibraryDrawer';
 import { Toast } from '../components/ui';
 import { apiService } from '../services/api';
+import { outputFormattingService } from '../services/output-formatting';
+import { executeNaturalLanguageStream, type StepStreamEvent } from '../services/ai-service';
 import { useChatHistory } from '../hooks/useChatHistory';
 import { useOutputFormatting } from '../hooks';
 import { useLanguage } from '../contexts/LanguageContext';
@@ -59,9 +63,19 @@ const Orchestration: React.FC = () => {
   // Execution results state
   const [executionResults, setExecutionResults] = useState<StepResult[] | null>(null);
   const [executionTotalDuration, setExecutionTotalDuration] = useState(0);
+  const [currentTraceId, setCurrentTraceId] = useState<string | null>(null);
+  const [isTraceInspectorOpen, setIsTraceInspectorOpen] = useState(false);
+
+  // Tool library state
+  const [isToolLibraryOpen, setIsToolLibraryOpen] = useState(false);
+  const [insertedText, setInsertedText] = useState<string | null>(null);
 
   // Step editor state
   const [editingStep, setEditingStep] = useState<{ step: WorkflowStep; index: number } | null>(null);
+
+  const handleInsertTool = (toolName: string) => {
+    setInsertedText(toolName);
+  };
 
   // Chat history persistence
   const { addMessages: persistMessages, createSession } = useChatHistory();
@@ -132,44 +146,126 @@ const Orchestration: React.FC = () => {
       };
       setMessages(prev => [...prev, loadingMessage]);
       
-      // Use the same executeNaturalLanguage endpoint as CLI
-      // This does multi-turn LLM function calling: plan → execute → return results
       setAnalysisStatus('Executing query via natural language engine...');
       
-      const result = await apiService.executeNaturalLanguage(content, {
-        autoStart: true,
-        silent: true,
-      });
+      // Use the streaming SSE endpoint — each step result is displayed as it arrives
+      const stepResultsAccum: StepResult[] = [];
       
-      if (result.success) {
+      const streamResult = await executeNaturalLanguageStream(
+        content,
+        (event: StepStreamEvent) => {
+          if (event.type === 'step_result') {
+            // Format the step result using the formatting system
+            let stepText = '';
+            try {
+              const fmtResult = outputFormattingService.format(event.result, {
+                toolName: event.toolName,
+              });
+              // Extract plain text from formatted output (strip markdown)
+              stepText = fmtResult.output
+                .replace(/\*\*/g, '')
+                .replace(/`/g, '')
+                .replace(/#{1,6}\s/g, '')
+                .substring(0, 300)
+                .trim();
+            } catch {
+              // Fallback: extract raw text
+              const result = event.result as any;
+              if (typeof result === 'string') {
+                stepText = result.substring(0, 300);
+              } else if (result?.content && Array.isArray(result.content)) {
+                stepText = result.content
+                  .filter((c: any) => c.type === 'text')
+                  .map((c: any) => c.text)
+                  .join('\n')
+                  .substring(0, 300);
+              }
+            }
+            
+            const stepName = event.toolName || 'Unknown step';
+            const status = event.success ? '✅' : '❌';
+            const stepContent = `**${status} ${stepName}**${stepText ? `\n> ${stepText}` : ''}${event.error ? `\n> Error: ${event.error}` : ''}`;
+            
+            // Accumulate step result for ExecutionResultPanel
+            stepResultsAccum.push({
+              name: stepName,
+              toolName: stepName,
+              success: event.success || false,
+              error: event.error,
+              duration: event.duration,
+              result: event.result,
+            });
+            
+            // Update the loading message with accumulated step results
+            setMessages(prev => prev.map(m =>
+              m.id === loadingMessageId ? {
+                ...m,
+                content: m.content + '\n' + stepContent,
+                metadata: {
+                  isStreaming: true,
+                  executionSteps: [...stepResultsAccum],
+                },
+              } : m
+            ));
+          }
+        },
+        { autoStart: true, silent: true },
+      );
+      
+      if (streamResult.success) {
         setStatus('success');
         
-        // Extract step results from execution result
-        const stepResults: StepResult[] = extractStepResults(result);
-        const totalDuration = result.statistics?.totalDuration || 
-          stepResults.reduce((sum, s) => sum + (s.duration || 0), 0);
+        const totalDuration = stepResultsAccum.reduce((sum, s) => sum + (s.duration || 0), 0);
         
-        setExecutionResults(stepResults);
+        setExecutionResults(stepResultsAccum);
         setExecutionTotalDuration(totalDuration);
         
-        // Format the result for display
-        const formattedResult = formatResultForDisplay(result, content);
+        // Extract traceId if available
+        if ((streamResult as any).traceId) {
+          setCurrentTraceId((streamResult as any).traceId);
+        }
         
-        // Update the loading message in-place instead of deleting and re-adding
-        setMessages(prev => prev.map(m => 
+        // Format the final result using the formatting system
+        let finalFormatted = '';
+        try {
+          if (streamResult.result) {
+            const fmtResult = outputFormattingService.format(streamResult.result, {
+              userQuery: content,
+            });
+            finalFormatted = fmtResult.output;
+          } else {
+            finalFormatted = '✅ Execution completed successfully.';
+          }
+        } catch {
+          finalFormatted = typeof streamResult.result === 'string'
+            ? streamResult.result
+            : '✅ Execution completed successfully.';
+        }
+        
+        // Append the final formatted result after the step records,
+        // separated by a divider. This preserves the streaming step experience
+        // while also showing the well-formatted final output.
+        setMessages(prev => prev.map(m =>
           m.id === loadingMessageId ? {
             ...m,
-            content: formattedResult,
+            content: m.content + `\n\n---\n\n${finalFormatted}`,
             metadata: {
               isResult: true,
-              executionSteps: stepResults,
+              executionSteps: stepResultsAccum,
               totalDuration,
             },
           } : m
         ));
         
-        // Also create draft steps from execution steps for re-execution
-        const workflowSteps = createWorkflowStepsFromResult(result);
+        // Create draft steps from accumulated results
+        const workflowSteps = createWorkflowStepsFromResult({
+          executionSteps: stepResultsAccum.map(s => ({
+            toolName: s.toolName,
+            arguments: {},
+            success: s.success,
+            result: s.result,
+          })),
+        });
         if (workflowSteps.length > 0) {
           setDraftSteps(workflowSteps);
         }
@@ -178,19 +274,16 @@ const Orchestration: React.FC = () => {
       } else {
         setStatus('error');
         
-        // Update the loading message with error content instead of deleting and re-adding
-        setMessages(prev => prev.map(m => 
+        setMessages(prev => prev.map(m =>
           m.id === loadingMessageId ? {
             ...m,
-            content: `❌ **Execution Failed**\n\n${result.error || 'Unknown error occurred'}\n\n💡 **Suggestions:**\n1. Make sure AI configuration is set (provider & API key)\n2. Make sure required MCP servers are running\n3. Try rephrasing your query`,
+            content: `❌ **Execution Failed**\n\n${streamResult.error || 'Unknown error occurred'}\n\n💡 **Suggestions:**\n1. Make sure AI configuration is set (provider & API key)\n2. Make sure required MCP servers are running\n3. Try rephrasing your query`,
           } : m
         ));
         
-        // Extract any partial results
-        const stepResults: StepResult[] = extractStepResults(result);
-        if (stepResults.length > 0) {
-          setExecutionResults(stepResults);
-          setExecutionTotalDuration(result.statistics?.totalDuration || 0);
+        if (stepResultsAccum.length > 0) {
+          setExecutionResults(stepResultsAccum);
+          setExecutionTotalDuration(stepResultsAccum.reduce((sum, s) => sum + (s.duration || 0), 0));
         }
       }
     } catch (error) {
@@ -198,8 +291,8 @@ const Orchestration: React.FC = () => {
       
       const errorContent = getErrorMessage(error);
       
-      // Update the loading message with error content instead of deleting and re-adding
-      setMessages(prev => prev.map(m => 
+      // Update the loading message with error content
+      setMessages(prev => prev.map(m =>
         m.metadata?.isStreaming ? {
           ...m,
           content: errorContent,
@@ -210,55 +303,52 @@ const Orchestration: React.FC = () => {
     }
   };
 
-  // Format result for display in chat
+  // Format result for display in chat — shows only the final result
+  // If there are multiple steps, only the LLM's summary (result.result) is shown.
+  // Step-by-step details are available in the ExecutionResultPanel on the right.
   const formatResultForDisplay = (result: any, query: string): string => {
-    // The LLM already returns a beautifully formatted Markdown result in result.result
-    // This is the same output that CLI displays to users
+    // Step 1: LLM's final summary — this is the single best thing to show
     if (result.result && typeof result.result === 'string') {
       return result.result;
     }
     
-    // Fallback: use the output formatting system
+    // Step 2: If there's only one step with text output, show it directly
+    const steps = result.executionSteps || [];
+    const successfulSteps = steps.filter((s: any) => s.success);
+    if (successfulSteps.length === 1) {
+      const singleStep = successfulSteps[0];
+      const stepResult = singleStep.result || singleStep.output;
+      if (stepResult) {
+        const text = extractResultText(stepResult);
+        if (text && text.length > 0) {
+          return text;
+        }
+      }
+    }
+    
+    // Step 3: Use the output formatting system
     try {
       const formatted = formatWithNewSystem(result, query);
       if (formatted && formatted.length > 0) {
         return formatted;
       }
     } catch {
-      // Fall through to default formatting
+      // Fall through
     }
     
-    // Last resort: build a simple summary from execution steps
-    const steps = result.executionSteps || [];
-    const successfulSteps = steps.filter((s: any) => s.success).length;
-    const totalSteps = steps.length;
-    
-    if (totalSteps > 0) {
-      let output = `✅ **Execution Complete** (${successfulSteps}/${totalSteps} steps successful)\n\n`;
-      for (const step of steps) {
-        const status = step.success ? '✅' : '❌';
-        const stepName = step.toolName || step.name || 'Unknown step';
-        output += `${status} **${stepName}**`;
-        if (step.duration) {
-          output += ` _(${step.duration}ms)_`;
-        }
-        output += '\n';
-        if (step.success && step.result) {
-          const resultText = extractResultText(step.result);
-          if (resultText) {
-            output += `  > ${resultText}\n`;
-          }
-        }
-        if (step.error) {
-          output += `  > Error: ${step.error}\n`;
-        }
+    // Step 4: Simple final summary
+    if (steps.length > 0) {
+      const successCount = successfulSteps.length;
+      const totalSteps = steps.length;
+      if (successCount === totalSteps) {
+        return `✅ Execution completed successfully.`;
+      } else {
+        return `⚠️ Execution completed with ${totalSteps - successCount} failed step(s).`;
       }
-      return output;
     }
     
     return '✅ Execution completed successfully.';
   };
-
   // Extract readable text from result
   const extractResultText = (result: any): string => {
     if (!result) return '';
@@ -338,6 +428,7 @@ const Orchestration: React.FC = () => {
             
             setExecutionResults(stepResults);
             setExecutionTotalDuration(totalDuration);
+            setCurrentTraceId(result.traceId || null);
             
             updateStepsWithResults(stepResults);
           } else {
@@ -502,14 +593,24 @@ const Orchestration: React.FC = () => {
   return (
     <div className="flex flex-col h-[calc(100vh-130px)] -m-6 overflow-hidden">
       {/* Main content area */}
-      <div className="flex flex-1 overflow-hidden">
+      <div className="flex flex-1 overflow-hidden relative">
         {/* Left: AI Chat Panel - 60% width */}
-        <div className="flex-[6] min-w-0">
+        <div className="flex-[6] min-w-0 relative">
           <AIChatPanel 
             onSendMessage={handleSendMessage}
             messages={messages}
             isAnalyzing={isAnalyzing}
             statusMessage={analysisStatus}
+            insertedText={insertedText}
+            onClearInsertedText={() => setInsertedText(null)}
+            onToggleLibrary={() => setIsToolLibraryOpen(!isToolLibraryOpen)}
+          />
+
+          {/* Tool Library Overlay */}
+          <ToolLibraryDrawer
+            isOpen={isToolLibraryOpen}
+            onClose={() => setIsToolLibraryOpen(false)}
+            onInsertTool={handleInsertTool}
           />
         </div>
 
@@ -544,6 +645,11 @@ const Orchestration: React.FC = () => {
               <ExecutionResultPanel
                 results={executionResults}
                 totalDuration={executionTotalDuration}
+                traceId={currentTraceId || undefined}
+                onInspectTrace={(id) => {
+                  setCurrentTraceId(id);
+                  setIsTraceInspectorOpen(true);
+                }}
                 onClose={() => setExecutionResults(null)}
                 onRetry={handleRetry}
               />
@@ -551,6 +657,18 @@ const Orchestration: React.FC = () => {
           )}
         </div>
       </div>
+
+      {/* Trace Inspector Overlay */}
+      {isTraceInspectorOpen && currentTraceId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+          <div className="w-full max-w-4xl">
+            <TraceInspector 
+              traceId={currentTraceId} 
+              onClose={() => setIsTraceInspectorOpen(false)} 
+            />
+          </div>
+        </div>
+      )}
 
       {/* Step Editor Modal */}
       {editingStep && (

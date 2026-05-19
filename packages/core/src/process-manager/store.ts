@@ -1,103 +1,115 @@
 import fs from "fs/promises";
+import fsSync from "fs";
 import { getProcessesPath, ensureInTorchDir } from "../utils/paths.js";
 import { ProcessInfo, ProcessStore } from "./types.js";
 import { isProcessRunning } from "../utils/system.js";
+import { MCPClient } from "../mcp/client.js";
+import { DatabaseManager, getProcessRepository } from "../utils/sqlite.js";
+import { logger } from "../core/logger.js";
 
 export class ProcessStoreManager {
   private storePath: string;
+  private _initialized = false;
 
   constructor() {
     this.storePath = getProcessesPath();
   }
 
-  async load(): Promise<ProcessStore> {
+  private async ensureInitialized(): Promise<void> {
+    if (this._initialized) return;
+    await DatabaseManager.getInstance().initialize();
+    await this.migrateLegacyProcesses();
+    this._initialized = true;
+  }
+
+  private async migrateLegacyProcesses(): Promise<void> {
     try {
-      ensureInTorchDir();
-      const data = await fs.readFile(this.storePath, "utf-8");
-      return JSON.parse(data);
+      if (fsSync.existsSync(this.storePath)) {
+        const data = await fs.readFile(this.storePath, "utf-8");
+        const store: ProcessStore = JSON.parse(data);
+        const repo = getProcessRepository();
+
+        for (const process of store.processes) {
+          // Map to repository expected structure
+          const repoData: Record<string, unknown> = {
+            ...process,
+            external: process.external ? 1 : 0,
+            manifest: JSON.stringify(process.manifest),
+            tools: process.tools ? JSON.stringify(process.tools) : null,
+          };
+          await repo.upsert(repoData);
+        }
+
+        await fs.rename(this.storePath, this.storePath + ".bak");
+        logger.info("[ProcessStoreManager] Migrated legacy processes to SQLite");
+      }
     } catch (err) {
-      // Return empty storage when file doesn't exist
-      return { processes: [] };
+      logger.warn(`[ProcessStoreManager] Legacy process migration failed: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 
+  async load(): Promise<ProcessStore> {
+    await this.ensureInitialized();
+    const repo = getProcessRepository();
+    const processes = await repo.list();
+    return { 
+      processes: processes.map(p => this.rowToProcessInfo(p))
+    };
+  }
+
   async save(store: ProcessStore): Promise<void> {
-    const lockPath = this.storePath + ".lock";
-    try {
-      ensureInTorchDir();
-
-      // Simple file locking with stale lock cleanup
-      try {
-        // Check if existing lock is stale (older than 10 seconds)
-        try {
-          const lockStat = await fs.stat(lockPath);
-          const lockAge = Date.now() - lockStat.mtimeMs;
-          if (lockAge > 10000) {
-            // Lock is stale, remove it
-            await fs.unlink(lockPath);
-          }
-        } catch (e) {
-          // Lock file doesn't exist or can't be read, proceed
-        }
-      } catch (e) {
-        // Ignore errors during stale lock check
-      }
-      await fs.writeFile(lockPath, process.pid.toString(), { flag: "wx" });
-
-      await fs.writeFile(
-        this.storePath,
-        JSON.stringify(store, null, 2),
-        "utf-8",
-      );
-    } catch (err: any) {
-      if (err.code === "EEXIST") {
-        throw new Error("Process storage is locked by another process.");
-      }
-      throw err;
-    } finally {
-      try {
-        await fs.unlink(lockPath);
-      } catch (e) {}
+    await this.ensureInitialized();
+    const repo = getProcessRepository();
+    // Since we now use individual row operations, save(store) is less efficient
+    // but we'll maintain it for compatibility by upserting all.
+    for (const process of store.processes) {
+      await repo.upsert(this.processInfoToRow(process));
     }
   }
 
   async addProcess(processInfo: ProcessInfo): Promise<void> {
-    const store = await this.load();
-    store.processes.push(processInfo);
-    await this.save(store);
+    await this.ensureInitialized();
+    const repo = getProcessRepository();
+    await repo.upsert(this.processInfoToRow(processInfo));
   }
 
   async updateProcess(
     pid: number,
     updates: Partial<ProcessInfo>,
   ): Promise<void> {
-    const store = await this.load();
-    const index = store.processes.findIndex((p) => p.pid === pid);
-    if (index !== -1) {
-      store.processes[index] = { ...store.processes[index], ...updates };
-      await this.save(store);
+    await this.ensureInitialized();
+    const repo = getProcessRepository();
+    const process = await repo.findByPid(pid);
+    if (process) {
+      const current = this.rowToProcessInfo(process);
+      await repo.upsert(this.processInfoToRow({ ...current, ...updates }));
     }
   }
 
   async removeProcess(pid: number): Promise<void> {
-    const store = await this.load();
-    store.processes = store.processes.filter((p) => p.pid !== pid);
-    await this.save(store);
+    await this.ensureInitialized();
+    const repo = getProcessRepository();
+    await repo.delete(pid);
   }
 
   async getProcess(pid: number): Promise<ProcessInfo | undefined> {
-    const store = await this.load();
-    const process = store.processes.find((p) => p.pid === pid);
+    await this.ensureInitialized();
+    const repo = getProcessRepository();
+    const row = await repo.findByPid(pid);
 
-    if (!process) {
+    if (!row) {
       return undefined;
     }
 
+    const process = this.rowToProcessInfo(row);
+
     // If process is marked as running, verify it's actually running
-    if (process.status === "running" && !isProcessRunning(pid)) {
-      // Process is not alive, update status
-      process.status = "stopped";
-      await this.save(store);
+    if (process.status === "running") {
+      const isAlive = await this.isProcessAlive(process);
+      if (!isAlive) {
+        process.status = "stopped";
+        await repo.upsert(this.processInfoToRow(process));
+      }
     }
 
     return process;
@@ -106,28 +118,31 @@ export class ProcessStoreManager {
   async getProcessByServerName(
     serverName: string,
   ): Promise<ProcessInfo | undefined> {
-    const store = await this.load();
+    await this.ensureInitialized();
+    const repo = getProcessRepository();
 
     // Helper function to check if a process is actually running
-    const isActuallyRunning = (process: ProcessInfo): boolean => {
+    const isActuallyRunning = async (process: ProcessInfo): Promise<boolean> => {
       if (process.status !== "running") {
         return false;
       }
       // Verify the process is actually running
-      if (!isProcessRunning(process.pid)) {
-        // Process is not alive, update status
+      const isAlive = await this.isProcessAlive(process);
+      if (!isAlive) {
         process.status = "stopped";
+        await repo.upsert(this.processInfoToRow(process));
         return false;
       }
       return true;
     };
 
     // First, try exact match on serverName
-    const exactMatch = store.processes.find(
-      (p) => p.serverName === serverName && isActuallyRunning(p),
-    );
+    const exactMatch = await repo.findByServerName(serverName);
     if (exactMatch) {
-      return exactMatch;
+      const p = this.rowToProcessInfo(exactMatch);
+      if (await isActuallyRunning(p)) {
+        return p;
+      }
     }
 
     // Support for owner/project format (e.g., "Joooook/12306-mcp")
@@ -137,11 +152,12 @@ export class ProcessStoreManager {
         const projectName = parts[1]; // e.g., "12306-mcp"
 
         // Try exact match with project name
-        const projectMatch = store.processes.find(
-          (p) => p.serverName === projectName && isActuallyRunning(p),
-        );
+        const projectMatch = await repo.findByServerName(projectName);
         if (projectMatch) {
-          return projectMatch;
+          const p = this.rowToProcessInfo(projectMatch);
+          if (await isActuallyRunning(p)) {
+            return p;
+          }
         }
 
         // Try variations of project name
@@ -155,76 +171,73 @@ export class ProcessStoreManager {
         ];
 
         for (const name of possibleNames) {
-          const variationMatch = store.processes.find(
-            (p) => p.serverName === name && isActuallyRunning(p),
-          );
-          if (variationMatch) {
-            return variationMatch;
+          const match = await repo.findByServerName(name);
+          if (match) {
+            const p = this.rowToProcessInfo(match);
+            if (await isActuallyRunning(p)) {
+              return p;
+            }
           }
         }
       }
     }
 
-    // If no exact match, try to find by manifest.name (alias discovery)
-    // This helps when workflow references a server by its manifest name rather than the serverName used to start it
-    const aliasMatch = store.processes.find(
-      (p) =>
-        isActuallyRunning(p) && p.manifest && p.manifest.name === serverName,
-    );
-
-    // Save store if any processes were updated
-    const needsSave = store.processes.some(
-      (p) => p.status === "stopped" && isProcessRunning(p.pid) === false,
-    );
-    if (needsSave) {
-      await this.save(store);
+    // If no exact match, try to find by manifest.name (alias discovery) in all processes
+    const all = await repo.list();
+    for (const row of all) {
+      const p = this.rowToProcessInfo(row);
+      if (
+        (await isActuallyRunning(p)) &&
+        p.manifest &&
+        p.manifest.name === serverName
+      ) {
+        return p;
+      }
     }
 
-    return aliasMatch;
+    return undefined;
   }
 
   async listProcesses(): Promise<ProcessInfo[]> {
-    const store = await this.load();
-    let changed = false;
-
-    // Filter out invalid processes
-    const validProcesses = store.processes.filter((p) => {
+    await this.ensureInitialized();
+    const repo = getProcessRepository();
+    const rows = await repo.list();
+    
+    const validProcesses: ProcessInfo[] = [];
+    for (const row of rows) {
+      const p = this.rowToProcessInfo(row);
       // Keep processes that are running or recently stopped
       if (p.status === "running") {
-        if (!isProcessRunning(p.pid)) {
-          // Process is not alive
+        const isAlive = await this.isProcessAlive(p);
+        if (!isAlive) {
+          // Process died — mark as stopped and remove from active list immediately
           p.status = "stopped";
-          changed = true;
-          // Keep stopped processes for a while
-          return true;
+          await repo.upsert(this.processInfoToRow(p));
+          // Still push so the frontend sees the updated status, but cap lifetime
+          validProcesses.push(p);
+        } else {
+          validProcesses.push(p);
         }
-        return true;
-      }
-
-      // For stopped processes, check if they should be cleaned up
-      if (p.status === "stopped") {
-        // Clean up obviously invalid PIDs
-        if (p.pid <= 0) {
-          changed = true;
-          return false; // Remove invalid PID
+      } else if (p.status === "stopped") {
+        // Clean up obviously invalid PIDs (only for non-external services)
+        if (!p.external && p.pid <= 0) {
+          await repo.delete(p.pid);
+          continue;
         }
 
-        // Clean up old stopped processes (older than 1 hour)
+        // Shorten the stopped-process retention from 1 hour to 30 seconds.
+        // A stopped process lingering for an hour causes the frontend to show
+        // stale "stopped" entries.  30 s is enough for the UI to read the
+        // final status before cleanup.
         const age = Date.now() - p.startTime;
-        if (age > 3600000) {
-          // 1 hour
-          changed = true;
-          return false;
+        if (age > 30000) {
+          await repo.delete(p.pid);
+          continue;
         }
-        return true;
+        validProcesses.push(p);
+      } else {
+        validProcesses.push(p);
       }
-
-      return true;
-    });
-
-    if (changed) {
-      store.processes = validProcesses;
-      await this.save(store);
     }
 
     return validProcesses;
@@ -236,8 +249,88 @@ export class ProcessStoreManager {
   }
 
   async clearStoppedProcesses(): Promise<void> {
-    const store = await this.load();
-    store.processes = store.processes.filter((p) => p.status === "running");
-    await this.save(store);
+    await this.ensureInitialized();
+    const repo = getProcessRepository();
+    const all = await repo.list();
+    for (const row of all) {
+      if (row.status !== "running") {
+        await repo.delete(row.pid as number);
+      }
+    }
+  }
+
+  /**
+   * Check if a process is alive based on its type.
+   * For external services (HTTP/SSE), try to connect to the URL.
+   * For managed processes, check PID.
+   */
+  private async isProcessAlive(process: ProcessInfo): Promise<boolean> {
+    if (process.external) {
+      return this.checkExternalServiceAlive(process);
+    }
+    return isProcessRunning(process.pid);
+  }
+
+  /**
+   * Check if an external service (HTTP/SSE) is still alive by attempting to connect.
+   */
+  private async checkExternalServiceAlive(process: ProcessInfo): Promise<boolean> {
+    if (!process.url || !process.transportType) {
+      return false;
+    }
+
+    try {
+      const client = new MCPClient({
+        transport: {
+          type: process.transportType as "http" | "sse",
+          url: process.url,
+        },
+        timeout: 3000,
+        maxRetries: 1,
+        serverName: process.name,
+      });
+
+      await client.connect();
+      await client.disconnect();
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  private rowToProcessInfo(row: Record<string, unknown>): ProcessInfo {
+    return {
+      pid: row.pid as number,
+      serverName: row.server_name as string,
+      name: row.name as string,
+      version: row.version as string,
+      manifest: JSON.parse(row.manifest as string),
+      startTime: row.start_time as number,
+      status: row.status as ProcessInfo["status"],
+      port: (row.port as number) || undefined,
+      logPath: (row.log_path as string) || undefined,
+      external: row.external === 1,
+      transportType: (row.transport_type as string) || undefined,
+      url: (row.url as string) || undefined,
+      tools: row.tools ? JSON.parse(row.tools as string) : undefined,
+    };
+  }
+
+  private processInfoToRow(p: ProcessInfo): Record<string, unknown> {
+    return {
+      pid: p.pid,
+      server_name: p.serverName,
+      name: p.name,
+      version: p.version,
+      manifest: JSON.stringify(p.manifest),
+      start_time: p.startTime,
+      status: p.status,
+      port: p.port ?? null,
+      log_path: p.logPath ?? null,
+      external: p.external ? 1 : 0,
+      transport_type: p.transportType ?? null,
+      url: p.url ?? null,
+      tools: p.tools ? JSON.stringify(p.tools) : null,
+    };
   }
 }

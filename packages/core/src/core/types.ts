@@ -66,7 +66,7 @@ export interface DetectionEvidence {
   executableAnalysis?: {
     type: string;
     confidence: number;
-    details: any;
+    details: Record<string, unknown>;
   };
   projectFiles?: {
     files: string[];
@@ -111,7 +111,7 @@ export interface AIConfig {
   localModelPath?: string;
   ollamaHost?: string;
   // Custom provider configuration
-  customConfig?: Record<string, any>;
+  customConfig?: Record<string, unknown>;
   // Additional configuration options
   enabled?: boolean;
   useLocalEmbeddings?: boolean;
@@ -189,5 +189,5 @@ export interface ServiceConfig {
 export interface DaemonResponse {
   success: boolean;
   message?: string;
-  data?: any;
+  data?: unknown;
 }

@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, User, Bot, Sparkles, Loader2 } from 'lucide-react';
+import { Send, User, Bot, Sparkles, Loader2, Box } from 'lucide-react';
 import { useLanguage } from '../../contexts/LanguageContext';
 import MessageContentRenderer from '../common/MessageContentRenderer';
 import InteractiveMessageRenderer from './InteractiveMessageRenderer';
@@ -36,12 +36,34 @@ interface AIChatPanelProps {
   messages: Message[];
   isAnalyzing: boolean;
   statusMessage?: string;
+  insertedText?: string | null;
+  onClearInsertedText?: () => void;
+  onToggleLibrary?: () => void;
 }
 
-const AIChatPanel: React.FC<AIChatPanelProps> = ({ onSendMessage, messages, isAnalyzing, statusMessage }) => {
+const AIChatPanel: React.FC<AIChatPanelProps> = ({ 
+  onSendMessage, 
+  messages, 
+  isAnalyzing, 
+  statusMessage,
+  insertedText,
+  onClearInsertedText,
+  onToggleLibrary
+}) => {
   const { t } = useLanguage();
   const [input, setInput] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Handle text insertion from Tool Library
+  useEffect(() => {
+    if (insertedText) {
+      const newText = input ? `${input.trim()} ${insertedText} ` : insertedText;
+      setInput(newText);
+      textareaRef.current?.focus();
+      onClearInsertedText?.();
+    }
+  }, [insertedText, input, onClearInsertedText]);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -153,7 +175,8 @@ const AIChatPanel: React.FC<AIChatPanelProps> = ({ onSendMessage, messages, isAn
       <div className="p-4 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/30">
         <form onSubmit={handleSubmit} className="relative group">
           <textarea
-            className="w-full pl-4 pr-14 py-3.5 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-2xl focus:ring-2 focus:ring-primary-500 focus:border-transparent transition-all duration-200 shadow-sm hover:border-gray-300 dark:hover:border-gray-500 resize-none text-sm min-h-[42px] max-h-42"
+            ref={textareaRef}
+            className="w-full pl-4 pr-24 py-3.5 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-2xl focus:ring-2 focus:ring-primary-500 focus:border-transparent transition-all duration-200 shadow-sm hover:border-gray-300 dark:hover:border-gray-500 resize-none text-sm min-h-[42px] max-h-42"
             placeholder={t('orchestration.inputPlaceholder')}
             rows={1}
             value={input}
@@ -165,14 +188,24 @@ const AIChatPanel: React.FC<AIChatPanelProps> = ({ onSendMessage, messages, isAn
               }
             }}
           />
-          <button
-            type="submit"
-            disabled={!input.trim() || isAnalyzing}
-            className="absolute right-2.5 bottom-3.5 p-2.5 bg-primary-600 text-white rounded-xl hover:bg-primary-700 active:scale-95 transition-all disabled:bg-gray-300 dark:disabled:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed shadow-md shadow-primary-500/20"
-            title={t('orchestration.sendButton')}
-          >
-            <Send className="w-3.5 h-3.5" />
-          </button>
+          <div className="absolute right-2 bottom-2.5 flex items-center space-x-1.5">
+            <button
+              type="button"
+              onClick={onToggleLibrary}
+              className="p-2 text-gray-400 hover:text-primary-500 hover:bg-primary-50 dark:hover:bg-primary-900/20 rounded-xl transition-all"
+              title="Tool Library"
+            >
+              <Box className="w-4 h-4" />
+            </button>
+            <button
+              type="submit"
+              disabled={!input.trim() || isAnalyzing}
+              className="p-2.5 bg-primary-600 text-white rounded-xl hover:bg-primary-700 active:scale-95 transition-all disabled:bg-gray-300 dark:disabled:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed shadow-md shadow-primary-500/20"
+              title={t('orchestration.sendButton')}
+            >
+              <Send className="w-3.5 h-3.5" />
+            </button>
+          </div>
         </form>
         <div className="mt-2 flex items-center justify-center space-x-2 opacity-40">
           <Sparkles className="w-2.5 h-2.5 text-primary-500" />

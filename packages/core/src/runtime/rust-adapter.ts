@@ -50,8 +50,8 @@ export class RustAdapter implements RuntimeAdapter {
             stdio: "inherit",
             cwd: servicePath,
           });
-        } catch (error: any) {
-          logger.warn(`[Rust] Failed to create Cargo.toml: ${error.message}`);
+        } catch (error) {
+          logger.warn(`[Rust] Failed to create Cargo.toml: ${error instanceof Error ? error.message : String(error)}`);
         }
       }
     }
@@ -74,8 +74,8 @@ export class RustAdapter implements RuntimeAdapter {
         });
         logger.info("[Rust] Debug build completed");
       }
-    } catch (error: any) {
-      logger.warn(`[Rust] Build failed: ${error.message}`);
+    } catch (error) {
+      logger.warn(`[Rust] Build failed: ${error instanceof Error ? error.message : String(error)}`);
       // Continue, might just be a warning
     }
 
@@ -89,8 +89,8 @@ export class RustAdapter implements RuntimeAdapter {
           cwd: servicePath,
         });
         logger.info("[Rust] Tests passed");
-      } catch (error: any) {
-        logger.warn(`[Rust] Tests failed: ${error.message}`);
+      } catch (error) {
+        logger.warn(`[Rust] Tests failed: ${error instanceof Error ? error.message : String(error)}`);
       }
     }
 
@@ -139,8 +139,8 @@ export class RustAdapter implements RuntimeAdapter {
         if (fs.existsSync(outputPath)) {
           return outputPath;
         }
-      } catch (error: any) {
-        logger.warn(`[Rust] Failed to compile single file: ${error.message}`);
+      } catch (error) {
+        logger.warn(`[Rust] Failed to compile single file: ${error instanceof Error ? error.message : String(error)}`);
       }
     }
 
@@ -241,8 +241,8 @@ export class RustAdapter implements RuntimeAdapter {
       });
       logger.info("[Rust] Successfully compiled");
       return true;
-    } catch (error: any) {
-      logger.error(`[Rust] Compilation failed: ${error.message}`);
+    } catch (error) {
+      logger.error(`[Rust] Compilation failed: ${error instanceof Error ? error.message : String(error)}`);
       return false;
     }
   }
@@ -257,8 +257,8 @@ export class RustAdapter implements RuntimeAdapter {
       });
       logger.info("[Rust] Tests passed");
       return true;
-    } catch (error: any) {
-      logger.error(`[Rust] Tests failed: ${error.message}`);
+    } catch (error) {
+      logger.error(`[Rust] Tests failed: ${error instanceof Error ? error.message : String(error)}`);
       return false;
     }
   }
@@ -273,8 +273,8 @@ export class RustAdapter implements RuntimeAdapter {
       });
       logger.info("[Rust] Check passed");
       return true;
-    } catch (error: any) {
-      logger.error(`[Rust] Check failed: ${error.message}`);
+    } catch (error) {
+      logger.error(`[Rust] Check failed: ${error instanceof Error ? error.message : String(error)}`);
       return false;
     }
   }
@@ -289,8 +289,8 @@ export class RustAdapter implements RuntimeAdapter {
       });
       logger.info("[Rust] Clippy passed");
       return true;
-    } catch (error: any) {
-      logger.error(`[Rust] Clippy failed: ${error.message}`);
+    } catch (error) {
+      logger.error(`[Rust] Clippy failed: ${error instanceof Error ? error.message : String(error)}`);
       return false;
     }
   }

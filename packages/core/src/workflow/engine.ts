@@ -4,7 +4,10 @@ import { ExpressionEvaluator } from "./evaluator.js";
 import { getProcessManager } from "../process-manager/manager.js";
 import { getSecretManager } from "../secret/manager.js";
 import { MCPClient } from "../mcp/client.js";
+import type { TransportConfig } from "../mcp/types.js";
 import { getInTorchDir } from "../utils/paths.js";
+import { getExecutionRecorder } from "./execution-recorder.js";
+import { randomUUID } from "crypto";
 import fs from "fs/promises";
 import fsSync from "fs";
 import path from "path";
@@ -14,8 +17,8 @@ export class WorkflowEngine {
 
   async execute(
     workflow: Workflow,
-    userInputs: Record<string, any>,
-  ): Promise<any> {
+    userInputs: Record<string, unknown>,
+  ): Promise<unknown> {
     // Force reload secrets from disk to ensure we have the latest data
     const sm = getSecretManager();
     await sm.load();
@@ -26,6 +29,11 @@ export class WorkflowEngine {
       secrets: await this.loadRequiredSecrets(),
     };
 
+    // Start execution recording
+    const executionId = randomUUID();
+    const recorder = getExecutionRecorder();
+    await recorder.startExecution(executionId, workflow, userInputs);
+
     try {
       // 1. Pre-flight: Ensure Servers are Running
       const requiredServers = workflow.requirements?.servers || [];
@@ -33,12 +41,16 @@ export class WorkflowEngine {
 
       // 2. Step Execution Loop
       const steps = workflow.steps || [];
-      for (const step of steps) {
+      for (let stepIndex = 0; stepIndex < steps.length; stepIndex++) {
+        const step = steps[stepIndex];
+
         if (
           step.if &&
           !(await ExpressionEvaluator.evaluateCondition(step.if, context))
         ) {
           logger.info(`⏭️ Skipping step ${step.id} (condition not met)`);
+          await recorder.startStep(executionId, step, stepIndex);
+          await recorder.completeStep(executionId, stepIndex, "skipped");
           continue;
         }
 
@@ -47,12 +59,41 @@ export class WorkflowEngine {
           await this.ensureServerRunning(step.serverName);
         }
 
-        const result = await this.executeStep(step, context);
-        context.state[step.id] = result;
+        // Record step start
+        await recorder.startStep(executionId, step, stepIndex);
+
+        try {
+          const result = await this.executeStep(step, context);
+          context.state[step.id] = result;
+
+          // Record step success
+          await recorder.completeStep(executionId, stepIndex, "success", result);
+        } catch (stepError: unknown) {
+          // Record step failure
+          await recorder.completeStep(
+            executionId,
+            stepIndex,
+            "failed",
+            undefined,
+            stepError instanceof Error ? stepError.message : String(stepError),
+          );
+
+          // Re-throw to fail the entire workflow
+          throw stepError;
+        }
       }
 
       // 3. Final Outputs
-      return this.resolveOutputs(workflow, context);
+      const output = this.resolveOutputs(workflow, context);
+
+      // Record successful completion
+      await recorder.completeExecution(executionId, "success", undefined, output);
+
+      return output;
+    } catch (error: unknown) {
+      // Record failed execution
+      await recorder.completeExecution(executionId, "failed", (error instanceof Error ? error.message : String(error)));
+      throw error;
     } finally {
       // Cleanup connections
       for (const client of this.clients.values()) {
@@ -65,7 +106,7 @@ export class WorkflowEngine {
   private async executeStep(
     step: WorkflowStep,
     context: WorkflowContext,
-  ): Promise<any> {
+  ): Promise<unknown> {
     const resolvedArgs = ExpressionEvaluator.resolve(
       step.parameters || {},
       context,
@@ -113,13 +154,13 @@ export class WorkflowEngine {
 
     while (attempt < maxAttempts) {
       try {
-        const response = await client.callTool(toolName, resolvedArgs);
+        const response = await client.callTool(toolName, resolvedArgs as Record<string, unknown>);
         return response;
-      } catch (error: any) {
+      } catch (error: unknown) {
         attempt++;
         if (attempt >= maxAttempts) {
           logger.error(
-            `❌ Step ${step.id} failed after ${maxAttempts} attempts: ${error.message}`,
+            `❌ Step ${step.id} failed after ${maxAttempts} attempts: ${(error instanceof Error ? error.message : String(error))}`,
           );
           throw error;
         }
@@ -167,9 +208,9 @@ export class WorkflowEngine {
 
   private async resolveInputs(
     workflow: Workflow,
-    userInputs: Record<string, any>,
-  ) {
-    const resolved: any = {};
+    userInputs: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> {
+    const resolved: Record<string, unknown> = {};
     const inputs = workflow.inputs || [];
     for (const input of inputs) {
       const value = userInputs[input.id] ?? input.default;
@@ -206,27 +247,51 @@ export class WorkflowEngine {
       // Fetch manifest for the server
       const manifest = await registryClient.fetchManifest(serverName);
 
-      if (!manifest || !manifest.runtime || !manifest.runtime.command) {
-        throw new Error(
-          `Invalid manifest for server ${serverName}: missing runtime configuration`,
-        );
+      if (!manifest) {
+        throw new Error(`Manifest not found for server ${serverName}`);
       }
 
-      // Create MCP client with transport configuration from manifest
-      const client = new MCPClient({
-        transport: {
+      // Determine transport type from manifest
+      const transportType = manifest.transport?.type || "stdio";
+      let transportConfig: TransportConfig;
+
+      if (transportType === "sse" || transportType === "http") {
+        const runtime = manifest.runtime as Record<string, unknown> | undefined;
+        const url = manifest.transport?.url || (runtime?.url as string | undefined);
+        if (!url) {
+          throw new Error(
+            `Invalid manifest for server ${serverName}: missing URL for ${transportType} transport`,
+          );
+        }
+        transportConfig = {
+          type: transportType,
+          url: url,
+          headers: manifest.transport?.headers,
+        };
+      } else {
+        // Default to stdio
+        if (!manifest.runtime || !manifest.runtime.command) {
+          throw new Error(
+            `Invalid manifest for server ${serverName}: missing runtime configuration for stdio transport`,
+          );
+        }
+        transportConfig = {
           type: "stdio",
           command: manifest.runtime.command,
           args: manifest.runtime.args || [],
           env: { ...process.env } as Record<string, string>,
-        },
+        };
+      }
+
+      // Create MCP client with transport configuration
+      const client = new MCPClient({
+        transport: transportConfig,
+        serverName: serverName,
       });
 
       // Handle transport errors to prevent process crash
       client.on("error", (error) => {
-        logger.warn(
-          `⚠️ MCP Client error for ${serverName}: ${error.message || error}`,
-        );
+        logger.error(`[WorkflowEngine] MCP Client error for "${serverName}":`, error);
       });
 
       // Connect the client
@@ -236,15 +301,15 @@ export class WorkflowEngine {
       this.clients.set(serverName, client);
 
       logger.info(
-        `✅ MCP client created and connected for server: ${serverName}`,
+        `✅ MCP client created and connected for server: ${serverName} (${transportType})`,
       );
-    } catch (error: any) {
+    } catch (error: unknown) {
       logger.error(
         `❌ Failed to create MCP client for server ${serverName}:`,
-        error.message,
+        (error instanceof Error ? error.message : String(error)),
       );
       throw new Error(
-        `Failed to create MCP client for server ${serverName}: ${error.message}`,
+        `Failed to create MCP client for server ${serverName}: ${(error instanceof Error ? error.message : String(error))}`,
       );
     }
   }

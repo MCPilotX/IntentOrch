@@ -18,14 +18,6 @@ export {
   type PlanConfirmationCallback,
 } from "./cloud-intent-engine.js";
 
-// Export Intent Service (legacy, kept for backward compatibility)
-export {
-  IntentService,
-  getIntentService,
-  type IntentParseRequest,
-  type IntentParseResponse,
-} from "./intent-service.js";
-
 /**
  * Check AI capabilities
  * Simplified version without vector database

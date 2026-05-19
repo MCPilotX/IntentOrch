@@ -29,17 +29,32 @@ export function logsCommand(): Command {
         }
 
         if (!pid) {
-          console.error(`❌ Process not found for identifier: ${identifier}`);
+          console.error(`Process not found for identifier: ${identifier}`);
+          return;
+        }
+
+        // Check if this is an external service
+        const processInfo = await processManager.get(pid);
+        if (processInfo?.external) {
+          console.log(
+            `External service "${processInfo.name}" manages its own logs.`,
+          );
+          console.log(
+            `  Cannot view logs for external services through intentorch.`,
+          );
+          if (processInfo.url) {
+            console.log(`  Service URL: ${processInfo.url}`);
+          }
           return;
         }
 
         const logPath = getLogPath(pid);
         if (!fs.existsSync(logPath)) {
-          console.error(`❌ Log file not found at: ${logPath}`);
+          console.error(`Log file not found at: ${logPath}`);
           return;
         }
 
-        console.log(`📑 Showing logs for PID ${pid} (${logPath}):\n`);
+        console.log(`Showing logs for PID ${pid} (${logPath}):\n`);
 
         if (options.follow) {
           // Stream logs
@@ -52,7 +67,7 @@ export function logsCommand(): Command {
           console.log(lines.slice(-numLines).join("\n"));
         }
       } catch (error: any) {
-        console.error("❌ Error reading logs:", error.message);
+        console.error("Error reading logs:", error.message);
       }
     });
 

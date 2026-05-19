@@ -13,11 +13,13 @@ export interface Manifest {
   transport?: {
     type: "stdio" | "http" | "sse" | "websocket" | "tcp"; // Communication transport type
     port?: number; // Port for HTTP transport
+    url?: string; // URL for HTTP/SSE transport
+    headers?: Record<string, string>; // Optional headers for HTTP/SSE transport
   };
   capabilities?: {
-    tools?: any[]; // Tools array (can be ToolMetadata or string[])
+    tools?: unknown[]; // Tools array (can be ToolMetadata or string[])
   };
-  tools?: any[]; // Direct tools array (alternative to capabilities.tools)
+  tools?: unknown[]; // Direct tools array (alternative to capabilities.tools)
   metadata?: {
     description?: string;
     author?: string;

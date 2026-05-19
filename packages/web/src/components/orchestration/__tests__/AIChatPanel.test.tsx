@@ -36,7 +36,8 @@ describe('AIChatPanel', () => {
     renderWithProviders(
       <AIChatPanel onSendMessage={() => {}} messages={[]} isAnalyzing={true} />
     );
-    expect(screen.getByRole('button')).toBeDisabled();
+    // The submit button should be disabled when analyzing
+    expect(screen.getByRole('button', { name: /send/i })).toBeDisabled();
   });
 
   it('shows messages correctly', () => {

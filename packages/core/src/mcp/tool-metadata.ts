@@ -37,14 +37,14 @@ export interface ToolMetadata {
   // Input/output specifications
   inputSchema: {
     type: "object";
-    properties: Record<string, any>;
+    properties: Record<string, unknown>;
     required?: string[];
     additionalProperties?: boolean;
   };
 
   outputSchema?: {
     type: string;
-    properties?: Record<string, any>;
+    properties?: Record<string, unknown>;
   };
 
   // Execution characteristics
@@ -79,8 +79,8 @@ export interface ToolMetadata {
   documentationUrl?: string;
   examples?: Array<{
     description: string;
-    input: Record<string, any>;
-    output: any;
+    input: Record<string, unknown>;
+    output: unknown;
   }>;
 
   // Performance metrics

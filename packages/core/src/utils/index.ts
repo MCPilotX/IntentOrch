@@ -4,12 +4,7 @@
 
 export { AutoStartManager } from "./auto-start-manager.js";
 export { CloudIntentEngineFactory } from "./cloud-intent-engine-factory.js";
-export {
-  ConfigManager,
-  getConfigManager,
-  getAIConfig,
-  getRegistryConfig,
-} from "./config.js";
+export { getAIConfig } from "../core/config-service.js";
 export {
   getProcessesPath,
   getConfigPath,
@@ -25,3 +20,8 @@ export {
   isWindows,
 } from "./system.js";
 export { OwnerProjectFormat } from "./owner-project-format.js";
+export {
+  DatabaseManager,
+  getSqliteDb,
+  closeSqliteDb,
+} from "./sqlite.js";

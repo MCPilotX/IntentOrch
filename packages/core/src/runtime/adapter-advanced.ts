@@ -119,7 +119,7 @@ export interface EnhancedRuntimeAdapter {
   /**
    * Error handling hook
    */
-  onError?(error: Error, context: any): Promise<void>;
+  onError?(error: Error, context: unknown): Promise<void>;
 }
 
 /**
@@ -144,7 +144,7 @@ export class RuntimeAdapterError extends Error {
   constructor(
     public code: string,
     override message: string,
-    public context?: Record<string, any>,
+    public context?: Record<string, unknown>,
     public override cause?: Error,
   ) {
     super(message);
@@ -342,7 +342,7 @@ export abstract class BaseRuntimeAdapter implements EnhancedRuntimeAdapter {
     // Default no-op
   }
 
-  async onError(error: Error, context: any): Promise<void> {
+  async onError(error: Error, context: unknown): Promise<void> {
     logger.error(`Runtime adapter error: ${error.message}`, { context });
   }
 }

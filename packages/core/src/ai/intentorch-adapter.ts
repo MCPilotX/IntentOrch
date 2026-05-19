@@ -12,7 +12,9 @@ import {
 } from "./cloud-intent-engine.js";
 import type { AIConfig } from "../core/types.js";
 import { MCPClient } from "../mcp/client.js";
+import type { ToolInfo } from "../execution/tool-executor/index.js";
 import { logger } from "../core/logger.js";
+import { ValidationLevel } from "../mcp/parameter-mapper.js";
 
 // Server connection info
 interface ConnectedServer {
@@ -61,6 +63,7 @@ export class IntentorchAdapter {
         provider: this.aiConfig.provider || "openai",
         apiKey: this.aiConfig.apiKey,
         model: this.aiConfig.model || "gpt-4o-mini",
+        endpoint: this.aiConfig.apiEndpoint || "",
         temperature: 0.3,
         maxTokens: 1000,
         timeout: 30000,
@@ -78,7 +81,7 @@ export class IntentorchAdapter {
         defaultTools: {},
       },
       parameterMapping: {
-        validationLevel: "warning" as any,
+        validationLevel: "warning" as ValidationLevel,
         enableCompatibilityMappings: true,
         logWarnings: true,
         enforceRequired: false,
@@ -120,7 +123,7 @@ export class IntentorchAdapter {
       // Handle transport errors to prevent process crash
       client.on("error", (error) => {
         logger.warn(
-          `[IntentorchAdapter] MCP Client error for ${options.name}: ${error.message || error}`,
+          `[IntentorchAdapter] MCP Client error for ${options.name}: ${(error instanceof Error ? error.message : String(error)) || error}`,
         );
       });
 
@@ -134,10 +137,10 @@ export class IntentorchAdapter {
       logger.debug(
         `[IntentorchAdapter] Successfully connected to server: ${options.name}`,
       );
-    } catch (error: any) {
+    } catch (error: unknown) {
       logger.error(
         `[IntentorchAdapter] Failed to connect to server ${options.name}:`,
-        error.message,
+        (error instanceof Error ? error.message : String(error)),
       );
       throw error;
     }
@@ -147,13 +150,12 @@ export class IntentorchAdapter {
    * Get all tools from connected servers
    * Uses timeout to prevent one slow server from blocking all others
    */
-  private async getAvailableTools(): Promise<any[]> {
-    const tools: any[] = [];
-    const TOOL_LIST_TIMEOUT = 60000; // 60 seconds timeout per server
+  private async getAvailableTools(): Promise<ToolInfo[]> {
+    const tools: ToolInfo[] = [];
+    const TOOL_LIST_TIMEOUT = 60000;
 
     for (const [name, server] of this.connectedServers) {
       try {
-        // Add timeout to prevent one slow server from blocking all others
         const serverTools = await Promise.race([
           server.client.listTools(),
           new Promise<never>((_, reject) =>
@@ -163,17 +165,18 @@ export class IntentorchAdapter {
             ),
           ),
         ]);
-        tools.push(
-          ...serverTools.map((tool: any) => ({
-            ...tool,
+        for (const tool of serverTools) {
+          tools.push({
+            name: tool.name,
             serverName: name,
-          })),
-        );
-      } catch (error: any) {
+            description: tool.description || "",
+            inputSchema: tool.inputSchema as Record<string, unknown> | undefined,
+          });
+        }
+      } catch (error: unknown) {
         logger.warn(
-          `[IntentorchAdapter] Failed to list tools for server ${name}: ${error.message}`,
+          `[IntentorchAdapter] Failed to list tools for server ${name}: ${(error instanceof Error ? error.message : String(error))}`,
         );
-        // Continue with other servers - don't let one slow server block everything
       }
     }
     return tools;
@@ -229,14 +232,14 @@ export class IntentorchAdapter {
         success: false,
         error: "No tool was selected for the query",
       };
-    } catch (error: any) {
+    } catch (error: unknown) {
       logger.error(
         "[IntentorchAdapter] Failed to process query:",
-        error.message,
+        (error instanceof Error ? error.message : String(error)),
       );
       return {
         success: false,
-        error: error.message,
+        error: (error instanceof Error ? error.message : String(error)),
       };
     }
   }
@@ -278,10 +281,10 @@ export class IntentorchAdapter {
         return {
           success: true,
           plan: {
-            toolSelections: plan.steps.map((step: any, idx: number) => ({
+            toolSelections: plan.steps.map((step: { id?: string; toolName: string; serverName?: string; arguments: Record<string, unknown> }, idx: number) => ({
               intentId: step.id || `step-${idx}`,
               toolName: step.toolName,
-              serverName: (step as any).serverName, // Some steps might have serverName
+              serverName: (step as { serverName?: string }).serverName, // Some steps might have serverName
               parameters: step.arguments,
             })),
           },
@@ -292,14 +295,14 @@ export class IntentorchAdapter {
         success: false,
         error: "Failed to generate plan",
       };
-    } catch (error: any) {
+    } catch (error: unknown) {
       logger.error(
         "[IntentorchAdapter] parseAndPlanWorkflow failed:",
-        error.message,
+        (error instanceof Error ? error.message : String(error)),
       );
       return {
         success: false,
-        error: error.message,
+        error: (error instanceof Error ? error.message : String(error)),
       };
     }
   }
@@ -331,10 +334,10 @@ export class IntentorchAdapter {
         logger.debug(
           `[IntentorchAdapter] Successfully disconnected from server: ${serverName}`,
         );
-      } catch (error: any) {
+      } catch (error: unknown) {
         logger.error(
           `[IntentorchAdapter] Failed to disconnect from server ${serverName}:`,
-          error.message,
+          (error instanceof Error ? error.message : String(error)),
         );
       }
     }

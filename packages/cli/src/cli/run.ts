@@ -8,6 +8,7 @@
  * the shared unified execution service.
  */
 
+import http from "http";
 import { Command } from "commander";
 import {
   getExecuteService,
@@ -75,13 +76,6 @@ function convertStepResults(executionSteps: any[]): any[] {
  * Display execution results in a user-friendly format
  */
 function displayExecutionResults(result: any, options: any) {
-  if (!options.silent) {
-    console.log("\n" + "=".repeat(50));
-    console.log("🎉 Workflow execution completed");
-    console.log("=".repeat(50));
-  }
-
-  // Convert MCP response formats
   const convertedResult = {
     ...result,
     executionSteps: convertStepResults(result.executionSteps),
@@ -89,83 +83,142 @@ function displayExecutionResults(result: any, options: any) {
   };
 
   if (convertedResult.success) {
-    if (!options.silent) {
-      console.log(`✅ Execution successful`);
-
-      // Display execution results
-      if (
-        convertedResult.executionSteps &&
-        convertedResult.executionSteps.length > 0
-      ) {
-        console.log("\n📊 Execution steps:");
-        for (const step of convertedResult.executionSteps) {
-          const status = step.success ? "✅" : "❌";
-          const stepName =
-            step.name || step.toolName || step.tool || "Unknown step";
-          console.log(`  ${status} ${stepName}`);
-
-          if (step.result) {
-            // Check if result has been converted to have result field
-            const stepResult = step.result.result || step.result;
-
-            if (step.toolName === "search_tickets" && stepResult.tickets) {
-              console.log(`     Found ${stepResult.tickets.length} tickets:`);
-              for (const ticket of stepResult.tickets.slice(0, 3)) {
-                console.log(
-                  `     - ${ticket.trainNo}: ${ticket.from} → ${ticket.to} ${ticket.departure}-${ticket.arrival} ${ticket.price}`,
-                );
-              }
-            } else if (step.toolName === "get_weather" && stepResult) {
-              console.log(
-                `     ${stepResult.location}: ${stepResult.temperature} ${stepResult.condition}`,
-              );
-            } else if (typeof stepResult === "string") {
-              // Display text result
-              console.log(
-                `     Result: ${stepResult.substring(0, 100)}${stepResult.length > 100 ? "..." : ""}`,
-              );
-            }
-          }
-        }
-      }
-
-      // Display final output
-      if (convertedResult.result) {
-        console.log("\n📋 Final output:");
-        const finalResult =
-          convertedResult.result.result || convertedResult.result;
+    // Show the final result output — this is the LLM's summary or the tool's final result
+    if (convertedResult.result) {
+      const finalResult =
+        typeof convertedResult.result === "string"
+          ? convertedResult.result
+          : convertedResult.result.result || JSON.stringify(convertedResult.result, null, 2);
+      
+      if (!options.silent) {
+        console.log("\n" + "=".repeat(50));
+        console.log("🎉 Execution completed");
+        console.log("=".repeat(50));
+        console.log(`\n${finalResult}`);
+      } else {
         console.log(finalResult);
       }
     } else {
-      // In silent mode, just output the result
-      if (convertedResult.result) {
-        const finalResult =
-          convertedResult.result.result || convertedResult.result;
-        console.log(JSON.stringify(finalResult, null, 2));
+      if (!options.silent) {
+        console.log("\n✅ Execution completed successfully.");
       }
     }
   } else {
-    console.log(`❌ Execution failed`);
-
+    console.log(`\n❌ Execution failed`);
     if (convertedResult.error) {
-      console.log(`\n📋 Error message:`);
-      console.log(convertedResult.error);
-    }
-
-    if (convertedResult.executionSteps) {
-      console.log("\n📊 Failed steps:");
-      for (const step of convertedResult.executionSteps) {
-        if (!step.success) {
-          const stepName =
-            step.name || step.toolName || step.tool || "Unknown step";
-          console.log(`  ❌ ${stepName}`);
-          if (step.error) {
-            console.log(`     Error: ${step.error}`);
-          }
-        }
-      }
+      console.log(`\n${convertedResult.error}`);
     }
   }
+}
+
+/**
+ * Execute a natural language query with SSE streaming, displaying results as they arrive.
+ */
+function executeNaturalLanguageStream(
+  query: string,
+  options: any,
+): Promise<{ success: boolean; error?: string }> {
+  return new Promise((resolve, reject) => {
+    const body = JSON.stringify({ query, options: { autoStart: options.autoStart, silent: true } });
+    const daemonPort = 9658;
+
+    const req = http.request(
+      {
+        hostname: "localhost",
+        port: daemonPort,
+        path: "/api/execute/natural-language-stream",
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+      },
+      (res) => {
+        let buffer = "";
+
+        res.on("data", (chunk: Buffer) => {
+          buffer += chunk.toString();
+          // Process complete SSE messages
+          const lines = buffer.split("\n");
+          buffer = lines.pop() || ""; // Keep incomplete line in buffer
+
+          for (const line of lines) {
+            if (!line.startsWith("data: ")) continue;
+            const data = line.slice(6).trim();
+
+            if (data === "[DONE]") continue;
+
+            try {
+              const event = JSON.parse(data);
+
+              if (event.type === "step_result") {
+                // Display each step result as it arrives
+                const status = event.success ? "✅" : "❌";
+                const stepName = event.toolName || "Unknown";
+
+                console.log(`  ${status} ${stepName}`);
+                if (event.error) {
+                  console.log(`     Error: ${event.error}`);
+                }
+              } else if (event.type === "complete") {
+                if (event.success) {
+                  // Extract the final result text — prefer the MCP text content
+                  let finalOutput = "✅ Execution completed successfully.";
+                  if (event.result) {
+                    const r = event.result as any;
+                    if (typeof r === "string") {
+                      finalOutput = r;
+                    } else if (r.content && Array.isArray(r.content)) {
+                      const texts = r.content
+                        .filter((c: any) => c.type === "text")
+                        .map((c: any) => c.text)
+                        .filter(Boolean);
+                      if (texts.length > 0) {
+                        finalOutput = texts.join("\n");
+                      }
+                    }
+                  }
+
+                  if (!options.silent) {
+                    console.log(`\n${finalOutput}`);
+                  } else {
+                    console.log(finalOutput);
+                  }
+                  resolve({ success: true });
+                } else {
+                  console.log(`\n❌ Execution failed`);
+                  if (event.error) {
+                    console.log(`\n${event.error}`);
+                  }
+                  resolve({ success: false, error: event.error });
+                }
+              } else if (event.type === "error") {
+                console.log(`\n❌ Error: ${event.error}`);
+                resolve({ success: false, error: event.error });
+              }
+            } catch {
+              // Ignore parse errors for incomplete chunks
+            }
+          }
+        });
+
+        res.on("end", () => {
+          // If we haven't resolved yet, resolve with success
+          resolve({ success: true });
+        });
+
+        res.on("error", (err) => {
+          reject(err);
+        });
+      },
+    );
+
+    req.on("error", (err) => {
+      reject(err);
+    });
+
+    req.write(body);
+    req.end();
+  });
 }
 
 export function runCommand(): Command {
@@ -259,16 +312,27 @@ export function runCommand(): Command {
         // Check AI configuration
         const aiConfig = await getAIConfig();
 
-        if (!aiConfig.provider || !aiConfig.apiKey) {
+        if (!aiConfig.provider) {
           console.error("❌ AI configuration not set");
           console.log("\n💡 Please set AI configuration first:");
           console.log(
-            `   ${PROGRAM_NAME} config set provider <openai|deepseek|...>`,
+            `   ${PROGRAM_NAME} config set provider <openai|deepseek|ollama|...>`,
           );
           console.log(`   ${PROGRAM_NAME} config set apiKey <your-api-key>`);
           console.log(
             `   ${PROGRAM_NAME} config set model <model-name> (optional)`,
           );
+          console.log(
+            `   ${PROGRAM_NAME} config set apiEndpoint <endpoint-url> (optional, for Ollama)`,
+          );
+          return;
+        }
+
+        // For Ollama, apiKey is not required
+        if (aiConfig.provider !== "ollama" && !aiConfig.apiKey) {
+          console.error("❌ API key not set for provider:", aiConfig.provider);
+          console.log("\n💡 Please set your API key:");
+          console.log(`   ${PROGRAM_NAME} config set apiKey <your-api-key>`);
           return;
         }
 
@@ -277,21 +341,28 @@ export function runCommand(): Command {
           console.log("✓ Execution service initialized");
         }
 
-        // Execute natural language query
-        const result = await executionService.executeNaturalLanguage(input, {
-          autoStart: options.autoStart,
-          keepAlive: options.keepAlive,
-          silent: options.silent,
-          simulate: options.simulate,
-          params,
-        });
+        // Try streaming execution first (SSE via daemon)
+        // Falls back to non-streaming if daemon is not available
+        const result = await executeNaturalLanguageStream(input, options);
 
-        displayExecutionResults(result, options);
+        if (!result.success && result.error) {
+          // Fall back to non-streaming execution
+          if (!options.silent) {
+            console.log("\n⚠️ Streaming execution failed, falling back to standard execution...");
+          }
+          const fallbackResult = await executionService.executeNaturalLanguage(input, {
+            autoStart: options.autoStart,
+            keepAlive: options.keepAlive,
+            silent: options.silent,
+            simulate: options.simulate,
+            params,
+          });
 
-        // Ensure process exits
-        setTimeout(() => {
-          process.exit(0);
-        }, 100);
+          displayExecutionResults(fallbackResult, options);
+
+          // Ensure process exits
+          setTimeout(() => { process.exit(0); }, 100);
+        }
       } catch (error: any) {
         console.error("❌ Workflow execution failed:", error.message);
         console.log("\n💡 Suggestions:");

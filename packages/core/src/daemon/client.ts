@@ -10,6 +10,12 @@ import {
   ListServersResponse,
   ServerLogsResponse,
   ErrorResponse,
+  SessionCreateResponse,
+  SessionExecuteResponse,
+  SessionFeedbackResponse,
+  SessionGetResponse,
+  SessionListResponse,
+  SessionCancelResponse,
 } from "./types.js";
 
 export class DaemonClient {
@@ -22,7 +28,7 @@ export class DaemonClient {
   private async request<T>(
     method: string,
     path: string,
-    data?: any,
+    data?: Record<string, unknown>,
   ): Promise<T> {
     // Get authentication token for daemon requests
     const secretManager = getSecretManager();
@@ -100,7 +106,7 @@ export class DaemonClient {
 
   async startServer(serverNameOrUrl: string): Promise<StartServerResponse> {
     const request: StartServerRequest = { serverNameOrUrl };
-    return this.request<StartServerResponse>("POST", "/api/servers", request);
+    return this.request<StartServerResponse>("POST", "/api/servers", request as unknown as Record<string, unknown>);
   }
 
   async stopServer(pid: number): Promise<StopServerResponse> {
@@ -111,19 +117,89 @@ export class DaemonClient {
     return this.request<ListServersResponse>("GET", "/api/servers");
   }
 
-  async getServerStatus(pid: number): Promise<any> {
-    return this.request<any>("GET", `/api/servers/${pid}`);
+  async getServerStatus(pid: number): Promise<unknown> {
+    return this.request<unknown>("GET", `/api/servers/${pid}`);
   }
 
   async getServerLogs(pid: number): Promise<ServerLogsResponse> {
     return this.request<ServerLogsResponse>("GET", `/api/servers/${pid}/logs`);
   }
 
+  // ==================== Session-Based API ====================
+
+  /**
+   * Create a new execution session via daemon.
+   */
+  async createSession(
+    query: string,
+    type: "direct" | "interactive" = "direct",
+    metadata?: Record<string, unknown>,
+  ): Promise<SessionCreateResponse> {
+    return this.request<SessionCreateResponse>("POST", "/api/execute/session/create", {
+      query,
+      type,
+      metadata,
+    });
+  }
+
+  /**
+   * Execute a session by ID via daemon.
+   */
+  async executeSession(sessionId: string, options?: Record<string, unknown>): Promise<SessionExecuteResponse> {
+    return this.request<SessionExecuteResponse>(
+      "POST",
+      `/api/execute/session/${sessionId}/execute`,
+      { options },
+    );
+  }
+
+  /**
+   * Send feedback for an interactive session via daemon.
+   */
+  async sendFeedback(
+    sessionId: string,
+    type: string,
+    message?: string,
+    modifiedPlan?: Record<string, unknown>,
+  ): Promise<SessionFeedbackResponse> {
+    return this.request<SessionFeedbackResponse>(
+      "POST",
+      `/api/execute/session/${sessionId}/feedback`,
+      { type, message, modifiedPlan },
+    );
+  }
+
+  /**
+   * Get a session by ID via daemon.
+   */
+  async getSession(sessionId: string): Promise<SessionGetResponse> {
+    return this.request<SessionGetResponse>("GET", `/api/execute/session/${sessionId}`);
+  }
+
+  /**
+   * List all sessions via daemon.
+   */
+  async listSessions(): Promise<SessionListResponse> {
+    return this.request<SessionListResponse>("GET", "/api/execute/sessions");
+  }
+
+  /**
+   * Cancel a session via daemon.
+   */
+  async cancelSession(sessionId: string): Promise<SessionCancelResponse> {
+    return this.request<SessionCancelResponse>(
+      "POST",
+      `/api/execute/session/${sessionId}/cancel`,
+    );
+  }
+
+  // ==================== Legacy API (kept for backward compatibility) ====================
+
   /**
    * Execute natural language query via daemon
    */
-  async executeNaturalLanguage(query: string, options?: any): Promise<any> {
-    return this.request<any>("POST", "/api/execute/natural-language", {
+  async executeNaturalLanguage(query: string, options?: Record<string, unknown>): Promise<unknown> {
+    return this.request<unknown>("POST", "/api/execute/natural-language", {
       query,
       options,
     });
@@ -132,8 +208,8 @@ export class DaemonClient {
   /**
    * Parse intent via daemon
    */
-  async parseIntent(intent: string, context?: any): Promise<any> {
-    return this.request<any>("POST", "/api/execute/parse-intent", {
+  async parseIntent(intent: string, context?: Record<string, unknown>): Promise<unknown> {
+    return this.request<unknown>("POST", "/api/execute/parse-intent", {
       intent,
       context,
     });
@@ -142,8 +218,8 @@ export class DaemonClient {
   /**
    * Execute pre-parsed steps via daemon
    */
-  async executeSteps(steps: any[], options?: any): Promise<any> {
-    return this.request<any>("POST", "/api/execute/steps", { steps, options });
+  async executeSteps(steps: Record<string, unknown>[], options?: Record<string, unknown>): Promise<unknown> {
+    return this.request<unknown>("POST", "/api/execute/steps", { steps, options });
   }
 
   async isDaemonRunning(): Promise<boolean> {

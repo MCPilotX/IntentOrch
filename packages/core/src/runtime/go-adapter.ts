@@ -44,8 +44,8 @@ export class GoAdapter implements RuntimeAdapter {
           stdio: "inherit",
           cwd: servicePath,
         });
-      } catch (error: any) {
-        logger.warn(`[Go] Failed to create go.mod: ${error.message}`);
+      } catch (error) {
+        logger.warn(`[Go] Failed to create go.mod: ${error instanceof Error ? error.message : String(error)}`);
       }
     }
 
@@ -57,8 +57,8 @@ export class GoAdapter implements RuntimeAdapter {
         cwd: servicePath,
       });
       logger.info("[Go] Dependencies downloaded successfully");
-    } catch (error: any) {
-      logger.warn(`[Go] Failed to download dependencies: ${error.message}`);
+    } catch (error) {
+      logger.warn(`[Go] Failed to download dependencies: ${error instanceof Error ? error.message : String(error)}`);
     }
 
     // Build executable (optional)
@@ -71,8 +71,8 @@ export class GoAdapter implements RuntimeAdapter {
           cwd: servicePath,
         });
         logger.info(`[Go] Executable built: ${outputName}`);
-      } catch (error: any) {
-        logger.warn(`[Go] Failed to build executable: ${error.message}`);
+      } catch (error) {
+        logger.warn(`[Go] Failed to build executable: ${error instanceof Error ? error.message : String(error)}`);
       }
     }
 
@@ -192,8 +192,8 @@ export class GoAdapter implements RuntimeAdapter {
       });
       logger.info(`[Go] Successfully compiled: ${outputName}`);
       return true;
-    } catch (error: any) {
-      logger.error(`[Go] Compilation failed: ${error.message}`);
+    } catch (error) {
+      logger.error(`[Go] Compilation failed: ${error instanceof Error ? error.message : String(error)}`);
       return false;
     }
   }
@@ -208,8 +208,8 @@ export class GoAdapter implements RuntimeAdapter {
       });
       logger.info("[Go] Tests passed");
       return true;
-    } catch (error: any) {
-      logger.error(`[Go] Tests failed: ${error.message}`);
+    } catch (error) {
+      logger.error(`[Go] Tests failed: ${error instanceof Error ? error.message : String(error)}`);
       return false;
     }
   }

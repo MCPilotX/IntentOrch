@@ -101,9 +101,9 @@ const Workflows: React.FC = () => {
       // Store execution results for display
       setExecutionResults({
         workflowId: variables, // variables is the id passed to mutationFn
-        results: data.results || [],
-        totalSteps: data.totalSteps || 0,
-        success: data.success || false,
+        results: ((data as { results?: unknown[] }).results || []) as { toolName: string; status: 'success' | 'error'; output?: unknown; error?: string }[],
+        totalSteps: (data as { totalSteps?: number }).totalSteps || 0,
+        success: (data as { success?: boolean }).success || false,
         timestamp: new Date().toISOString()
       });
       

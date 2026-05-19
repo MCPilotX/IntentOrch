@@ -4,8 +4,10 @@ import { logger } from "../core/logger.js";
  * Creates properly configured CloudIntentEngine instances using OrchApp configuration system
  */
 
-import { CloudIntentEngine } from "../ai/cloud-intent-engine.js";
-import { getAIConfig, AIConfig } from "./config.js";
+import { CloudIntentEngine, type CloudIntentEngineConfig } from "../ai/cloud-intent-engine.js";
+import { ValidationLevel } from "../mcp/parameter-mapper.js";
+import { getAIConfig } from "../core/config-service.js";
+import type { AIConfig } from "../core/types.js";
 
 export interface CloudIntentEngineOptions {
   /**
@@ -30,7 +32,7 @@ export interface CloudIntentEngineOptions {
   fallback?: {
     enableKeywordMatching?: boolean;
     askUserOnFailure?: boolean;
-    defaultTools?: Record<string, any>;
+    defaultTools?: Record<string, unknown>;
   };
 
   /**
@@ -67,29 +69,39 @@ export async function createCloudIntentEngine(
 
       // Fallback to environment variables
       aiConfig = {
-        provider: (process.env.LLM_PROVIDER as any) || "deepseek",
+        provider: (process.env.LLM_PROVIDER || "deepseek") as any,
         apiKey: process.env.LLM_API_KEY || process.env.DEEPSEEK_API_KEY,
         model: process.env.LLM_MODEL || "deepseek-chat",
+        apiEndpoint: process.env.LLM_API_ENDPOINT || "",
       };
     }
   }
 
   // Validate AI configuration
-  if (!aiConfig.provider || !aiConfig.apiKey) {
+  if (!aiConfig.provider) {
     throw new Error(
-      "AI configuration is incomplete. Please set provider and apiKey in " +
-        "~/.intorch/config.json or provide them via environment variables.\n" +
-        "You can set configuration using: intorch config set provider <provider>\n" +
-        "And: intorch config set apiKey <your-api-key>",
+      "AI configuration is incomplete. Please set provider in " +
+        "~/.intorch/config.json or provide it via environment variables.\n" +
+        "You can set configuration using: intorch config set provider <provider>",
+    );
+  }
+
+  // For Ollama, apiKey is not required
+  if (aiConfig.provider !== "ollama" && !aiConfig.apiKey) {
+    throw new Error(
+      `API key is required for provider "${aiConfig.provider}". Please set apiKey in ` +
+        "~/.intorch/config.json or provide it via environment variables.\n" +
+        "You can set configuration using: intorch config set apiKey <your-api-key>",
     );
   }
 
   // Build the CloudIntentEngine configuration
-  const config = {
+  const config: CloudIntentEngineConfig = {
     llm: {
-      provider: aiConfig.provider as any, // Type assertion to avoid import issues
+      provider: aiConfig.provider as any,
       apiKey: aiConfig.apiKey,
       model: aiConfig.model || "gpt-3.5-turbo",
+      endpoint: aiConfig.apiEndpoint || "",
       temperature: 0.3,
       maxTokens: 1000,
       timeout: 30000,
@@ -105,16 +117,16 @@ export async function createCloudIntentEngine(
     fallback: {
       enableKeywordMatching: true,
       askUserOnFailure: false,
-      defaultTools: {},
-      ...options.fallback,
+      defaultTools: {} as Record<string, string>,
+      ...(options.fallback ? { ...options.fallback, defaultTools: (options.fallback.defaultTools ?? {}) as Record<string, string> } : {}),
     },
     parameterMapping: {
-      validationLevel: "warning" as any, // Type assertion for compatibility
+      validationLevel: "warning" as ValidationLevel | undefined,
       enableCompatibilityMappings: true,
       logWarnings: true,
       enforceRequired: false,
       ...options.parameterMapping,
-    },
+    } as CloudIntentEngineConfig["parameterMapping"],
   };
 
   // Create the engine

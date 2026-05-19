@@ -50,27 +50,38 @@ export interface LightweightManifest {
  * Check if a manifest is lightweight (doesn't contain tools)
  */
 export function isLightweightManifest(
-  manifest: any,
+  manifest: unknown,
 ): manifest is LightweightManifest {
+  const m = manifest as Record<string, unknown> | null;
   return (
-    manifest &&
-    typeof manifest === "object" &&
-    typeof manifest.name === "string" &&
-    typeof manifest.version === "string" &&
-    manifest.runtime &&
-    typeof manifest.runtime.type === "string" &&
-    typeof manifest.runtime.command === "string" &&
+    m !== null &&
+    typeof m === "object" &&
+    typeof m.name === "string" &&
+    typeof m.version === "string" &&
+    m.runtime !== null &&
+    typeof m.runtime === "object" &&
+    typeof (m.runtime as Record<string, unknown>).type === "string" &&
+    typeof (m.runtime as Record<string, unknown>).command === "string" &&
     // Lightweight manifests should not have tools array
-    !manifest.tools &&
-    !(manifest.capabilities && manifest.capabilities.tools)
+    !m.tools &&
+    !((m.capabilities as Record<string, unknown>)?.tools)
   );
 }
 
 /**
- * Convert full manifest to lightweight manifest
+ * Convert full manifest to lightweight manifest.
+ * Accepts a partial manifest shape — callers are responsible for ensuring
+ * that `name`, `version`, and `runtime` are present.
  */
-export function toLightweightManifest(fullManifest: any): LightweightManifest {
-  return {
+export function toLightweightManifest(fullManifest: {
+  name: string;
+  version: string;
+  runtime: { type: string; command: string; args?: string[]; cwd?: string; env?: string[] };
+  metadata?: { description?: string; author?: string; repository?: string; license?: string };
+  compatibility?: { supportsDynamicDiscovery?: boolean; minMCPVersion?: string };
+  transport?: { type: string; url?: string; headers?: Record<string, string> };
+}): LightweightManifest {
+  const manifest: LightweightManifest = {
     name: fullManifest.name,
     version: fullManifest.version,
     runtime: {
@@ -86,12 +97,24 @@ export function toLightweightManifest(fullManifest: any): LightweightManifest {
       minMCPVersion: fullManifest.compatibility?.minMCPVersion || "1.0.0",
     },
   };
+
+  // Preserve transport configuration (important for SSE/HTTP services)
+  if (fullManifest.transport) {
+    (manifest as LightweightManifest & { transport: unknown }).transport = fullManifest.transport;
+  }
+
+  return manifest;
 }
 
 /**
- * Check if server supports dynamic tool discovery
+ * Check if server supports dynamic tool discovery.
+ * Accepts a partial manifest shape with optional tools/capabilities fields.
  */
-export function supportsDynamicDiscovery(manifest: any): boolean {
+export function supportsDynamicDiscovery(manifest: {
+  compatibility?: { supportsDynamicDiscovery?: boolean };
+  tools?: unknown[];
+  capabilities?: { tools?: unknown[] };
+}): boolean {
   return (
     manifest.compatibility?.supportsDynamicDiscovery !== false &&
     (!manifest.tools || manifest.tools.length === 0) &&
