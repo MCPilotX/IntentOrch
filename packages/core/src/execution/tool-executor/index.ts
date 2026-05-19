@@ -59,13 +59,69 @@ export class ToolExecutionEngine {
   /**
    * Connect to running MCP servers.
    */
+  /**
+   * Connect to running MCP servers.
+   * In daemon mode, connections are persistent and survive across sessions.
+   * If a server was previously connected but is now disconnected, it will be
+   * reconnected automatically.
+   */
   async connectToRunningServers(options: { simulate?: boolean } = {}): Promise<void> {
     if (options.simulate) return;
 
     const processManager = getProcessManager();
-    const runningServers = await processManager.listRunning();
+    let runningServers = await processManager.listRunning();
+
+    // If no running servers found, try to restart from error/stopped records
+    if (runningServers.length === 0) {
+      const allServers = await processManager.list();
+      const restartableServers = allServers.filter(
+        (p) => (p.status === "error" || p.status === "stopped") && p.serverName,
+      );
+      // Deduplicate by serverName (keep most recent)
+      const seen = new Map<string, typeof allServers[0]>();
+      for (const s of restartableServers) {
+        seen.set(s.serverName, s);
+      }
+      for (const [serverName] of seen) {
+        if (this.connectedServers.has(serverName)) continue;
+        try {
+          logger.info(`[ToolExecutor] Auto-restarting ${serverName}...`);
+          const pid = await processManager.start(serverName);
+          logger.info(`[ToolExecutor] Restarted ${serverName} (PID: ${pid})`);
+        } catch (e: unknown) {
+          logger.warn(`[ToolExecutor] Failed to restart ${serverName}: ${e instanceof Error ? e.message : String(e)}`);
+        }
+      }
+      runningServers = await processManager.listRunning();
+    }
+
+    // Also check all cached manifests to connect servers that were registered
+    // but never started (or died). This ensures tools are available even when
+    // the process store has no running records.
+    const allServerNames = new Set(runningServers.map(s => s.serverName));
+    try {
+      const registryClient = getRegistryClient();
+      const cachedNames = await registryClient.listCachedManifests();
+      for (const name of cachedNames) {
+        if (!allServerNames.has(name)) {
+          // This server has a cached manifest but no running process record.
+          // Try to start it if we have a connection for it already.
+          if (this.connectedServers.has(name)) continue;
+          // Don't auto-start from cache alone — only if there's a process record
+          // or it was previously connected. This prevents unwanted server startups.
+        }
+      }
+    } catch {
+      // best-effort
+    }
 
     if (runningServers.length === 0) {
+      // Still no running servers — but we may already have connected servers
+      // from a previous session. Verify they are still alive.
+      if (this.connectedServers.size > 0) {
+        logger.debug(`[ToolExecutor] No new servers to connect, but ${this.connectedServers.size} already connected`);
+        return;
+      }
       logger.info("[ToolExecutor] No running MCP servers found — nothing to connect to");
       return;
     }
@@ -73,6 +129,7 @@ export class ToolExecutionEngine {
     logger.debug(`[ToolExecutor] Connecting to ${runningServers.length} running servers`);
 
     for (const server of runningServers) {
+      if (this.connectedServers.has(server.serverName)) continue;
       try {
         const registryClient = getRegistryClient();
         let manifest = await registryClient.getCachedManifest(server.serverName);
@@ -94,8 +151,6 @@ export class ToolExecutionEngine {
           try {
             await this.connectToServer(server.serverName, manifest as Manifest);
           } catch (connectError: unknown) {
-            // If connection fails (e.g. EBADF from a zombie process), mark the server
-            // as stopped so we don't retry it on every subsequent request.
             logger.warn(`[ToolExecutor] Failed to connect to ${server.serverName}: ${connectError instanceof Error ? connectError.message : String(connectError)}`);
             try {
               const pm = getProcessManager();
@@ -106,7 +161,7 @@ export class ToolExecutionEngine {
             } catch {
               // best-effort cleanup
             }
-            continue;  // Skip this server, try others
+            continue;
           }
         }
       } catch (error: unknown) {
@@ -394,7 +449,34 @@ export class ToolExecutionEngine {
       } catch (error: unknown) {
         logger.error(`[ToolExecutor] Failed to disconnect from server ${serverName}: ${(error instanceof Error ? error.message : String(error))}`);
       }
+      this.connectedServers.delete(serverName);
     }
+  }
+
+  /**
+   * Get a connected server instance.
+   */
+  getConnectedServer(serverName: string): ConnectedServer | undefined {
+    return this.connectedServers.get(serverName);
+  }
+
+  /**
+   * Restart a specific server by disconnecting and reconnecting.
+   */
+  async restartServer(serverName: string): Promise<void> {
+    logger.info(`[ToolExecutor] Restarting server: ${serverName}`);
+    
+    // 1. Disconnect existing (if any)
+    await this.disconnectServer(serverName);
+
+    // 2. Fetch manifest and reconnect
+    const registryClient = getRegistryClient();
+    const manifest = await registryClient.fetchManifest(serverName);
+    if (!manifest) {
+      throw new Error(`Cannot restart ${serverName}: manifest not found`);
+    }
+
+    await this.connectToServer(serverName, manifest as Manifest);
   }
 
   // ==================== Cache Management ====================

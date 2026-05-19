@@ -140,8 +140,19 @@ export class ProcessManager {
     this.processes.set(pid, child);
     child.unref();
 
+    // Wait for the process to initialize. For stdio-based servers, the process
+    // may start and crash very quickly (e.g. 12306-mcp's top-level await failure).
+    // We wait briefly for it to either stabilize or crash before declaring it running.
     const waitTime = isNetworkServer ? 1000 : 2000;
     await new Promise((resolve) => setTimeout(resolve, waitTime));
+
+    // Check if the child has already exited — this catches fast crashes like
+    // 12306-mcp's "get station name js file failed" where the process dies
+    // within <1s of spawning. In that case, don't report it as running.
+    if (child.exitCode !== null || child.signalCode !== null) {
+      logger.warn(`[ProcessManager] Process ${pid} exited shortly after start (code=${child.exitCode}, signal=${child.signalCode})`);
+      return this.handleStartFailure(manifest, serverNameOrUrl, pid, child, finalLogPath);
+    }
 
     const isAlive = await isProcessRunningWithRetry(pid, 3, 500);
     const childAlive = child.exitCode === null && child.signalCode === null;
@@ -407,6 +418,52 @@ export class ProcessManager {
         (error instanceof Error ? error.message : String(error)),
       );
     }
+  }
+
+  /**
+   * Handle a process that failed shortly after start (fast crash).
+   * Records the failure and attempts ONE retry with a fresh spawn.
+   */
+  private async handleStartFailure(
+    manifest: Manifest,
+    serverNameOrUrl: string,
+    pid: number,
+    childProcess: ChildProcess,
+    logPath: string,
+  ): Promise<number> {
+    // Record the failed attempt
+    const exitCode = childProcess.exitCode;
+    const signalCode = childProcess.signalCode;
+    logger.warn(`[ProcessManager] Process ${pid} (${manifest.name}) exited with code=${exitCode}, signal=${signalCode}`);
+    logger.warn(`[ProcessManager] Check logs: ${logPath}`);
+
+    // Clean up the failed process record
+    this.processes.delete(pid);
+    await this.store.updateProcess(pid, { status: "error" });
+
+    // Read the log to see why it crashed
+    try {
+      const fs = await import("fs");
+      if (fs.existsSync(logPath)) {
+        const logContent = fs.readFileSync(logPath, "utf-8").trim();
+        if (logContent) {
+          logger.warn(`[ProcessManager] Last log lines for PID ${pid}:`);
+          const lines = logContent.split("\n").slice(-5);
+          for (const line of lines) {
+            logger.warn(`[ProcessManager]   | ${line}`);
+          }
+        }
+      }
+    } catch {
+      // best-effort
+    }
+
+    // Retry once: the crash may have been a transient issue (e.g. 12306.cn
+    // network hiccup during npx startup). A second attempt often succeeds.
+    logger.info(`[ProcessManager] Retrying ${manifest.name} (one retry)...`);
+    const retryPid = await this.start(serverNameOrUrl);
+    logger.info(`[ProcessManager] Retry for ${manifest.name} returned PID ${retryPid}`);
+    return retryPid;
   }
 
   async stop(pid: number): Promise<void> {

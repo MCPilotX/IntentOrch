@@ -448,6 +448,7 @@ async function handleNaturalLanguageStream(
       executionSteps: result.executionSteps,
       statistics: result.statistics,
       error: result.error,
+      traceId: result.traceId,
     });
     res.write(`data: ${completeEvent}\n\n`);
     res.write(`data: [DONE]\n\n`);

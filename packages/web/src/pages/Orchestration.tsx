@@ -3,6 +3,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import AIChatPanel from '../components/orchestration/AIChatPanel';
 import StepPreviewBoard from '../components/orchestration/StepPreviewBoard';
 import ExecutionResultPanel from '../components/orchestration/ExecutionResultPanel';
+import TraceInspector from '../components/orchestration/TraceInspector';
 import StepEditorModal from '../components/orchestration/StepEditorModal';
 import ToolLibraryDrawer from '../components/orchestration/ToolLibraryDrawer';
 import { Toast } from '../components/ui';
@@ -62,6 +63,8 @@ const Orchestration: React.FC = () => {
   // Execution results state
   const [executionResults, setExecutionResults] = useState<StepResult[] | null>(null);
   const [executionTotalDuration, setExecutionTotalDuration] = useState(0);
+  const [currentTraceId, setCurrentTraceId] = useState<string | null>(null);
+  const [isTraceInspectorOpen, setIsTraceInspectorOpen] = useState(false);
 
   // Tool library state
   const [isToolLibraryOpen, setIsToolLibraryOpen] = useState(false);
@@ -216,6 +219,11 @@ const Orchestration: React.FC = () => {
         
         setExecutionResults(stepResultsAccum);
         setExecutionTotalDuration(totalDuration);
+        
+        // Extract traceId if available
+        if ((streamResult as any).traceId) {
+          setCurrentTraceId((streamResult as any).traceId);
+        }
         
         // Format the final result using the formatting system
         let finalFormatted = '';
@@ -420,6 +428,7 @@ const Orchestration: React.FC = () => {
             
             setExecutionResults(stepResults);
             setExecutionTotalDuration(totalDuration);
+            setCurrentTraceId(result.traceId || null);
             
             updateStepsWithResults(stepResults);
           } else {
@@ -636,6 +645,11 @@ const Orchestration: React.FC = () => {
               <ExecutionResultPanel
                 results={executionResults}
                 totalDuration={executionTotalDuration}
+                traceId={currentTraceId || undefined}
+                onInspectTrace={(id) => {
+                  setCurrentTraceId(id);
+                  setIsTraceInspectorOpen(true);
+                }}
                 onClose={() => setExecutionResults(null)}
                 onRetry={handleRetry}
               />
@@ -643,6 +657,18 @@ const Orchestration: React.FC = () => {
           )}
         </div>
       </div>
+
+      {/* Trace Inspector Overlay */}
+      {isTraceInspectorOpen && currentTraceId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+          <div className="w-full max-w-4xl">
+            <TraceInspector 
+              traceId={currentTraceId} 
+              onClose={() => setIsTraceInspectorOpen(false)} 
+            />
+          </div>
+        </div>
+      )}
 
       {/* Step Editor Modal */}
       {editingStep && (

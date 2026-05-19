@@ -8,6 +8,7 @@ import {
   ChevronRight,
   Copy,
   Download,
+  Activity,
 } from 'lucide-react';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { outputFormattingService } from '../../services/output-formatting';
@@ -34,6 +35,8 @@ interface ExecutionResultPanelProps {
   totalDuration: number;
   onClose?: () => void;
   onRetry?: () => void;
+  traceId?: string;
+  onInspectTrace?: (traceId: string) => void;
 }
 
 const ExecutionResultPanel: React.FC<ExecutionResultPanelProps> = ({
@@ -41,6 +44,8 @@ const ExecutionResultPanel: React.FC<ExecutionResultPanelProps> = ({
   totalDuration,
   onClose,
   onRetry,
+  traceId,
+  onInspectTrace,
 }) => {
   const { t } = useLanguage();
   const [expandedSteps, setExpandedSteps] = React.useState<Set<number>>(new Set());
@@ -165,6 +170,16 @@ const ExecutionResultPanel: React.FC<ExecutionResultPanelProps> = ({
             </div>
           </div>
           <div className="flex items-center space-x-2">
+            {traceId && onInspectTrace && (
+              <button
+                onClick={() => onInspectTrace(traceId)}
+                className="flex items-center space-x-1 px-3 py-1.5 text-xs font-bold bg-indigo-100 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800 rounded-lg hover:bg-indigo-200 dark:hover:bg-indigo-900/60 transition-colors"
+                title="Inspect Execution Trace"
+              >
+                <Activity className="w-3.5 h-3.5" />
+                <span>Trace</span>
+              </button>
+            )}
             <button
               onClick={copyResults}
               className="p-2 text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"

@@ -4,11 +4,13 @@
  * Provides API endpoints for:
  * - GET  /api/telemetry/traces
  * - GET  /api/telemetry/traces/:sessionId
+ * - GET  /api/telemetry/spans/:traceId
  * - GET  /api/telemetry/metrics
  * - GET  /api/telemetry/ai-records/:traceId
  */
 
 import { telemetry } from "../../telemetry/index.js";
+import { getTraceRepository } from "../../utils/sqlite.js";
 import { sendJson } from "./index.js";
 import type { RouteContext } from "./index.js";
 
@@ -25,21 +27,37 @@ export async function handleTelemetryRoutes(ctx: RouteContext): Promise<boolean>
     return true;
   }
 
-  // GET /api/telemetry/traces/:sessionId — Get traces for a session
-  const tracesSessionMatch = path.match(/^\/api\/telemetry\/traces\/([a-zA-Z0-9_-]+)$/);
-  if (tracesSessionMatch && method === "GET") {
-    const sessionId = tracesSessionMatch[1];
-    const traces = telemetry.tracer.getTracesBySession(sessionId);
-    sendJson(ctx.res, 200, traces);
+  // GET /api/telemetry/spans/:traceId — Get detailed spans from SQLite
+  const spansMatch = path.match(/^\/api\/telemetry\/spans\/([a-zA-Z0-9_-]+)$/);
+  if (spansMatch && method === "GET") {
+    const traceId = spansMatch[1];
+    const repo = getTraceRepository();
+    const spans = await repo.listByTraceId(traceId);
+    
+    // Parse JSON strings in metadata and input/output for the frontend
+    const parsedSpans = spans.map(s => ({
+      ...s,
+      metadata: s.metadata ? JSON.parse(s.metadata as string) : {},
+      input: s.input ? JSON.parse(s.input as string) : undefined,
+      output: s.output ? JSON.parse(s.output as string) : undefined,
+    }));
+    
+    sendJson(ctx.res, 200, { traceId, spans: parsedSpans });
     return true;
   }
 
-  // GET /api/telemetry/traces — Get recent traces list
+  // GET /api/telemetry/traces/:sessionId — Get traces for a session (DEPRECATED)
+  const tracesSessionMatch = path.match(/^\/api\/telemetry\/traces\/([a-zA-Z0-9_-]+)$/);
+  if (tracesSessionMatch && method === "GET") {
+    // Return empty array as legacy in-memory tracer is disabled
+    sendJson(ctx.res, 200, []);
+    return true;
+  }
+
+  // GET /api/telemetry/traces — Get recent traces list (DEPRECATED)
   if (path === "/api/telemetry/traces" && method === "GET") {
-    const limitParam = parsedUrl.searchParams.get("limit");
-    const limit = limitParam ? parseInt(limitParam, 10) : 50;
-    const traces = telemetry.tracer.getAllTraces(limit);
-    sendJson(ctx.res, 200, traces);
+    // Return empty array as legacy in-memory tracer is disabled
+    sendJson(ctx.res, 200, []);
     return true;
   }
 

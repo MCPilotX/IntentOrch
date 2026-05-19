@@ -40,6 +40,9 @@ import { LoggingTraceInterceptor } from "../core/interceptors/logging-trace.js";
 import { PersistenceTraceInterceptor } from "../core/interceptors/persistence-trace.js";
 import { SemanticRoutingInterceptor } from "../core/interceptors/semantic-routing.js";
 import { SandboxInterceptor } from "../core/interceptors/sandbox.js";
+import { AutoRepairInterceptor } from "../core/interceptors/auto-repair.js";
+import { EnvironmentAnomaliesInterceptor } from "../core/interceptors/environment-anomalies.js";
+import type { ToolInterceptorInput } from "../core/interceptors/auto-repair.js";
 
 import type { AIConfig } from "../core/types.js";
 import type { ToolExecutionPlan } from "./cloud-intent-engine.js";
@@ -120,6 +123,8 @@ export interface UnifiedExecutionResult {
   confidence?: number;
   error?: string;
   statistics?: ExecutionStatistics;
+  /** The unique trace ID for this execution, used for observability */
+  traceId?: string;
 }
 
 // Workflow execution result
@@ -161,17 +166,29 @@ export class ExecuteService {
     UnifiedExecutionResult
   >();
 
+  /**
+   * Interceptor chain for individual tool calls.
+   * Handles granular auditing and self-healing (AutoRepair).
+   */
+  private toolChain = new InterceptorChain<ToolInterceptorInput, any>();
+
   /** Optional callback for streaming step results */
   public onStreamEvent: StreamCallback | null = null;
 
   constructor() {
     logger.debug("[ExecuteService] Creating service instance");
 
-    // Register default infrastructure interceptors
+    // Register default infrastructure interceptors for sessions
     this.executionChain.use(new LoggingTraceInterceptor());
     this.executionChain.use(new PersistenceTraceInterceptor());
     this.executionChain.use(new SandboxInterceptor());
     this.executionChain.use(new SemanticRoutingInterceptor());
+
+    // Register default tool-level interceptors
+    this.toolChain.use(new LoggingTraceInterceptor());
+    this.toolChain.use(new PersistenceTraceInterceptor());
+    this.toolChain.use(new EnvironmentAnomaliesInterceptor());
+    this.toolChain.use(new AutoRepairInterceptor());
   }
 
   /**
@@ -308,7 +325,22 @@ export class ExecuteService {
               }
 
               this.cloudIntentEngine.setAvailableTools(tools);
-              const toolExecutorFn = this.toolExecutor.createToolExecutor(tools);
+              const rawToolExecutor = this.toolExecutor.createToolExecutor(tools);
+
+              // Wrap the tool executor with an interceptor chain for tracing and auto-repair
+              const toolExecutorFn = async (name: string, args: Record<string, unknown>) => {
+                return TraceContextManager.trace(`tool:${name}`, async (span) => {
+                  return this.toolChain.execute(
+                    { 
+                      toolName: name, 
+                      arguments: args, 
+                      toolMetadata: tools.find(t => t.name === name) 
+                    },
+                    async (input) => rawToolExecutor(input.toolName, input.arguments),
+                    { span, executeToolFn: toolExecutorFn }
+                  );
+                });
+              };
 
               // ==================== Phase 1: Plan ====================
               let plan = session.plan;
@@ -382,6 +414,9 @@ export class ExecuteService {
                 await this.sessionManager.failSession(sessionId);
               }
 
+              // Add traceId for observability
+              reactResult.traceId = span.traceId;
+
               // Daemon mode: keep MCP connections alive across requests.
               const isDaemonProcess = process.env.INTORCH_DAEMON === "true";
               if (!options.keepAlive && !isDaemonProcess) {
@@ -396,6 +431,7 @@ export class ExecuteService {
               return {
                 success: false,
                 error: error instanceof Error ? error.message : String(error),
+                traceId: span.traceId,
               };
             }
           },

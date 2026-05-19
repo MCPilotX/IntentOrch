@@ -189,6 +189,7 @@ export interface SessionExecuteResponse {
   confidence?: number;
   error?: string;
   session?: CoreExecutionSession;
+  traceId?: string;
 }
 
 export interface SessionListResponse {

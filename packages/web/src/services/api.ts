@@ -450,9 +450,13 @@ class ApiService {
     }
   }
 
-  // Notification management (NOT IMPLEMENTED on backend — safe no-op stubs)
-  async getNotifications(): Promise<Notification[]> {
-    return [];
+  // ==================== Telemetry & Trace = :
+  async getAIRecordsByTrace(traceId: string): Promise<any[]> {
+    return await this.client.get(`/api/telemetry/ai-records/${traceId}`);
+  }
+
+  async getSpansByTrace(traceId: string): Promise<{ traceId: string; spans: any[] }> {
+    return await this.client.get(`/api/telemetry/spans/${traceId}`);
   }
 
   async markNotificationAsRead(_id: string): Promise<void> {

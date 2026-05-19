@@ -134,7 +134,10 @@ function createStartCommand(): Command {
         if (options.detached) {
           await startDaemonDetached(options.host, options.port);
         } else {
-          // Start in foreground
+          // Start in foreground — daemon mode flag is needed so executeSession
+          // knows not to clean up MCP connections between calls.
+          process.env.INTORCH_DAEMON = "true";
+
           const daemon = new DaemonServer({
             host: options.host,
             port: parseInt(options.port),

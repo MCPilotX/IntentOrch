@@ -24,11 +24,15 @@ export interface Interceptor<TInput = any, TOutput = any> {
   before?: (ctx: InterceptorContext<TInput, TOutput>) => Promise<void>;
   /** Hook run AFTER the main operation succeeds. Can modify ctx.output. */
   after?: (ctx: InterceptorContext<TInput, TOutput>) => Promise<void>;
-  /** Hook run when the main operation THROWS an error. */
+  /** 
+   * Hook run when the main operation THROWS an error.
+   * If it returns a value (not undefined), the error is considered HANDLED/RECOVERED,
+   * and the chain will return this value instead of throwing.
+   */
   onError?: (
     ctx: InterceptorContext<TInput, TOutput>,
     error: Error,
-  ) => Promise<void>;
+  ) => Promise<TOutput | void>;
 }
 
 /**
@@ -99,9 +103,23 @@ export class InterceptorChain<TInput = any, TOutput = any> {
       }
 
       // 6. Run error hooks (in reverse order)
+      // If any hook returns a recovery result, we stop and return it.
       for (const interceptor of [...this.interceptors].reverse()) {
         if (interceptor.onError) {
-          await interceptor.onError(ctx, error);
+          const recovery = await interceptor.onError(ctx, error);
+          if (recovery !== undefined) {
+            ctx.output = recovery as R;
+            
+            // If recovered, update span status to OK
+            if (ctx.span) {
+              ctx.span.status = SpanStatus.OK;
+              ctx.span.output = recovery;
+              ctx.span.metadata.recovered = true;
+              ctx.span.metadata.recoveryInterceptor = interceptor.name;
+            }
+
+            return recovery as R;
+          }
         }
       }
       throw error;

@@ -150,16 +150,6 @@ export class LLMClient {
       span.metadata.provider = this.config.provider;
       span.metadata.model = this.getModel();
 
-      // Legacy telemetry bridge
-      const activeSpan = telemetry.tracer.getActiveSpan();
-      const legacySpan = telemetry.tracer.startSpan("llm.chat", {
-        parentSpanId: activeSpan?.spanId,
-        attributes: {
-          provider: this.config.provider,
-          model: this.getModel(),
-        },
-      });
-
       // Extract system prompt and user message for recording
       const systemMsg = options.messages.find((m) => m.role === "system");
       const userMsg = options.messages.find((m) => m.role === "user");
@@ -171,14 +161,6 @@ export class LLMClient {
       try {
         const response = await this.provider.chat(options);
         const latency = Date.now() - startTime;
-
-        telemetry.tracer.addEvent(legacySpan.spanId, {
-          name: "llm.response",
-          attributes: {
-            latency,
-            toolCalls: response.toolCalls?.length || 0,
-          },
-        });
 
         // Record AI interaction
         telemetry.promptRecorder.recordAIRecord({
@@ -208,17 +190,11 @@ export class LLMClient {
           provider: this.config.provider,
         });
 
-        telemetry.tracer.endSpan(legacySpan.spanId, "ok");
         return response;
       } catch (error: unknown) {
         const latency = Date.now() - startTime;
         const errorMessage =
           error instanceof Error ? error.message : String(error);
-
-        telemetry.tracer.addEvent(legacySpan.spanId, {
-          name: "llm.error",
-          attributes: { error: errorMessage, latency },
-        });
 
         // Record failed AI interaction
         telemetry.promptRecorder.recordAIRecord({
@@ -241,7 +217,6 @@ export class LLMClient {
           provider: this.config.provider,
         });
 
-        telemetry.tracer.endSpan(legacySpan.spanId, "error");
         logger.error(`[LLMClient] Chat request failed: ${errorMessage}`);
         throw error;
       }

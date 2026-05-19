@@ -184,6 +184,28 @@ export async function handleServerRoutes(
         return true;
       }
 
+      // Connect ToolExecutor to the newly started server so subsequent
+      // tool calls don't need to re-start the MCP process.
+      // Use a timeout to prevent blocking the HTTP response if MCP init hangs.
+      try {
+        const { getToolExecutor } = await import("../../execution/tool-executor/index.js");
+        const registryClient = getRegistryClient();
+        const manifest = await registryClient.getCachedManifest(serverNameOrUrl);
+        if (manifest) {
+          await Promise.race([
+            getToolExecutor().connectToServer(serverNameOrUrl, manifest as any),
+            new Promise<void>((_, reject) =>
+              setTimeout(() => reject(new Error("Connect timeout after 15s")), 15000),
+            ),
+          ]);
+          logger.info(`[Daemon] ToolExecutor connected to ${serverNameOrUrl}`);
+        }
+      } catch (connectError: unknown) {
+        logger.warn(`[Daemon] Failed to connect ToolExecutor after start: ${connectError instanceof Error ? connectError.message : String(connectError)}`);
+        // Non-fatal: ToolExecutor will retry on next executeSession
+        // The process is already running via processManager, so pm.start() was successful.
+      }
+
       const tools = await getToolRegistry().findToolsByServer(serverNameOrUrl);
       sendJson(res, 201, {
         pid: processInfo.pid,
